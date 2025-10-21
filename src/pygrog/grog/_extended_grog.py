@@ -1,8 +1,7 @@
-"""GRAPPA operator based interpolation with improved caching and performance."""
+"""Extended GROG with improved caching and performance."""
 
 __all__ = ["GROGInterpolator"]
 
-import warnings
 import pickle
 import os
 import pathlib
@@ -15,10 +14,6 @@ import numba as nb
 from numpy.typing import NDArray
 from scipy.linalg import fractional_matrix_power as fmp
 from scipy.spatial import KDTree
-
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore")
-    from sigpy import get_device, to_device
 
 from ._utils import rescale_coords
 
