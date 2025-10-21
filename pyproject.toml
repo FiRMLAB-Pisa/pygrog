@@ -1,0 +1,165 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pygrog"
+description = "An interoperable GROG package to accelerate Non-Cartesian MR reconstructions."
+readme = "README.rst"
+
+requires-python = ">=3.10"
+dynamic = ["version"]
+
+license = {file = "LICENSE"}
+keywords = ["mri", "reconstruction", "non-cartesian", "parallel-imaging"]
+
+authors = [
+  {name = "Matteo Cencini", email = "matteo.cencini@gmail.com" } # Optional
+]
+
+# Classifiers help users find your project by categorizing it.
+# For a list of valid classifiers, see https://pypi.org/classifiers/
+classifiers = [  # Optional
+  # How mature is this project? Common values are
+  #   3 - Alpha
+  #   4 - Beta
+  #   5 - Production/Stable
+  "Development Status :: 3 - Alpha",
+
+  # Indicate who your project is intended for
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+
+  # Specify the Python versions you support here. In particular, ensure
+  # that you indicate you support Python 3. These classifiers are *not*
+  # checked by "pip install". See instead "python_requires" below.
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "numpy",
+    "mri-nufft",
+    "sigpy",
+    "torch",
+    "ipywidgets",
+]
+
+[project.optional-dependencies] # Optional
+dev = [
+    "black", 
+    "isort", 
+    "ruff", 
+    "pre-commit"
+]
+doc = [
+    "sphinx-book-theme",
+    "sphinx-copybutton", 
+    "sphinx-gallery",
+    "matplotlib",
+    "coverage",
+    "codecov"
+]
+test = [
+    "pytest<8.0.0", 
+    "pytest-cov", 
+    "pytest-xdist", 
+    "pytest-sugar", 
+    "pytest-cases"
+]
+
+# List URLs that are relevant to your project
+# This field corresponds to the "Project-URL" and "Home-Page" metadata fields:
+[project.urls]  # Optional
+"Homepage" = "https://github.com/FiRMLAB-Pisa/pygrog"
+"Bug Reports" = "https://github.com/FiRMLAB-Pisa/pygrog/issues"
+"Source" = "https://github.com/FiRMLAB-Pisa/pygrog"
+
+[tool.setuptools.packages.find]
+where=["src"]
+
+[tool.setuptools_scm]
+write_to = "src/pygrog/_version.py"
+version_scheme = "python-simplified-semver"
+local_scheme="no-local-version"
+fallback_version="v99-dev"
+
+# Formatting using black.
+[tool.black]
+line-length = 88
+target-version = ["py310"]  # Match your Python version
+
+# Sorting imports using isort.
+[tool.isort]
+profile="black"
+
+# Linting using ruff.
+[tool.ruff]
+line-length = 88
+extend-exclude = ["__init__.py"]
+exclude = ["doc/**"]
+
+# RUFF section
+[tool.ruff.lint]
+select = [
+  "A", 
+  "ARG", 
+  "B", 
+  "C4", 
+  "COM", 
+  "F", 
+  "I", 
+  "NPY", 
+  "RUF", 
+  "S", 
+  "SIM", 
+  "PIE", 
+  "PTH", 
+  "Q", 
+  "W", 
+  "YTT",
+]
+ignore = [
+    "E501",  # line too long
+    "W191",  # tabs
+    "E203",  # spacing before ':'
+    "COM812", # missing trailing comma
+    "Q000", "Q001", "Q002",  # quote rules handled by Black
+    "I001", "I002",          # isort handled by Black
+    "S101",
+]
+extend-ignore = [
+    "E501",  # line too long → Black wraps
+    "W191",  # tabs → Black uses spaces
+    "E203",  # colon spacing → Black style
+]
+
+[tool.ruff.lint.isort]
+force-single-line = false
+split-on-trailing-comma = false
+
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = "double"
+inline-quotes = "single"
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+pythonpath  = ["tests"]
+testpaths=["tests"]
+addopts = [
+    "--import-mode=importlib",
+    "--cov=pulserver_interpreter",
+    "--cov-report=term-missing",
+    "--cov-report=xml"
+]
+
+[tool.pylsp-mypy]
+enabled = false
+live_mode = false
+
+[tool.mypy]
+ignore_missing_imports = true
