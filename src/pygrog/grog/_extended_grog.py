@@ -1,6 +1,6 @@
 """GRAPPA operator based interpolation with improved caching and performance."""
 
-__all__ = ["groginterp", "GROGInterpolator"]
+__all__ = ["GROGInterpolator"]
 
 import warnings
 import pickle
@@ -591,101 +591,7 @@ class GROGInterpolator:
         
         return plan
 
-
-def groginterp(
-    grappa_kernels: dict[str, NDArray],
-    input: NDArray,
-    coords: NDArray,
-    shape: list[int] | tuple[int, ...],
-    stack_axes: list[int] | tuple[int, ...] | None = None,
-    oversamp: float | list[float] | tuple[float, ...] | None = None,
-    radius: float = 0.75,
-    precision: int = 1,
-    weighting_mode: str = "distance",
-) -> tuple[NDArray, NDArray, tuple[int, ...]]:
-    """
-    GRAPPA Operator Gridding (GROP) interpolation of Non-Cartesian datasets.
-
-    Parameters
-    ----------
-    grappa_kernels : dict[str, NDArray]
-        Dictionary of GRAPPA kernels with keys 'x', 'y', and optionally 'z'
-        for 3D interpolation.
-    input : NDArray
-        Input Non-Cartesian kspace with coils as the rightmost dimension:
-        ``(batch1,...,batchN,stack1,...,stackN,view,readout,coils)``
-    coords : NDArray
-        Fourier domain coordinates array of shape ``(..., ndims)``.
-    shape : list[int] | tuple[int, ...]
-        Cartesian grid size of shape ``(ndim,)``.
-        If scalar, isotropic matrix is assumed.
-    stack_axes: list[int] | tuple[int, ...] | None
-        Indices marking stack axes. The default is ``None``.
-    oversamp: float | list[float] | tuple[float, ...] | None
-        Cartesian grid oversampling factor. If scalar, assume
-        same oversampling for all spatial dimensions.
-        The default is ``1.0`` (2D MRI) or ``(1.0, 1.0, 1.2)`` (3D MRI).
-    radius: float
-        Spreading radius. The default is ``0.75``.
-    precision: int
-        Number of decimal digits in GROG kernel power. The default is ``1``.
-    weighting_mode: str
-        Non Cartesian samples accumulation mode. Can be:
-
-            * "average": arithmetic average.
-            * "distance": weight according to distance.
-
-        The default is ``"distance"``.
-
-    Returns
-    -------
-    output : NDArray
-        Output sparse Cartesian kspace.
-    indexes : NDArray
-        Sampled k-space points indexes.
-    shape : tuple[int, ...]
-        Oversampled k-space grid size.
-
-    Notes
-    -----
-    Produces the unit operator described in [1]_.
-
-    This seems to only work well when coil sensitivities are very
-    well separated/distinct. If coil sensitivities are similar,
-    operators perform poorly.
-
-    References
-    ----------
-    .. [1] Griswold, Mark A., et al. "Parallel magnetic resonance
-           imaging using the GRAPPA operator formalism." Magnetic
-           resonance in medicine 54.6 (2005): 1553-1556.
-    """
-    device = get_device(input)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore")
-        
-        # Create interpolator with trajectory information
-        interpolator_obj = GROGInterpolator(
-            coords=coords,
-            shape=shape,
-            stack_axes=stack_axes,
-            oversamp=oversamp,
-            radius=radius,
-            precision=precision,
-            weighting_mode=weighting_mode
-        )
-        
-        # Set kernels and apply interpolation
-        interpolator_obj.set_kernels(grappa_kernels)
-        data, indexes = interpolator_obj(input)
-
-    # enforce correct device
-    data = to_device(data, device)
-    indexes = to_device(indexes, device)
-
-    return data, indexes, interpolator_obj.output_shape
-
-
+# %% subroutines
 def prepare_interpolation_data(
     n_stacks, grid, coords, stack_coords, radius, precision, weighting_mode
 ):

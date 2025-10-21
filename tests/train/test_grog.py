@@ -5,7 +5,7 @@ import numpy as np
 import tempfile
 import os
 
-from pygrog.grog import GROGInterpolator, groginterp
+from pygrog.grog import GROGInterpolator
 
 
 @pytest.fixture
@@ -390,24 +390,6 @@ def test_complex_dataset_structure(identity_interpolator):
     
     # Verify shot output has data
     assert np.sum(np.abs(shot_output)) > 0
-
-
-def test_groginterp_function(identity_interpolator, cartesian_2d_data):
-    """Test the convenience interp function."""
-    data, coords, shape = cartesian_2d_data
-    
-    # Use the interp function with updated API
-    output, indices, output_shape = groginterp(
-        grappa_kernels=identity_interpolator,
-        input=data,
-        coords=coords,
-        shape=shape
-    )
-    
-    # Check results
-    assert output.shape[0] == indices.shape[0]
-    assert output_shape == shape
-    assert np.allclose(np.sum(np.abs(output)), np.sum(np.abs(data)), rtol=1e-1)
 
 
 def test_different_oversamp(identity_interpolator, cartesian_2d_data):

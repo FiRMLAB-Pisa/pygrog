@@ -1,5 +1,5 @@
 """GROG interpolation routines."""
 
-__all__ = ["GROGInterpolator", "groginterp"]
+__all__ = ["GROGInterpolator"]
 
-from .grog_train import GROGInterpolator, groginterp
+from ._extended_grog import GROGInterpolator
