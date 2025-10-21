@@ -5,9 +5,7 @@ __all__ = ["_GrogInterpolator"]
 import numpy as np
 import numba as nb
 
-from scipy.linalg import fractional_matrix_power as fmp
-
-from ._utils import rescale_coords
+from ._utils import rescale_coords, prepare_grog_table, grog_power
 
 class _GrogInterpolator:
     """
@@ -93,15 +91,15 @@ class _GrogInterpolator:
         deltas = (np.arange(nsteps) - (nsteps - 1) // 2) / (nsteps - 1)
         
         # pre-compute partial operators
-        Dx = _grog_power(grappa_kernels["x"], deltas)  # (nsteps, nc, nc)
-        Dy = _grog_power(grappa_kernels["y"], deltas)  # (nsteps, nc, nc)
+        Dx = grog_power(grappa_kernels["x"], deltas)  # (nsteps, nc, nc)
+        Dy = grog_power(grappa_kernels["y"], deltas)  # (nsteps, nc, nc)
         if "z" in grappa_kernels and grappa_kernels["z"] is not None:
-            Dz = _grog_power(grappa_kernels["z"], deltas)  # (nsteps, nc, nc), 3D only
+            Dz = grog_power(grappa_kernels["z"], deltas)  # (nsteps, nc, nc), 3D only
         else:
             Dz = None
             
         # Compute grog table
-        self._grog_table = _prepare_grog_table(Dx, Dy, Dz, nsteps, ndim)
+        self._grog_table = prepare_grog_table(Dx, Dy, Dz, nsteps, ndim)
         self._n_coils = n_coils
         self._kernels_set = True
     
@@ -329,70 +327,6 @@ def _flatten_lut(lut, nsteps):
         return lut[..., 0] + lut[..., 1] * nsteps
     else:  # ndim == 3
         return lut[..., 0] + lut[..., 1] * nsteps + lut[..., 2] * nsteps**2
-
-
-def _prepare_grog_table(Dx, Dy, Dz, nsteps, ndim):
-    """Prepare the GROG operator table."""
-    # Convert to numpy arrays
-    Dx = np.asarray(Dx)
-    Dy = np.asarray(Dy)
-    
-    if ndim == 2:
-        # 2D case
-        Dx = Dx[None, :, ...]  # (1, nsteps, nc, nc)
-        Dy = Dy[:, None, ...]  # (nsteps, 1, nc, nc)
-        Dx = np.repeat(Dx, nsteps, axis=0)  # (nsteps, nsteps, nc, nc)
-        Dy = np.repeat(Dy, nsteps, axis=1)  # (nsteps, nsteps, nc, nc)
-        Dx = Dx.reshape(-1, *Dx.shape[-2:])  # (nsteps**2, nc, nc)
-        Dy = Dy.reshape(-1, *Dy.shape[-2:])  # (nsteps**2, nc, nc)
-        grog_table = Dx @ Dy  # (nsteps**2, nc, nc)
-        
-    elif ndim == 3:
-        # 3D case
-        if Dz is None:
-            raise ValueError("3D interpolation requires Z operator")
-        
-        Dz = np.asarray(Dz)
-        Dx = Dx[None, None, :, ...]  # (1, 1, nsteps, nc, nc)
-        Dy = Dy[None, :, None, ...]  # (1, nsteps, 1, nc, nc)
-        Dz = Dz[:, None, None, ...]  # (nsteps, 1, 1, nc, nc)
-        
-        # Repeat to create a grid of all combinations
-        Dx = np.repeat(Dx, nsteps, axis=0)  # (nsteps, 1, nsteps, nc, nc)
-        Dx = np.repeat(Dx, nsteps, axis=1)  # (nsteps, nsteps, nsteps, nc, nc)
-        Dy = np.repeat(Dy, nsteps, axis=0)  # (nsteps, nsteps, 1, nc, nc)
-        Dy = np.repeat(Dy, nsteps, axis=2)  # (nsteps, nsteps, nsteps, nc, nc)
-        Dz = np.repeat(Dz, nsteps, axis=1)  # (nsteps, nsteps, 1, nc, nc)
-        Dz = np.repeat(Dz, nsteps, axis=2)  # (nsteps, nsteps, nsteps, nc, nc)
-        
-        # Reshape to flat combinations
-        Dx = Dx.reshape(-1, *Dx.shape[-2:])  # (nsteps**3, nc, nc)
-        Dy = Dy.reshape(-1, *Dy.shape[-2:])  # (nsteps**3, nc, nc)
-        Dz = Dz.reshape(-1, *Dz.shape[-2:])  # (nsteps**3, nc, nc)
-        
-        # Combine all operators
-        grog_table = Dx @ Dy @ Dz  # (nsteps**3, nc, nc)
-    
-    else:
-        raise ValueError(f"GROG interpolation only supports 2D or 3D data, got {ndim}D")
-        
-    return grog_table
-
-
-def _grog_power(G, exponents):
-    """Compute matrix powers of GROG operators."""
-    D, idx = [], 0
-    for exp in exponents:
-        if np.isclose(exp, 0.0):
-            _D = np.eye(G.shape[0], dtype=G.dtype)
-        else:
-            _D = fmp(G, np.abs(exp)).astype(G.dtype)
-            if np.sign(exp) < 0:
-                _D = np.linalg.pinv(_D).astype(G.dtype)
-        D.append(_D)
-        idx += 1
-
-    return np.stack(D, axis=0)
 
 @nb.njit(fastmath=True, cache=True)  # pragma: no cover
 def _dot_product(out, in_a, in_b):
