@@ -2,39 +2,16 @@
 
 import pytest
 import numpy as np
-import tempfile
-import os
 
-from pygrog.grog import GROGInterpolator
+from numpy.testing import assert_allclose
 
-
-@pytest.fixture
-def identity_interpolator():
-    """Create identity GROG interpolator matrices for 2D."""
-    n_coils = 4
-    return {
-        "x": np.eye(n_coils, dtype=np.complex64),
-        "y": np.eye(n_coils, dtype=np.complex64)
-    }
-
+from pygrog.grog import _GrogInterpolator
 
 @pytest.fixture
-def identity_interpolator_3d():
-    """Create identity GROG interpolator matrices for 3D."""
-    n_coils = 4
-    return {
-        "x": np.eye(n_coils, dtype=np.complex64),
-        "y": np.eye(n_coils, dtype=np.complex64),
-        "z": np.eye(n_coils, dtype=np.complex64)
-    }
-
-
-@pytest.fixture
-def cartesian_2d_data():
-    """Create 2D Cartesian k-space data and coordinates."""
-    n_coils = 4
+def cartesian_2d_coords():
+    """Create 2D coordinates exactly on a Cartesian grid."""
     matrix_size = 16
-    
+
     # Create Cartesian coordinates
     x, y = np.meshgrid(
         np.linspace(-0.5, 0.5, matrix_size),
@@ -42,17 +19,12 @@ def cartesian_2d_data():
         indexing='ij'
     )
     coords = np.stack([y.flatten(), x.flatten()], axis=-1)
-    
-    # Create test data with coils as the rightmost dimension
-    data = np.ones((matrix_size**2, n_coils), dtype=np.complex64)
-        
-    return data, coords, (matrix_size, matrix_size)
+    return coords
 
 
 @pytest.fixture
-def cartesian_3d_data():
-    """Create 3D Cartesian k-space data and coordinates."""
-    n_coils = 4
+def cartesian_3d_coords():
+    """Create 3D coordinates exactly on a Cartesian grid."""
     matrix_size = 8  # Smaller for 3D to keep test fast
     
     # Create Cartesian coordinates
@@ -64,437 +36,254 @@ def cartesian_3d_data():
     )
     coords = np.stack([z.flatten(), y.flatten(), x.flatten()], axis=-1)
     
-    # Create test data with coils as the rightmost dimension
-    data = np.ones((matrix_size**3, n_coils), dtype=np.complex64)
-    
-    return data, coords, (matrix_size, matrix_size, matrix_size)
+    return coords
 
 
-def test_create_grog_interpolator(identity_interpolator, cartesian_2d_data):
-    """Test creating a GROG interpolator instance."""
-    _, coords, shape = cartesian_2d_data
-    
-    # Create interpolator without kernels
-    grog = GROGInterpolator(
-        coords=coords,
-        shape=shape
-    )
-    
-    # Check that the plan was created but doesn't have grog_table
-    assert grog.plan is not None
-    assert grog._grog_table is None  # No table yet
-    assert "output_shape" in grog.plan
-    
-    # Set the kernels
-    grog.set_kernels(identity_interpolator)
-    
-    # Now there should be a grog_table in memory but not in the plan
-    assert grog._grog_table is not None
-    assert "grog_table" not in grog.plan
-    
-    # Check that output shape matches input shape
-    assert grog.output_shape == shape
+@pytest.fixture
+def identity_kernels_2d():
+    """Create identity matrix GRAPPA kernels for 2D."""
+    ncoils = 4
+    Gx = np.eye(ncoils, dtype=complex)
+    Gy = np.eye(ncoils, dtype=complex)
+    return {"x": Gx, "y": Gy}
 
 
-def test_apply_interpolation(identity_interpolator, cartesian_2d_data):
-    """Test applying interpolation to entire dataset."""
-    data, coords, shape = cartesian_2d_data
-    
-    # Create interpolator and set kernels
-    grog = GROGInterpolator(
-        coords=coords,
-        shape=shape,
-    )
-    grog.set_kernels(identity_interpolator)
-    
-    # Apply interpolation
-    output, indices = grog(data)
-    
-    # With identity matrices and Cartesian coordinates, output should preserve signal
-    assert np.allclose(np.sum(np.abs(output)), np.sum(np.abs(data)), rtol=1e-1)
-    
-    # Check that indices were returned
-    assert indices.shape[0] == output.shape[0]
+@pytest.fixture
+def identity_kernels_3d():
+    """Create identity matrix GRAPPA kernels for 3D."""
+    ncoils = 4
+    Gx = np.eye(ncoils, dtype=complex)
+    Gy = np.eye(ncoils, dtype=complex)
+    Gz = np.eye(ncoils, dtype=complex)
+    return {"x": Gx, "y": Gy, "z": Gz}
 
 
-def test_save_load_interpolator_without_kernels(cartesian_2d_data):
-    """Test saving and loading interpolator without kernels."""
-    _, coords, shape = cartesian_2d_data
-    
-    # Create interpolator without setting kernels
-    grog = GROGInterpolator(
-        coords=coords,
-        shape=shape
-    )
-    
-    # Save to temporary file
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        # Test pickle format
-        pkl_path = os.path.join(tmp_dir, "grog_plan.pkl")
-        grog.to_file(pkl_path)
-        
-        # Load from pickle file
-        loaded_grog = GROGInterpolator.from_file(pkl_path)
-        
-        # Check that core parts of the plan are equal
-        assert grog.output_shape == loaded_grog.output_shape
-        
-        # Verify no grog_table is loaded
-        assert loaded_grog._grog_table is None
+@pytest.fixture
+def uniform_2d_data():
+    """Create uniform 2D data filled with ones."""
+    # 3 views, 4 readouts, 4 coils
+    return np.ones((3, 4, 4), dtype=complex)
 
 
-def test_save_load_set_kernels_workflow(identity_interpolator, cartesian_2d_data):
-    """Test saving trajectory plan, loading it, and then setting kernels."""
-    data, coords, shape = cartesian_2d_data
-    
-    # Create interpolator without kernels
-    grog = GROGInterpolator(
-        coords=coords,
-        shape=shape
-    )
-    
-    # Save to temporary file
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        # Test numpy format
-        npy_path = os.path.join(tmp_dir, "grog_plan.npy")
-        grog.to_file(npy_path)
-        
-        # Load from numpy file
-        loaded_grog = GROGInterpolator.from_file(npy_path)
-        
-        # Set kernels on loaded interpolator
-        loaded_grog.set_kernels(identity_interpolator)
-        
-        # Now we should be able to use it
-        assert loaded_grog._grog_table is not None
-        
-        # Test interpolation
-        output, indices = loaded_grog(data)
-        assert output.shape[0] > 0
-        assert np.allclose(np.sum(np.abs(output)), np.sum(np.abs(data)), rtol=1e-1)
+@pytest.fixture
+def uniform_3d_data():
+    """Create uniform 3D data filled with ones."""
+    # 2 slices, 3 views, 4 readouts, 4 coils
+    return np.ones((2, 3, 4, 4), dtype=complex)
 
 
-def test_missing_kernels(cartesian_2d_data):
-    """Test error when trying to use interpolator without setting kernels."""
-    data, coords, shape = cartesian_2d_data
+def test_initialization(cartesian_2d_coords):
+    """Test that the interpolator initializes correctly."""
+    # Basic initialization
+    interp = _GrogInterpolator(cartesian_2d_coords, (10, 10))
+    assert interp.shape == (10, 10)
+    assert interp.oversamp == 1.0
+    assert interp.precision == 1
+    assert interp.weighting_mode == "count"
+    assert interp.nsteps == 11  # For precision=1
     
-    # Create interpolator without kernels
-    grog = GROGInterpolator(
-        coords=coords,
-        shape=shape
-    )
-    
-    # Try to use it without setting kernels
-    with pytest.raises(RuntimeError, match="GRAPPA kernels have not been set"):
-        grog(data)
-
-
-def test_invalid_radius(cartesian_2d_data):
-    """Test error handling for invalid radius."""
-    _, coords, shape = cartesian_2d_data
-    
-    # Create interpolator with invalid radius
-    with pytest.raises(ValueError, match="Maximum GRAPPA shift is 1.0"):
-        GROGInterpolator(
-            coords=coords,
-            shape=shape,
-            radius=1.5
-        )
-
-
-def test_invalid_weighting_mode(cartesian_2d_data):
-    """Test error handling for invalid weighting mode."""
-    _, coords, shape = cartesian_2d_data
-    
-    # Create interpolator with invalid weighting mode
-    with pytest.raises(ValueError, match="Weighting mode can be either"):
-        GROGInterpolator(
-            coords=coords,
-            shape=shape,
-            weighting_mode="invalid"
-        )
-
-
-def test_coil_count_mismatch(identity_interpolator, cartesian_2d_data):
-    """Test error handling for coil count mismatch."""
-    data, coords, shape = cartesian_2d_data
-    
-    # Create interpolator
-    grog = GROGInterpolator(
-        coords=coords,
-        shape=shape
-    )
-    grog.set_kernels(identity_interpolator)
-    
-    # Create data with wrong coil count
-    wrong_data = np.zeros((data.shape[0], 5), dtype=np.complex64)
-    
-    # Apply interpolation with wrong data
-    with pytest.raises(ValueError, match="Input data has .* coils but kernels expect"):
-        grog(wrong_data)
-
-
-def test_shot_by_shot_processing(identity_interpolator):
-    """Test shot-by-shot processing functionality."""
-    n_coils = 4
-    n_readout = 16
-    n_views = 2
-    
-    # Create Cartesian coordinates for a simple trajectory
-    coords = np.zeros((n_views, n_readout, 2), dtype=np.float32)
-    for v in range(n_views):
-        for r in range(n_readout):
-            coords[v, r, 0] = -0.5 + r / n_readout  # x coordinate
-            coords[v, r, 1] = -0.5 + v / n_views    # y coordinate
-            
-    # Create test data with coils as rightmost dimension
-    data = np.zeros((n_views, n_readout, n_coils), dtype=np.complex64)
-    
-    # Set a signal point in each view
-    data[0, 8, :] = 1.0 + 0j
-    data[1, 4, :] = 0.5 + 0j
-    
-    # Create interpolator and set kernels
-    grog = GROGInterpolator(
-        coords=coords,
-        shape=(16, 16)
-    )
-    grog.set_kernels(identity_interpolator)
-    
-    # Process whole dataset
-    whole_output, whole_indices = grog(data)
-    
-    # Process shot-by-shot
-    shot_outputs = []
-    shot_indices = []
-    for v in range(n_views):
-        # Extract single shot data: (readout, coils)
-        shot_data = data[v]  
-        # Process with shot index
-        output, indices = grog(shot_data, shot_index=(v,))
-        shot_outputs.append(output)
-        shot_indices.append(indices)
-    
-    # Verify shot-by-shot results are consistent
-    whole_sum = np.sum(np.abs(whole_output))
-    shot_sum = sum(np.sum(np.abs(output)) for output in shot_outputs)
-    
-    # Check that total signal is preserved
-    assert np.isclose(whole_sum, shot_sum, rtol=1e-2)
-
-
-def test_3d_interpolation(identity_interpolator_3d, cartesian_3d_data):
-    """Test 3D interpolation functionality."""
-    data, coords, shape = cartesian_3d_data
-    
-    # Create interpolator and set 3D kernels
-    grog = GROGInterpolator(
-        coords=coords,
-        shape=shape,
-        oversamp=[1.0, 1.0, 1.0]
-    )
-    grog.set_kernels(identity_interpolator_3d)
-    
-    # Apply interpolation
-    output, indices = grog(data)
-    
-    # With identity matrices and Cartesian coordinates, output should preserve signal
-    assert np.allclose(np.sum(np.abs(output)), np.sum(np.abs(data)), rtol=1e-1)
-    
-    # Check that we have 3D indices
-    assert indices.shape[1] == 1  # Just the grid index since no stack axes
-
-
-def test_with_stack_axes(identity_interpolator):
-    """Test interpolation with stack axes."""
-    n_coils = 4
-    n_readout = 16
-    n_stacks = 2  # e.g., 2 slices
-    
-    # Create Cartesian coordinates with stack axis
-    coords = np.zeros((n_stacks, n_readout, 2), dtype=np.float32)
-    for s in range(n_stacks):
-        for r in range(n_readout):
-            coords[s, r, 0] = -0.5 + r / n_readout  # x coordinate
-            coords[s, r, 1] = -0.5  # y coordinate fixed
-            
-    # Create test data with coils as rightmost dimension
-    data = np.zeros((n_stacks, n_readout, n_coils), dtype=np.complex64)
-    
-    # Set a signal point in each stack
-    data[0, 8, :] = 1.0 + 0j
-    data[1, 4, :] = 0.5 + 0j
-    
-    # Create interpolator with stack_axes=[0] and set kernels
-    grog = GROGInterpolator(
-        coords=coords,
-        shape=(16, 16),
-        stack_axes=[0]
-    )
-    grog.set_kernels(identity_interpolator)
-    
-    # Process dataset
-    output, indices = grog(data)
-    
-    # Verify output has signals from both stacks
-    assert output.shape[0] > 0
-    assert np.sum(np.abs(output)) > 0
-    
-    # Verify indices include stack dimension
-    assert indices.shape[1] >= 2  # Should have (stack_idx, point_idx)
-
-
-def test_complex_dataset_structure(identity_interpolator):
-    """Test with more complex dataset structure (batch, stack, view, readout, coil)."""
-    n_coils = 4
-    n_readout = 8
-    n_views = 2
-    n_stacks = 2  # e.g., slices
-    n_batches = 2  # e.g., time points
-    
-    # Create coordinates with stack axis
-    coords = np.zeros((n_stacks, n_views, n_readout, 2), dtype=np.float32)
-    for s in range(n_stacks):
-        for v in range(n_views):
-            for r in range(n_readout):
-                coords[s, v, r, 0] = -0.5 + r / n_readout  # x varies by readout
-                coords[s, v, r, 1] = -0.5 + v / n_views    # y varies by view
-    
-    # Create test data
-    data = np.zeros((n_batches, n_stacks, n_views, n_readout, n_coils), dtype=np.complex64)
-    
-    # Set a signal point in different locations
-    data[0, 0, 0, 4, :] = 1.0 + 0j  # batch 0, stack 0, view 0
-    data[0, 1, 1, 2, :] = 0.8 + 0j  # batch 0, stack 1, view 1
-    data[1, 0, 1, 6, :] = 0.6 + 0j  # batch 1, stack 0, view 1
-    data[1, 1, 0, 3, :] = 0.4 + 0j  # batch 1, stack 1, view 0
-    
-    # Create interpolator and set kernels
-    grog = GROGInterpolator(
-        coords=coords,
-        shape=(16, 16),
-        stack_axes=[0]  # First dimension (after batches) is stack
-    )
-    grog.set_kernels(identity_interpolator)
-    
-    # Process dataset
-    output, indices = grog(data)
-    
-    # Verify output shape has correct batch dimensions
-    assert output.shape[0] == n_batches
-    
-    # Test processing a single shot from the dataset
-    b, s, v = 0, 1, 1  # batch 0, stack 1, view 1
-    shot_data = data[b, s, v]  # shape: (n_readout, n_coils)
-    shot_output, shot_indices = grog(shot_data, shot_index=(b, s, v))
-    
-    # Verify shot output has data
-    assert np.sum(np.abs(shot_output)) > 0
-
-
-def test_different_oversamp(identity_interpolator, cartesian_2d_data):
-    """Test with different oversampling factors."""
-    data, coords, shape = cartesian_2d_data
-    
-    # Create interpolator with higher oversampling and set kernels
-    grog = GROGInterpolator(
-        coords=coords,
-        shape=shape,
-        oversamp=2.0
-    )
-    grog.set_kernels(identity_interpolator)
-    
-    # Apply interpolation
-    output, indices = grog(data)
-    
-    # Check output shape is larger
-    assert grog.output_shape[0] >= shape[0] * 1.9  # Allow for rounding
-    assert grog.output_shape[1] >= shape[1] * 1.9
-    
-    # Check that signal is preserved
-    assert np.allclose(np.sum(np.abs(output)) / 2.0**2, np.sum(np.abs(data)), rtol=1e-1)
-    
-    # Test with different oversampling per dimension
-    grog2 = GROGInterpolator(
-        coords=coords,
-        shape=shape,
-        oversamp=[1.5, 2.0]
-    )
-    grog2.set_kernels(identity_interpolator)
-    
-    # Check asymmetric output shape
-    assert grog2.output_shape[0] >= shape[0] * 1.4  # Allow for rounding
-    assert grog2.output_shape[1] >= shape[1] * 1.9
-
-
-def test_different_weighting(identity_interpolator, cartesian_2d_data):
-    """Test with different weighting modes."""
-    data, coords, shape = cartesian_2d_data
-    
-    # Create interpolator with distance weighting and set kernels
-    grog_distance = GROGInterpolator(
-        coords=coords,
-        shape=shape,
+    # With explicit parameters
+    interp = _GrogInterpolator(
+        cartesian_2d_coords, (10, 10), 
+        oversamp=1.5, 
+        precision=2, 
         weighting_mode="distance"
     )
-    grog_distance.set_kernels(identity_interpolator)
-    
-    # Create interpolator with average weighting and set kernels
-    grog_average = GROGInterpolator(
-        coords=coords,
-        shape=shape,
-        weighting_mode="average"
-    )
-    grog_average.set_kernels(identity_interpolator)
-    
-    # Apply interpolation
-    output_distance, _ = grog_distance(data)
-    output_average, _ = grog_average(data)
-    
-    # Both should preserve signal sum, though individual values might differ
-    assert np.allclose(np.sum(np.abs(output_distance)), np.sum(np.abs(data)), rtol=1e-1)
-    assert np.allclose(np.sum(np.abs(output_average)), np.sum(np.abs(data)), rtol=1e-1)
+    assert interp.shape == (10, 10)
+    assert interp.oversamp == 1.5
+    assert interp.precision == 2
+    assert interp.weighting_mode == "distance"
+    assert interp.nsteps == 101  # For precision=2
 
 
-def test_kernel_setting_workflow():
-    """Test typical GROG workflow with precomputation and runtime usage."""
-    # Setup data
-    n_coils = 4
-    matrix_size = 16
-    x, y = np.meshgrid(
-        np.linspace(-0.5, 0.5, matrix_size),
-        np.linspace(-0.5, 0.5, matrix_size),
-        indexing='ij'
-    )
-    coords = np.stack([y.flatten(), x.flatten()], axis=-1)
-    data = np.ones((matrix_size**2, n_coils), dtype=np.complex64)
-    shape = (matrix_size, matrix_size)
+def test_invalid_weighting_mode(cartesian_2d_coords):
+    """Test that invalid weighting mode raises an error."""
+    with pytest.raises(ValueError):
+        _GrogInterpolator(cartesian_2d_coords, (10, 10), weighting_mode="invalid")
+
+
+def test_kernels_setting_2d(cartesian_2d_coords, identity_kernels_2d):
+    """Test setting 2D GRAPPA kernels."""
+    interp = _GrogInterpolator(cartesian_2d_coords, (10, 10))
+    interp.set_kernels(identity_kernels_2d)
     
-    # Create identity kernels
-    kernels = {
-        "x": np.eye(n_coils, dtype=np.complex64),
-        "y": np.eye(n_coils, dtype=np.complex64)
-    }
+    assert interp._kernels_set
+    assert interp._n_coils == 4
+    assert interp._grog_table.shape == (11*11, 4, 4)  # nsteps^2 x nc x nc
+
+
+def test_kernels_setting_3d(cartesian_3d_coords, identity_kernels_3d):
+    """Test setting 3D GRAPPA kernels."""
+    interp = _GrogInterpolator(cartesian_3d_coords, (10, 10, 10))
+    interp.set_kernels(identity_kernels_3d)
     
-    # Workflow: Precompute trajectory info, save, load, set kernels at runtime
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        # Step 1: Precomputation
-        precomp_grog = GROGInterpolator(
-            coords=coords,
-            shape=shape
-        )
+    assert interp._kernels_set
+    assert interp._n_coils == 4
+    assert interp._grog_table.shape == (11*11*11, 4, 4)  # nsteps^3 x nc x nc
+
+
+def test_missing_kernels(cartesian_2d_coords):
+    """Test error handling when GRAPPA kernels are missing."""
+    interp = _GrogInterpolator(cartesian_2d_coords, (10, 10))
+    
+    # Missing x kernel
+    with pytest.raises(ValueError):
+        interp.set_kernels({"y": np.eye(4)})
         
-        # Save precomputed plan
-        plan_path = os.path.join(tmp_dir, "precomputed_plan.pkl")
-        precomp_grog.to_file(plan_path)
+    # Missing y kernel
+    with pytest.raises(ValueError):
+        interp.set_kernels({"x": np.eye(4)})
+
+
+def test_missing_z_kernel_for_3d(cartesian_3d_coords):
+    """Test error when missing z kernel for 3D data."""
+    interp_3d = _GrogInterpolator(cartesian_3d_coords, (10, 10, 10))
+    with pytest.raises(ValueError):
+        interp_3d.set_kernels({"x": np.eye(4), "y": np.eye(4)})
+
+
+def test_call_without_kernels(cartesian_2d_coords, uniform_2d_data):
+    """Test error when calling without setting kernels first."""
+    interp = _GrogInterpolator(cartesian_2d_coords, (10, 10))
+    with pytest.raises(RuntimeError):
+        interp(uniform_2d_data)
+
+
+def test_interpolation_2d(cartesian_2d_coords, uniform_2d_data, identity_kernels_2d):
+    """Test interpolation with 2D Cartesian grid data."""
+    interp = _GrogInterpolator(cartesian_2d_coords, (10, 10))
+    interp.set_kernels(identity_kernels_2d)
+    
+    output, indexes, weights = interp(uniform_2d_data)
+    
+    # Check shapes
+    assert output.shape == uniform_2d_data.shape
+    assert indexes.shape == cartesian_2d_coords.shape
+    assert weights.shape == (*cartesian_2d_coords.shape[:-1], 1)
+    
+    # Since points are on grid and kernels are identity matrices,
+    # output should be very close to input
+    assert_allclose(output, uniform_2d_data, rtol=1e-5)
+    
+    # Indexes should correspond to coordinates plus grid offset
+    expected_indexes = cartesian_2d_coords + np.array([5, 5])
+    assert_allclose(indexes, expected_indexes, rtol=1e-10)
+    
+    # Each point should have weight 1.0 since they're on grid positions
+    assert_allclose(weights, np.ones(weights.shape), rtol=1e-5)
+
+
+def test_interpolation_3d(cartesian_3d_coords, uniform_3d_data, identity_kernels_3d):
+    """Test interpolation with 3D Cartesian grid data."""
+    interp = _GrogInterpolator(cartesian_3d_coords, (10, 10, 10))
+    interp.set_kernels(identity_kernels_3d)
+    
+    output, indexes, weights = interp(uniform_3d_data)
+    
+    # Check shapes
+    assert output.shape == uniform_3d_data.shape
+    assert indexes.shape == cartesian_3d_coords.shape
+    assert weights.shape == (*cartesian_3d_coords.shape[:-1], 1)
+    
+    # Since points are on grid and kernels are identity matrices,
+    # output should be very close to input
+    assert_allclose(output, uniform_3d_data, rtol=1e-5)
+    
+    # Indexes should correspond to coordinates plus grid offset
+    expected_indexes = cartesian_3d_coords + np.array([5, 5, 5])
+    assert_allclose(indexes, expected_indexes, rtol=1e-10)
+    
+    # Each point should have weight 1.0 since they're on grid positions
+    assert_allclose(weights, np.ones(weights.shape), rtol=1e-5)
+
+
+def test_single_shot_2d(cartesian_2d_coords, uniform_2d_data, identity_kernels_2d):
+    """Test single shot processing in 2D with Cartesian grid data."""
+    interp = _GrogInterpolator(cartesian_2d_coords, (10, 10))
+    interp.set_kernels(identity_kernels_2d)
+    
+    # Process single shot - second view
+    shot_index = (1,)
+    shot_data = uniform_2d_data[1]  # Shape: (4, 4) - readouts, coils
+    
+    output, indexes, weights = interp(shot_data, shot_index)
+    
+    # Check shapes
+    assert output.shape == shot_data.shape
+    assert indexes.shape == (4, 2)  # readouts, ndim
+    assert weights.shape == (4, 1)  # readouts, 1
+    
+    # Output should match input for identity kernels
+    assert_allclose(output, shot_data, rtol=1e-5)
+    
+    # Indexes should match original coordinates plus grid offset
+    expected_indexes = cartesian_2d_coords[1] + np.array([5, 5])
+    assert_allclose(indexes, expected_indexes, rtol=1e-10)
+    
+    # Weights should be 1.0
+    assert_allclose(weights, np.ones(weights.shape), rtol=1e-5)
+
+
+def test_single_shot_3d(cartesian_3d_coords, uniform_3d_data, identity_kernels_3d):
+    """Test single shot processing in 3D with Cartesian grid data."""
+    interp = _GrogInterpolator(cartesian_3d_coords, (10, 10, 10))
+    interp.set_kernels(identity_kernels_3d)
+    
+    # Process single shot - first slice, second view
+    shot_index = (0, 1)
+    shot_data = uniform_3d_data[0, 1]  # Shape: (4, 4) - readouts, coils
+    
+    output, indexes, weights = interp(shot_data, shot_index)
+    
+    # Check shapes
+    assert output.shape == shot_data.shape
+    assert indexes.shape == (4, 3)  # readouts, ndim
+    assert weights.shape == (4, 1)  # readouts, 1
+    
+    # Output should match input for identity kernels
+    assert_allclose(output, shot_data, rtol=1e-5)
+    
+    # Indexes should match original coordinates plus grid offset
+    expected_indexes = cartesian_3d_coords[0, 1] + np.array([5, 5, 5])
+    assert_allclose(indexes, expected_indexes, rtol=1e-10)
+    
+    # Weights should be 1.0
+    assert_allclose(weights, np.ones(weights.shape), rtol=1e-5)
+
+
+def test_count_vs_distance_weighting(cartesian_2d_coords, uniform_2d_data, identity_kernels_2d):
+    """Test that both weighting methods give same results for grid-aligned data."""
+    # With count weighting
+    interp_count = _GrogInterpolator(cartesian_2d_coords, (10, 10), weighting_mode="count")
+    interp_count.set_kernels(identity_kernels_2d)
+    _, _, weights_count = interp_count(uniform_2d_data)
+    
+    # With distance weighting
+    interp_distance = _GrogInterpolator(cartesian_2d_coords, (10, 10), weighting_mode="distance")
+    interp_distance.set_kernels(identity_kernels_2d)
+    _, _, weights_distance = interp_distance(uniform_2d_data)
+    
+    # For grid-aligned points, both weightings should give similar results
+    assert_allclose(weights_count, weights_distance, rtol=1e-5)
+    assert_allclose(weights_count, np.ones_like(weights_count), rtol=1e-5)
+
+
+def test_oversamp_scaling(cartesian_2d_coords, uniform_2d_data, identity_kernels_2d):
+    """Test that oversampling correctly scales coordinates."""
+    # Without oversampling
+    interp1 = _GrogInterpolator(cartesian_2d_coords, (10, 10), oversamp=1.0)
+    interp1.set_kernels(identity_kernels_2d)
+    _, indexes1, _ = interp1(uniform_2d_data)
+    
+    # With oversampling
+    interp2 = _GrogInterpolator(cartesian_2d_coords, (10, 10), oversamp=2.0)
+    interp2.set_kernels(identity_kernels_2d)
+    _, indexes2, _ = interp2(uniform_2d_data)
+    
+    # Indexes should differ by the scaling factor
+    # For oversamp=2.0, coordinates are doubled before rounding
+    expected_indexes2 = np.zeros_like(indexes1)
+    for i in range(2):
+        expected_indexes2[..., i] = cartesian_2d_coords[..., i] * 2 + 5
         
-        # Step 2: Runtime
-        runtime_grog = GROGInterpolator.from_file(plan_path)
-        runtime_grog.set_kernels(kernels)
-        
-        # Use the interpolator
-        output, indices = runtime_grog(data)
-        
-        # Check output
-        assert output.shape[0] > 0
-        assert np.allclose(np.sum(np.abs(output)), np.sum(np.abs(data)), rtol=1e-1)
+    assert_allclose(indexes2, expected_indexes2, rtol=1e-10)

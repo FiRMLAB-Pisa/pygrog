@@ -1,6 +1,6 @@
 """Extended GROG with improved caching and performance."""
 
-__all__ = ["GROGInterpolator"]
+__all__ = ["_ExtendedGrogInterpolator"]
 
 import pickle
 import os
@@ -18,7 +18,7 @@ from scipy.spatial import KDTree
 from ._utils import rescale_coords
 
 
-class GROGInterpolator:
+class _ExtendedGrogInterpolator:
     """
     GRAPPA Operator Gridding (GROG) interpolator class.
     
@@ -125,7 +125,7 @@ class GROGInterpolator:
         self._kernels_set = True
     
     @classmethod
-    def from_file(cls, filepath: str | pathlib.Path) -> "GROGInterpolator":
+    def from_file(cls, filepath: str | pathlib.Path) -> "_ExtendedGrogInterpolator":
         """
         Load a GROG interpolator from a saved file.
         

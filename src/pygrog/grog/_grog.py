@@ -1,439 +1,533 @@
-"""Python implementation of the GRAPPA operator formalism. Adapted for convenience from PyGRAPPA"""
+"""Python implementation of the GRAPPA operator formalism."""
 
-__all__ = ["grog_interp"]
-
-from types import SimpleNamespace
+__all__ = ["_GrogInterpolator"]
 
 import numpy as np
 import numba as nb
 
-import torch
+from scipy.linalg import fractional_matrix_power as fmp
 
-
-from ...._utils import backend
-
-
-def grog_interp(
-    input, calib, coord, shape, lamda=0.01, nsteps=11, device=None, threadsperblock=128,
-):
+class _GrogInterpolator:
     """
-    GRAPPA Operator Gridding (GROP) interpolation of Non-Cartesian datasets.
-
-    Parameters
-    ----------
-    input : np.ndarray | torch.Tensor
-        Input Non-Cartesian kspace of shape ``(..., ncontrasts, nviews, nsamples)``.
-    calib : np.ndarray | torch.Tensor
-        Calibration region data of shape ``(nc, nz, ny, nx)`` or ``(nc, ny, nx)``.
-        Usually a small portion from the center of kspace.
-    coord : np.ndarray | torch.Tensor
-        K-space coordinates of shape ``(ncontrasts, nviews, nsamples, ndims)``.
-        Coordinates must be normalized between ``(-0.5 * shape, 0.5 * shape)``.
-    shape : Iterable[int]
-        Cartesian grid size of shape ``(ndim,)``.
-        If scalar, isotropic matrix is assumed.
-    lamda : float, optional
-        Tikhonov regularization parameter.  Set to 0 for no
-        regularization. Defaults to ``0.01``.
-    nsteps : int, optional
-        K-space interpolation grid discretization. Defaults to ``11``
-        steps (i.e., ``dk = -0.5, -0.4, ..., 0.0, ..., 0.4, 0.5``)
-    device : str, optional
-        Computational device (``cpu`` or ``cuda:n``, with ``n=0, 1,...nGPUs``).
-        The default is ``cpu``.
-    threadsperblock : int
-        CUDA blocks size (for GPU only). The default is ``128``.
-
-    Returns
-    -------
-    output : np.ndarray | torch.Tensor
-        Output sparse Cartesian kspace of shape ``(..., ncontrasts, nviews, nsamples)``.
-    indexes : np.ndarray | torch.Tensor
-        Sampled k-space points indexes of shape ``(ncontrasts, nviews, nsamples, ndims)``.
-    weights : np.ndarray | torch.Tensor
-        Number of occurrences of each k-space sample of shape ``(ncontrasts, nviews, nsamples)``.
-
-    Notes
-    -----
-    Produces the unit operator described in [1]_.
-
-    This seems to only work well when coil sensitivities are very
-    well separated/distinct.  If coil sensitivities are similar,
-    operators perform poorly.
-
-    References
-    ----------
-    .. [1] Griswold, Mark A., et al. "Parallel magnetic resonance
-           imaging using the GRAPPA operator formalism." Magnetic
-           resonance in medicine 54.6 (2005): 1553-1556.
-
+    GRAPPA Operator Gridding (GROG) interpolator class.
+    
+    This class handles the creation of GROG interpolation plans and
+    their application to non-Cartesian k-space data.
     """
-    if isinstance(input, np.ndarray):
-        isnumpy = True
-    else:
-        isnumpy = False
-        input = torch.as_tensor(input)
-
-    # get device
-    if device is None:
-        device = input.device
-
-    # cast everything
-    idevice = input.device
-    input = input.to(device)
-    coord = torch.as_tensor(coord, device=device)
-    calib = torch.as_tensor(calib, device=device)
-
-    # default to odds steps to explicitly have 0
-    nsteps = 2 * (nsteps // 2) + 1
-
-    # get number of spatial dimes
-    ndim = coord.shape[-1]
-
-    # get grappa operator
-    kern = _calc_grappaop(calib, ndim, lamda, device)
-        
-    # get coord shape
-    cshape = coord.shape
-
-    # reshape coordinates
-    ishape = input.shape
-    input = input.reshape(*ishape[: -(len(cshape) - 1)], int(np.prod(cshape[:-1])))
-
-    # bring coil axes to the front
-    input = input[..., None]
-    input = input.swapaxes(-3, -1)
-    dshape = input.shape
-    input = input.reshape(
-        -1, *input.shape[-2:]
-    )  # (nslices, nsamples, ncoils) or (nsamples, ncoils)
-
-    # perform product
-    deltas = (torch.arange(nsteps) - (nsteps - 1) // 2) / (nsteps - 1)
-
-    # get Gx, Gy, Gz
-    Gx = _weight_grid(kern.Gx, deltas)  # 2D: (nsteps, nslices, nc, nc); 3D: (nsteps, nc, nc)
-    Gy = _weight_grid(kern.Gy, deltas)  # 2D: (nsteps, nslices, nc, nc); 3D: (nsteps, nc, nc)
     
-    if ndim == 3:
-        Gz = _weight_grid(kern.Gz, deltas)  # (nsteps, nc, nc), 3D only
-    else:
-        Gz = None
+    def __init__(
+        self,
+        coords,
+        shape,
+        oversamp=1.0,
+        precision=1,
+        weighting_mode="count",
+    ):
+        """
+        Create a new GROG interpolator with trajectory information.
+        
+        Parameters
+        ----------
+        coords : np.ndarray
+            Fourier domain coordinates array of shape ``(stack1...stackN, view, readouts, ndims)``.
+        shape : list[int] | tuple[int, ...]
+            Cartesian grid size of shape ``(ndim,)``.
+        oversamp : float | list[float] | tuple[float, ...], optional
+            Cartesian grid oversampling factor. The default is ``1.0``
+        precision : int, optional
+            Number of decimal digits in GROG kernel power. The default is ``1``.
+            This determines the number of steps (nsteps = 2*10^precision + 1)
+        weighting_mode : str, optional
+            Method for weighting samples. Options are:
+            - 'count': inverse of counts per grid point (default)
+            - 'distance': weighting based on distance from grid point
+        """
+        # Store configuration parameters
+        self.coords = coords
+        self.original_coord_shape = coords.shape
+        self.shape = shape
+        self.oversamp = oversamp
+        self.precision = precision
+        self.weighting_mode = weighting_mode
+        
+        if weighting_mode not in ["count", "distance"]:
+            raise ValueError("weighting_mode must be either 'count' or 'distance'")
+        
+        # calculate interpolation stepsize based on precision
+        pfac = 10.0**precision
+        radius = 0.5  # maximum shift is 0.5 in either direction
+        self.radius = np.ceil(pfac * radius) / pfac
+        self.nsteps = int(2 * self.radius / 10**(-precision) + 1)  # ensure odd number
+        
+        # Create the trajectory-based part of the plan
+        self.plan = self._create_trajectory_plan()
+        
+        # Initialize runtime attributes
+        self._grog_table = None
+        self._kernels_set = False
+        
+    def set_kernels(self, grappa_kernels):
+        """
+        Set the GRAPPA kernels and compute the GROG table for interpolation.
+        
+        Parameters
+        ----------
+        grappa_kernels : dict
+            Dictionary of GRAPPA kernels with keys 'x', 'y', and optionally 'z'
+            for 3D interpolation.
+        """
+        # Check required keys in kernels
+        ndim = self.plan["ndim"]
+        if "x" not in grappa_kernels or "y" not in grappa_kernels:
+            raise ValueError("GRAPPA kernels must include 'x' and 'y' operators")
+        if ndim == 3 and "z" not in grappa_kernels:
+            raise ValueError("3D interpolation requires 'z' operator in GRAPPA kernels")
+            
+        # Get number of coils from kernels
+        n_coils = grappa_kernels["x"].shape[0]
+            
+        # compute exponentials
+        nsteps = self.nsteps
+        deltas = (np.arange(nsteps) - (nsteps - 1) // 2) / (nsteps - 1)
+        
+        # pre-compute partial operators
+        Dx = _grog_power(grappa_kernels["x"], deltas)  # (nsteps, nc, nc)
+        Dy = _grog_power(grappa_kernels["y"], deltas)  # (nsteps, nc, nc)
+        if "z" in grappa_kernels and grappa_kernels["z"] is not None:
+            Dz = _grog_power(grappa_kernels["z"], deltas)  # (nsteps, nc, nc), 3D only
+        else:
+            Dz = None
+            
+        # Compute grog table
+        self._grog_table = _prepare_grog_table(Dx, Dy, Dz, nsteps, ndim)
+        self._n_coils = n_coils
+        self._kernels_set = True
+    
+    def __call__(self, input_data, shot_index=None):
+        """
+        Apply the GROG interpolation to input data.
+        
+        Parameters
+        ----------
+        input_data : np.ndarray
+            Input Non-Cartesian kspace data. When shot_index is None,
+            shape should be (..., ncoils). When shot_index is provided,
+            shape should be (readouts, ncoils) for a single shot.
+            
+        shot_index : tuple or int, optional
+            Index of the shot to process. If provided, only interpolates
+            data for this specific shot. Default is None (process all data).
+        
+        Returns
+        -------
+        output : np.ndarray
+            Output sparse Cartesian kspace with same shape as input.
+        indexes : np.ndarray
+            Sampled k-space points indexes with shape (..., ndim).
+        weights : np.ndarray
+            Sample weights with shape (..., 1).
+        """
+        if not self._kernels_set:
+            raise RuntimeError("GRAPPA kernels have not been set. Call set_kernels() first.")
+        
+        # Extract plan components
+        coord = self.plan["coord"]
+        shape = self.plan["shape"]
+        ndim = self.plan["ndim"]
+        nsteps = self.plan["nsteps"]
+        
+        if shot_index is not None:
+            # Process single shot
+            return self._process_single_shot(input_data, shot_index, coord, shape, ndim, nsteps)
+        else:
+            # Process entire dataset
+            return self._process_full_dataset(input_data, coord, shape, ndim, nsteps)
+    
+    def _process_single_shot(self, shot_data, shot_index, coord, shape, ndim, nsteps):
+        """
+        Process a single shot for GROG interpolation.
+        
+        Parameters
+        ----------
+        shot_data : np.ndarray
+            Data for a single shot with shape (readouts, ncoils).
+        shot_index : tuple or int
+            Index of the shot in the trajectory.
+        coord : np.ndarray
+            Coordinates array.
+        shape : tuple
+            Output shape.
+        ndim : int
+            Number of dimensions.
+        nsteps : int
+            Number of interpolation steps.
+            
+        Returns
+        -------
+        output : np.ndarray
+            Interpolated data for the shot with same shape as input.
+        indexes : np.ndarray
+            Grid indexes for the shot with shape (readouts, ndim).
+        weights : np.ndarray
+            Weights for the shot with shape (readouts, 1).
+        """
+        # Convert shot_index to tuple if it's an integer
+        if isinstance(shot_index, int):
+            shot_index = (shot_index,)
+        
+        # Calculate the flat index for this shot
+        coord_shape = self.original_coord_shape[:-1]  # Exclude coordinate dimension
+        
+        # For readout-only case, adjust shot_index handling
+        if len(shot_index) < len(coord_shape) - 1:  # -1 for readouts dimension
+            # Incomplete index provided, assume it's for views/batches
+            remaining_dims = len(coord_shape) - len(shot_index) - 1  # -1 for readouts
+            shot_index = shot_index + (0,) * remaining_dims
+        
+        # Calculate multidimensional index without readouts
+        multi_index = shot_index + (slice(None),)
+        
+        # Get coordinates for this shot
+        shot_coord = self.coords[multi_index]
+        
+        # Build indexes by rounding coordinates
+        indexes = np.round(shot_coord).astype(int)
+        
+        # Calculate displacements from grid points
+        displacements = indexes - shot_coord
+        
+        # Convert displacements to table indices
+        lut = np.floor(10 * displacements).astype(int) + int(nsteps // 2)
+        lut_flat = _flatten_lut(lut, nsteps)
+        
+        # Reshape input to match interpolation format
+        input_reshaped = shot_data.reshape(-1, 1, shot_data.shape[-1])  # (nsamples, 1, ncoils)
+        
+        # Create output array
+        output = np.zeros_like(input_reshaped)
+        
+        # Perform interpolation
+        _interp(output, input_reshaped, self._grog_table, lut_flat)
+        
+        # Remove batch dimension
+        output = output[:, 0, :]  # (nsamples, ncoils)
+        
+        # Adjust indexes for the output grid
+        if np.isscalar(shape):
+            shape = [shape] * ndim
+        indexes = indexes + np.array(shape[:ndim][::-1]) // 2
+        indexes = indexes.astype(int)
+        
+        # Ensure bounds are within grid
+        for n in range(ndim):
+            outside = indexes[..., n] < 0
+            output[outside] = 0.0
+            indexes[..., n][outside] = 0
+            outside = indexes[..., n] >= shape[::-1][n]
+            indexes[..., n][outside] = shape[::-1][n] - 1
+            output[outside] = 0.0
+        
+        # Calculate weights
+        if self.weighting_mode == "count":
+            # Create flat index for unique counting
+            unfolding = [1] + list(np.cumprod(list(shape)[::-1]))[: ndim - 1]
+            flattened_idx = np.sum(indexes * np.array(unfolding, dtype=int)[:, np.newaxis], axis=1)
+            
+            # Count-based weights - inverse of occurrence count
+            unique_idx, inverse, counts = np.unique(flattened_idx, return_inverse=True, return_counts=True)
+            weights = 1 / counts[inverse]
+        else:  # distance-based
+            # Distance-based weights - closer samples get higher weights
+            distances = np.sqrt(np.sum(displacements**2, axis=-1))
+            
+            # Invert distances to get weights (closer = higher weight)
+            epsilon = 1e-10
+            distance_weights = 1.0 / (distances + epsilon)
+            
+            # Create flat index for unique grouping
+            unfolding = [1] + list(np.cumprod(list(shape)[::-1]))[: ndim - 1]
+            flattened_idx = np.sum(indexes * np.array(unfolding, dtype=int)[:, np.newaxis], axis=1)
+            
+            # Group by target grid point
+            unique_idx, inverse = np.unique(flattened_idx, return_inverse=True)
+            
+            # Initialize weights array
+            weights = np.zeros_like(distances)
+            
+            # For each unique grid point
+            for i, idx in enumerate(unique_idx):
+                # Get the indices of samples that map to this grid point
+                mask = (flattened_idx == idx)
+                
+                # Calculate normalized weights for this group
+                group_weights = distance_weights[mask]
+                norm_factor = np.sum(group_weights)
+                if norm_factor > 0:
+                    group_weights = group_weights / norm_factor
+                
+                # Assign the normalized weights
+                weights[mask] = group_weights
+        
+        # Reshape weights to have shape (..., 1)
+        weights = weights[..., np.newaxis]
+        
+        return output, indexes, weights
+    
+    def _process_full_dataset(self, input_data, coord, shape, ndim, nsteps):
+        """
+        Process the entire dataset for GROG interpolation.
+        
+        Parameters
+        ----------
+        input_data : np.ndarray
+            Full dataset with shape (..., ncoils).
+        coord : np.ndarray
+            Coordinates array.
+        shape : tuple
+            Output shape.
+        ndim : int
+            Number of dimensions.
+        nsteps : int
+            Number of interpolation steps.
+            
+        Returns
+        -------
+        output : np.ndarray
+            Interpolated data with same shape as input.
+        indexes : np.ndarray
+            Grid indexes with shape (..., ndim).
+        weights : np.ndarray
+            Weights with shape (..., 1).
+        """
+        # Store original data shape for reshaping output
+        original_shape = input_data.shape
+        
+        # Reshape input for processing
+        ncoils = original_shape[-1]
+        input_flattened = input_data.reshape(-1, ncoils)
+        
+        # Add a dummy batch dimension
+        input_reshaped = input_flattened[:, np.newaxis, :]  # (nsamples, 1, ncoils)
+        
+        # Build indexes by rounding coordinates
+        coord_flat = coord.reshape(-1, ndim)
+        indexes_flat = np.round(coord_flat).astype(int)
+        
+        # Calculate displacements from grid points
+        displacements_flat = indexes_flat - coord_flat
+        
+        # Convert displacements to table indices
+        lut = np.floor(10 * displacements_flat).astype(int) + int(nsteps // 2)
+        lut_flat = _flatten_lut(lut, nsteps)
+        
+        # Create output array
+        output_flat = np.zeros_like(input_reshaped)
+        
+        # Perform interpolation
+        _interp(output_flat, input_reshaped, self._grog_table, lut_flat)
+        
+        # Remove batch dimension
+        output_flat = output_flat[:, 0, :]  # (nsamples, ncoils)
+        
+        # Adjust indexes for the output grid
+        if np.isscalar(shape):
+            shape = [shape] * ndim
+        indexes_flat = indexes_flat + np.array(shape[:ndim][::-1]) // 2
+        indexes_flat = indexes_flat.astype(int)
+        
+        # Calculate weights
+        if self.weighting_mode == "count":
+            # Create flat index for unique counting
+            unfolding = [1] + list(np.cumprod(list(shape)[::-1]))[: ndim - 1]
+            flattened_idx = np.sum(indexes_flat * np.array(unfolding, dtype=int), axis=1)
+            
+            # Count-based weights - inverse of occurrence count
+            unique_idx, inverse, counts = np.unique(flattened_idx, return_inverse=True, return_counts=True)
+            weights_flat = 1 / counts[inverse]
+        else:  # distance-based
+            # Distance-based weights - closer samples get higher weight
+            distances = np.sqrt(np.sum(displacements_flat**2, axis=1))
+            
+            # Invert distances to get weights (closer = higher weight)
+            epsilon = 1e-10
+            distance_weights = 1.0 / (distances + epsilon)
+            
+            # Create flat index for unique grouping
+            unfolding = [1] + list(np.cumprod(list(shape)[::-1]))[: ndim - 1]
+            flattened_idx = np.sum(indexes_flat * np.array(unfolding, dtype=int), axis=1)
+            
+            # Group by target grid point
+            unique_idx, inverse = np.unique(flattened_idx, return_inverse=True)
+            
+            # Initialize weights array
+            weights_flat = np.zeros_like(distances)
+            
+            # For each unique grid point
+            for i, idx in enumerate(unique_idx):
+                # Get the indices of samples that map to this grid point
+                mask = (flattened_idx == idx)
+                
+                # Calculate normalized weights for this group
+                group_weights = distance_weights[mask]
+                norm_factor = np.sum(group_weights)
+                if norm_factor > 0:
+                    group_weights = group_weights / norm_factor
+                
+                # Assign the normalized weights
+                weights_flat[mask] = group_weights
+        
+        # Ensure bounds are within grid
+        for n in range(ndim):
+            outside = indexes_flat[:, n] < 0
+            output_flat[outside] = 0.0
+            indexes_flat[outside, n] = 0
+            outside = indexes_flat[:, n] >= shape[::-1][n]
+            indexes_flat[outside, n] = shape[::-1][n] - 1
+            output_flat[outside] = 0.0
+        
+        # Reshape outputs back to original shapes
+        output = output_flat.reshape(original_shape)
+        indexes = indexes_flat.reshape(self.original_coord_shape)
+        
+        # Add extra dimension to weights
+        weights_flat = weights_flat[..., np.newaxis]
+        weights = weights_flat.reshape(self.original_coord_shape[:-1] + (1,))
+        
+        return output, indexes, weights
+    
+    def _create_trajectory_plan(self):
+        """
+        Create the trajectory-dependent part of a GROG interpolation plan.
+            
+        Returns
+        -------
+        plan : dict
+            A dictionary containing trajectory-dependent information for interpolation.
+        """
+        coords = self.coords
+        shape = self.shape
+        oversamp = self.oversamp
+        nsteps = self.nsteps
+        
+        # Get dimensions from coords
+        ndim = coords.shape[-1]
+        
+        # expand oversamp
+        if np.isscalar(oversamp):
+            oversamp = tuple(ndim * [oversamp])
+        elif len(oversamp) == 1:
+            oversamp = tuple(ndim * oversamp[0])
+        else:
+            oversamp = tuple(oversamp)
+            
+        # Rescale coordinates for oversampling
+        rescaled_coords = np.copy(coords)
+        for i in range(ndim):
+            rescaled_coords[..., i] *= oversamp[i]
+        
+        # Create plan dictionary
+        plan = {
+            "coord": rescaled_coords,
+            "shape": shape,
+            "oversamp": oversamp,
+            "nsteps": nsteps,
+            "ndim": ndim,
+        }
+        
+        return plan
 
-    # build G
+
+# Utility functions
+def _flatten_lut(lut, nsteps):
+    """Flatten LUT indices based on dimensionality."""
+    ndim = lut.shape[-1]
     if ndim == 2:
-        Gx = Gx[None, ...]
-        Gy = Gy[:, None, ...]
-        Gx = np.repeat(Gx, nsteps, axis=0) # (nsteps, nsteps, nslices, nc, nc)
-        Gy = np.repeat(Gy, nsteps, axis=1) # (nsteps, nsteps, nslices, nc, nc)
-        Gx = Gx.reshape(-1, *Gx.shape[-3:]) # (nsteps**2, nslices, nc, nc)
-        Gy = Gy.reshape(-1, *Gy.shape[-3:]) # (nsteps**2, nslices, nc, nc)
-        G = Gx @ Gy # (nsteps**2, nslices, nc, nc)
+        return lut[..., 0] + lut[..., 1] * nsteps
+    else:  # ndim == 3
+        return lut[..., 0] + lut[..., 1] * nsteps + lut[..., 2] * nsteps**2
+
+
+def _prepare_grog_table(Dx, Dy, Dz, nsteps, ndim):
+    """Prepare the GROG operator table."""
+    # Convert to numpy arrays
+    Dx = np.asarray(Dx)
+    Dy = np.asarray(Dy)
+    
+    if ndim == 2:
+        # 2D case
+        Dx = Dx[None, :, ...]  # (1, nsteps, nc, nc)
+        Dy = Dy[:, None, ...]  # (nsteps, 1, nc, nc)
+        Dx = np.repeat(Dx, nsteps, axis=0)  # (nsteps, nsteps, nc, nc)
+        Dy = np.repeat(Dy, nsteps, axis=1)  # (nsteps, nsteps, nc, nc)
+        Dx = Dx.reshape(-1, *Dx.shape[-2:])  # (nsteps**2, nc, nc)
+        Dy = Dy.reshape(-1, *Dy.shape[-2:])  # (nsteps**2, nc, nc)
+        grog_table = Dx @ Dy  # (nsteps**2, nc, nc)
+        
     elif ndim == 3:
-        Gx = Gx[None, None, ...]
-        Gy = Gy[None, :, None, ...]
-        Gz = Gz[:, None, None, ...]
-        Gx = np.repeat(Gx, nsteps, axis=0) # (nsteps, nsteps, nsteps, nc, nc)
-        Gx = np.repeat(Gx, nsteps, axis=1) # (nsteps, nsteps, nsteps, nc, nc)
-        Gy = np.repeat(Gy, nsteps, axis=0) # (nsteps, nsteps, nsteps, nc, nc)
-        Gy = np.repeat(Gy, nsteps, axis=2) # (nsteps, nsteps, nsteps, nc, nc)
-        Gz = np.repeat(Gz, nsteps, axis=1) # (nsteps, nsteps, nsteps, nc, nc)
-        Gz = np.repeat(Gz, nsteps, axis=2) # (nsteps, nsteps, nsteps, nc, nc)
-        Gx = Gx.reshape(-1, *Gx.shape[-2:]) # (nsteps**3, nc, nc)
-        Gy = Gy.reshape(-1, *Gy.shape[-2:]) # (nsteps**3, nc, nc)
-        Gz = Gz.reshape(-1, *Gz.shape[-2:]) # (nsteps**3, nc, nc)
-        G = Gx @ Gy @ Gz # (nsteps**3, nc, nc)
+        # 3D case
+        if Dz is None:
+            raise ValueError("3D interpolation requires Z operator")
         
-    # build indexes
-    indexes = torch.round(coord)
-    lut = indexes - coord
-    lut = torch.floor(10 * lut).to(int) + int(nsteps // 2)
-    lut = lut.reshape(-1, ndim)  # (nsamples, ndim)
-    lut = lut * torch.as_tensor([1, nsteps, nsteps**2])[:ndim]
-    lut = lut.sum(axis=-1)
-
-    if ndim == 2:
-        input = input.swapaxes(0, 1)  # (nsamples, nslices, ncoils)
-
-    # perform interpolation
-    if device == "cpu" or device == torch.device("cpu"):
-        output = do_interpolation(input, G, lut)
-    else:
-        output = do_interpolation_cuda(input, G, lut, threadsperblock)
-
-    # finalize indexes
-    if np.isscalar(shape):
-        shape = [shape] * ndim
-    indexes = indexes + torch.as_tensor(list(shape[-ndim:])[::-1]) // 2
-    indexes = indexes.to(int)
-
-    # flatten indexes
-    unfolding = [1] + list(np.cumprod(list(shape)[::-1]))[: ndim - 1]
-    flattened_idx = torch.as_tensor(unfolding, dtype=int) * indexes
-    flattened_idx = flattened_idx.sum(axis=-1).flatten()
-
-    # count elements
-    _, idx, counts = torch.unique(
-        flattened_idx, return_inverse=True, return_counts=True
-    )
-    weights = counts[idx]
-
-    # count
-    weights = weights.reshape(*indexes.shape[:-1])
-    weights = weights.to(torch.float32)
-    weights = 1 / weights
-
-    # finalize
-    if ndim == 2:
-        output = output.swapaxes(0, 1)  # (nslices, nsamples, ncoils)
-    output = output.reshape(*dshape)
-    output = output.swapaxes(-3, -1)
-    output = output[..., 0]
-    output = output.reshape(ishape)
-    
-    # remove out-of-boundaries
-    shape = list(shape[-ndim:])[::-1] # (x, y, z)
-    for n in range(ndim):
-        outside = indexes[..., n] < 0
-        output[..., outside] = 0.0
-        indexes[..., n][outside] = 0
-        outside = indexes[..., n] >= shape[n]
-        indexes[..., n][outside] = shape[n]-1
-        output[..., outside] = 0.0
-    
-    # cast back to original device
-    output = output.to(idevice)
-    indexes = indexes.to(idevice)
-    weights = weights.to(idevice)
-    
-    # if required, cast back to numpy
-    if isnumpy:
-        output = output.numpy(force=True)
-        indexes = indexes.to(idevice)
-        weights = weights.to(idevice)
-
-    return output, indexes, weights
-
-
-# %% subroutines
-def _calc_grappaop(calib, ndim, lamda, device):
-    # as Tensor
-    calib = torch.as_tensor(calib, device=device)
-
-    # expand
-    if len(calib.shape) == 3:  # single slice (nc, ny, nx)
-        calib = calib[:, None, :, :].clone()
-
-    # compute kernels
-    if ndim == 2:
-        gy, gx = _grappa_op_2d(calib, lamda)
-    elif ndim == 3:
-        gz, gy, gx = _grappa_op_3d(calib, lamda)
-
-    # prepare output
-    GrappaOp = SimpleNamespace(Gx=gx, Gy=gy)
-    # GrappaOp.Gx, GrappaOp.Gy = (gx.numpy(force=True), gy.numpy(force=True))
-
-    if ndim == 3:
-        GrappaOp.Gz = gz #.numpy(force=True)
-    else:
-        GrappaOp.Gz = None
-
-    return GrappaOp
-
-
-def _grappa_op_2d(calib, lamda):
-    """Return a batch of 2D GROG operators (one for each z)."""
-    # coil axis in the back
-    calib = torch.moveaxis(calib, 0, -1)
-    nz, _, _, nc = calib.shape[:]
-
-    # we need sources (last source has no target!)
-    Sy = torch.reshape(calib[:, :-1, :, :], (nz, -1, nc))
-    Sx = torch.reshape(calib[:, :, :-1, :], (nz, -1, nc))
-
-    # and we need targets for an operator along each axis (first
-    # target has no associated source!)
-    Ty = torch.reshape(calib[:, 1:, :, :], (nz, -1, nc))
-    Tx = torch.reshape(calib[:, :, 1:, :], (nz, -1, nc))
-
-    # train the operators:
-    Syh = Sy.conj().permute(0, 2, 1)
-    lamda0 = lamda * torch.linalg.norm(Syh, dim=(1, 2)) / Syh.shape[1]
-    Gy = torch.linalg.solve(
-        _bdot(Syh, Sy) + lamda0[:, None, None] * torch.eye(Syh.shape[1])[None, ...],
-        _bdot(Syh, Ty),
-    )
-
-    Sxh = Sx.conj().permute(0, 2, 1)
-    lamda0 = lamda * torch.linalg.norm(Sxh, dim=(1, 2)) / Sxh.shape[1]
-    Gx = torch.linalg.solve(
-        _bdot(Sxh, Sx) + lamda0[:, None, None] * torch.eye(Sxh.shape[1])[None, ...],
-        _bdot(Sxh, Tx),
-    )
-
-    return Gy.clone(), Gx.clone()
-
-
-def _grappa_op_3d(calib, lamda):
-    """Return 3D GROG operator."""
-    # coil axis in the back
-    calib = torch.moveaxis(calib, 0, -1)
-    _, _, _, nc = calib.shape[:]
-
-    # we need sources (last source has no target!)
-    Sz = torch.reshape(calib[:-1, :, :, :], (-1, nc))
-    Sy = torch.reshape(calib[:, :-1, :, :], (-1, nc))
-    Sx = torch.reshape(calib[:, :, :-1, :], (-1, nc))
-
-    # and we need targets for an operator along each axis (first
-    # target has no associated source!)
-    Tz = torch.reshape(calib[1:, :, :, :], (-1, nc))
-    Ty = torch.reshape(calib[:, 1:, :, :], (-1, nc))
-    Tx = torch.reshape(calib[:, :, 1:, :], (-1, nc))
-
-    # train the operators:
-    Szh = Sz.conj().permute(1, 0)
-    lamda0 = lamda * torch.linalg.norm(Szh) / Szh.shape[0]
-    Gz = torch.linalg.solve(Szh @ Sz + lamda0 * torch.eye(Szh.shape[0]), Szh @ Tz)
-
-    Syh = Sy.conj().permute(1, 0)
-    lamda0 = lamda * torch.linalg.norm(Syh) / Syh.shape[0]
-    Gy = torch.linalg.solve(Syh @ Sy + lamda0 * torch.eye(Syh.shape[0]), Syh @ Ty)
-
-    Sxh = Sx.conj().permute(1, 0)
-    lamda0 = lamda * torch.linalg.norm(Sxh) / Sxh.shape[0]
-    Gx = torch.linalg.solve(Sxh @ Sx + lamda0 * torch.eye(Sxh.shape[0]), Sxh @ Tx)
-
-    return Gz.clone(), Gy.clone(), Gx.clone()
-
-
-def _bdot(a, b):
-    return torch.einsum("...ij,...jk->...ik", a, b)
-
-
-def _weight_grid(A, weight):
-    # decompose
-    L, V = torch.linalg.eig(A)
-    
-    # raise to power along expanded first dim
-    if len(L.shape) == 2: # 3D case, (nc, nc)
-        L = L[None, ...]**weight[:, None, None]
-    else: # 2D case, (nslices, nc, nc)
-        L = L[None, ...]**weight[:, None, None, None]
-    
-    # unsqueeze batch dimension for V
-    V = V[None, ...]
+        Dz = np.asarray(Dz)
+        Dx = Dx[None, None, :, ...]  # (1, 1, nsteps, nc, nc)
+        Dy = Dy[None, :, None, ...]  # (1, nsteps, 1, nc, nc)
+        Dz = Dz[:, None, None, ...]  # (nsteps, 1, 1, nc, nc)
         
-    # put together and return
-    return V @ torch.diag_embed(L) @ torch.linalg.inv(V)
+        # Repeat to create a grid of all combinations
+        Dx = np.repeat(Dx, nsteps, axis=0)  # (nsteps, 1, nsteps, nc, nc)
+        Dx = np.repeat(Dx, nsteps, axis=1)  # (nsteps, nsteps, nsteps, nc, nc)
+        Dy = np.repeat(Dy, nsteps, axis=0)  # (nsteps, nsteps, 1, nc, nc)
+        Dy = np.repeat(Dy, nsteps, axis=2)  # (nsteps, nsteps, nsteps, nc, nc)
+        Dz = np.repeat(Dz, nsteps, axis=1)  # (nsteps, nsteps, 1, nc, nc)
+        Dz = np.repeat(Dz, nsteps, axis=2)  # (nsteps, nsteps, nsteps, nc, nc)
+        
+        # Reshape to flat combinations
+        Dx = Dx.reshape(-1, *Dx.shape[-2:])  # (nsteps**3, nc, nc)
+        Dy = Dy.reshape(-1, *Dy.shape[-2:])  # (nsteps**3, nc, nc)
+        Dz = Dz.reshape(-1, *Dz.shape[-2:])  # (nsteps**3, nc, nc)
+        
+        # Combine all operators
+        grog_table = Dx @ Dy @ Dz  # (nsteps**3, nc, nc)
+    
+    else:
+        raise ValueError(f"GROG interpolation only supports 2D or 3D data, got {ndim}D")
+        
+    return grog_table
 
-# def _weight_grid(A, weight):
-#     return np.stack([_matrix_power(A, w) for w in weight], axis=0)
 
+def _grog_power(G, exponents):
+    """Compute matrix powers of GROG operators."""
+    D, idx = [], 0
+    for exp in exponents:
+        if np.isclose(exp, 0.0):
+            _D = np.eye(G.shape[0], dtype=G.dtype)
+        else:
+            _D = fmp(G, np.abs(exp)).astype(G.dtype)
+            if np.sign(exp) < 0:
+                _D = np.linalg.pinv(_D).astype(G.dtype)
+        D.append(_D)
+        idx += 1
 
-# def _matrix_power(A, t):
-#     if len(A.shape) == 2:
-#         return scipy.linalg.fractional_matrix_power(A, t)
-#     else:
-#         return np.stack([scipy.linalg.fractional_matrix_power(a, t) for a in A])
-
-
-def do_interpolation(noncart, G, lut):
-    cart = torch.zeros(noncart.shape, dtype=noncart.dtype, device=noncart.device)
-    cart = backend.pytorch2numba(cart)
-    G = backend.pytorch2numba(G)
-    noncart = backend.pytorch2numba(noncart)
-    lut = backend.pytorch2numba(lut)
-
-    _interp(cart, noncart, G, lut)
-
-    noncart = backend.numba2pytorch(noncart)
-    G = backend.numba2pytorch(G)
-    cart = backend.numba2pytorch(cart)
-    lut = backend.numba2pytorch(lut)
-
-    return cart
-
+    return np.stack(D, axis=0)
 
 @nb.njit(fastmath=True, cache=True)  # pragma: no cover
 def _dot_product(out, in_a, in_b):
+    """Matrix-vector multiplication helper."""
     row, col = in_b.shape
-
     for i in range(row):
         for j in range(col):
             out[j] += in_b[i][j] * in_a[j]
-
     return out
 
 
 @nb.njit(fastmath=True, parallel=True)  # pragma: no cover
 def _interp(data_out, data_in, interp, lut):
-    # get data dimension
+    """Numba-optimized interpolation kernel."""
     nsamples, batch_size, _ = data_in.shape
-
     for i in nb.prange(nsamples * batch_size):
         sample = i // batch_size
         batch = i % batch_size
         idx = lut[sample]
-
         _dot_product(
-            data_out[sample][batch], data_in[sample][batch], interp[idx][batch]
+            data_out[sample][batch], data_in[sample][batch], interp[idx]
         )
-
-
-# %% CUDA
-if torch.cuda.is_available():
-    from numba import cuda
-
-    def do_interpolation_cuda(noncart, G, lut, threadsperblock):
-        # calculate size
-        nsamples, batch_size, ncoils = noncart.shape
-
-        # define number of blocks
-        blockspergrid = (
-            (nsamples * batch_size) + (threadsperblock - 1)
-        ) // threadsperblock
-
-        cart = torch.zeros(noncart.shape, dtype=noncart.dtype, device=noncart.device)
-        cart = backend.pytorch2numba(cart)
-        G = backend.pytorch2numba(G)
-        noncart = backend.pytorch2numba(noncart)
-        lut = backend.pytorch2numba(lut)
-
-        # run kernel
-        _interp_cuda[blockspergrid, threadsperblock](cart, noncart, G, lut)
-
-        noncart = backend.numba2pytorch(noncart)
-        G = backend.numba2pytorch(G)
-        cart = backend.numba2pytorch(cart)
-        lut = backend.numba2pytorch(lut)
-
-        return cart
-
-    @cuda.jit(device=True, inline=True)  # pragma: no cover
-    def _dot_product_cuda(out, in_a, in_b):
-        row, col = in_b.shape
-
-        for i in range(row):
-            for j in range(col):
-                out[j] += in_b[i][j] * in_a[j]
-
-        return out
-
-    @cuda.jit(fastmath=True)  # pragma: no cover
-    def _interp_cuda(data_out, data_in, interp, lut):
-        # get data dimension
-        nvoxels, batch_size, _ = data_in.shape
-
-        i = nb.cuda.grid(1)
-        if i < nvoxels * batch_size:
-            sample = i // batch_size
-            batch = i % batch_size
-            idx = lut[sample]
-
-            _dot_product_cuda(
-                data_out[sample][batch], data_in[sample][batch], interp[idx][batch]
-            )
-
-
