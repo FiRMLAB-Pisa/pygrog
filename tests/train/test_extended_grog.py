@@ -1,9 +1,12 @@
 """Test Extended GROG interpolator."""
 
-import pytest
-import numpy as np
-import tempfile
 import os
+import tempfile
+
+import numpy as np
+import pytest
+
+from numpy.testing import assert_allclose
 
 from pygrog.grog import _ExtendedGrogInterpolator
 
@@ -49,7 +52,7 @@ def test_apply_interpolation(identity_interpolator, cartesian_2d_data):
     output, indices = grog(data)
     
     # With identity matrices and Cartesian coordinates, output should preserve signal
-    assert np.allclose(np.sum(np.abs(output)), np.sum(np.abs(data)), rtol=1e-1)
+    assert_allclose(np.sum(np.abs(output)), np.sum(np.abs(data)), rtol=1e-1)
     
     # Check that indices were returned
     assert indices.shape[0] == output.shape[0]
@@ -109,7 +112,7 @@ def test_save_load_set_kernels_workflow(identity_interpolator, cartesian_2d_data
         # Test interpolation
         output, indices = loaded_grog(data)
         assert output.shape[0] > 0
-        assert np.allclose(np.sum(np.abs(output)), np.sum(np.abs(data)), rtol=1e-1)
+        assert_allclose(np.sum(np.abs(output)), np.sum(np.abs(data)), rtol=1e-1)
 
 
 def test_missing_kernels(cartesian_2d_data):
@@ -218,7 +221,7 @@ def test_shot_by_shot_processing(identity_interpolator):
     shot_sum = sum(np.sum(np.abs(output)) for output in shot_outputs)
     
     # Check that total signal is preserved
-    assert np.isclose(whole_sum, shot_sum, rtol=1e-2)
+    assert_allclose(whole_sum, shot_sum, rtol=1e-2)
 
 
 def test_3d_interpolation(identity_interpolator_3d, cartesian_3d_data):
@@ -237,7 +240,7 @@ def test_3d_interpolation(identity_interpolator_3d, cartesian_3d_data):
     output, indices = grog(data)
     
     # With identity matrices and Cartesian coordinates, output should preserve signal
-    assert np.allclose(np.sum(np.abs(output)), np.sum(np.abs(data)), rtol=1e-1)
+    assert_allclose(np.sum(np.abs(output)), np.sum(np.abs(data)), rtol=1e-1)
     
     # Check that we have 3D indices
     assert indices.shape[1] == 1  # Just the grid index since no stack axes
@@ -350,7 +353,7 @@ def test_different_oversamp(identity_interpolator, cartesian_2d_data):
     assert grog.output_shape[1] >= shape[1] * 1.9
     
     # Check that signal is preserved
-    assert np.allclose(np.sum(np.abs(output)) / 2.0**2, np.sum(np.abs(data)), rtol=1e-1)
+    assert_allclose(np.sum(np.abs(output)) / 2.0**2, np.sum(np.abs(data)), rtol=1e-1)
     
     # Test with different oversampling per dimension
     grog2 = _ExtendedGrogInterpolator(
@@ -390,8 +393,8 @@ def test_different_weighting(identity_interpolator, cartesian_2d_data):
     output_average, _ = grog_average(data)
     
     # Both should preserve signal sum, though individual values might differ
-    assert np.allclose(np.sum(np.abs(output_distance)), np.sum(np.abs(data)), rtol=1e-1)
-    assert np.allclose(np.sum(np.abs(output_average)), np.sum(np.abs(data)), rtol=1e-1)
+    assert_allclose(np.sum(np.abs(output_distance)), np.sum(np.abs(data)), rtol=1e-1)
+    assert_allclose(np.sum(np.abs(output_average)), np.sum(np.abs(data)), rtol=1e-1)
 
 
 def test_kernel_setting_workflow():
@@ -435,4 +438,4 @@ def test_kernel_setting_workflow():
         
         # Check output
         assert output.shape[0] > 0
-        assert np.allclose(np.sum(np.abs(output)), np.sum(np.abs(data)), rtol=1e-1)
+        assert_allclose(np.sum(np.abs(output)), np.sum(np.abs(data)), rtol=1e-1)
