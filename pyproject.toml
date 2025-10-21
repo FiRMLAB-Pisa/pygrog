@@ -154,7 +154,7 @@ pythonpath  = ["tests"]
 testpaths=["tests"]
 addopts = [
     "--import-mode=importlib",
-    "--cov=pulserver_interpreter",
+    "--cov=pygrog",
     "--cov-report=term-missing",
     "--cov-report=xml"
 ]

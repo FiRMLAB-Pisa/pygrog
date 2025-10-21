@@ -33,8 +33,8 @@ def cartesian_2d_data():
     
     # Create Cartesian coordinates
     x, y = np.meshgrid(
-        np.linspace(-0.5, 0.5, matrix_size),
-        np.linspace(-0.5, 0.5, matrix_size),
+        np.arange(-matrix_size // 2, matrix_size // 2) / matrix_size,
+        np.arange(-matrix_size // 2, matrix_size // 2) / matrix_size,
         indexing='ij'
     )
     coords = np.stack([y.flatten(), x.flatten()], axis=-1)
@@ -53,9 +53,9 @@ def cartesian_3d_data():
     
     # Create Cartesian coordinates
     x, y, z = np.meshgrid(
-        np.linspace(-0.5, 0.5, matrix_size),
-        np.linspace(-0.5, 0.5, matrix_size),
-        np.linspace(-0.5, 0.5, matrix_size),
+        np.arange(-matrix_size // 2, matrix_size // 2) / matrix_size,
+        np.arange(-matrix_size // 2, matrix_size // 2) / matrix_size,
+        np.arange(-matrix_size // 2, matrix_size // 2) / matrix_size,
         indexing='ij'
     )
     coords = np.stack([z.flatten(), y.flatten(), x.flatten()], axis=-1)
@@ -64,49 +64,3 @@ def cartesian_3d_data():
     data = np.ones((matrix_size**3, n_coils), dtype=np.complex64)
     
     return data, coords, (matrix_size, matrix_size, matrix_size)
-
-
-@pytest.fixture
-def uniform_2d_data():
-    """Create uniform 2D data filled with ones."""
-    # 3 views, 4 readouts, 4 coils
-    return np.ones((3, 4, 4), dtype=np.complex64)
-
-
-@pytest.fixture
-def uniform_3d_data():
-    """Create uniform 3D data filled with ones."""
-    # 2 slices, 3 views, 4 readouts, 4 coils
-    return np.ones((2, 3, 4, 4), dtype=np.complex64)
-
-
-@pytest.fixture
-def cartesian_2d_coords():
-    """Create 2D coordinates exactly on a Cartesian grid."""
-    matrix_size = 16
-
-    # Create Cartesian coordinates
-    x, y = np.meshgrid(
-        np.linspace(-0.5, 0.5, matrix_size),
-        np.linspace(-0.5, 0.5, matrix_size),
-        indexing='ij'
-    )
-    coords = np.stack([y.flatten(), x.flatten()], axis=-1)
-    return coords
-
-
-@pytest.fixture
-def cartesian_3d_coords():
-    """Create 3D coordinates exactly on a Cartesian grid."""
-    matrix_size = 8  # Smaller for 3D to keep test fast
-    
-    # Create Cartesian coordinates
-    x, y, z = np.meshgrid(
-        np.linspace(-0.5, 0.5, matrix_size),
-        np.linspace(-0.5, 0.5, matrix_size),
-        np.linspace(-0.5, 0.5, matrix_size),
-        indexing='ij'
-    )
-    coords = np.stack([z.flatten(), y.flatten(), x.flatten()], axis=-1)
-    
-    return coords

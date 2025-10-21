@@ -7,6 +7,8 @@ import numba as nb
 
 from scipy.linalg import fractional_matrix_power as fmp
 
+from ._utils import rescale_coords
+
 class _GrogInterpolator:
     """
     GRAPPA Operator Gridding (GROG) interpolator class.
@@ -126,24 +128,19 @@ class _GrogInterpolator:
             Sampled k-space points indexes with shape (..., ndim).
         weights : np.ndarray
             Sample weights with shape (..., 1).
+            
         """
         if not self._kernels_set:
             raise RuntimeError("GRAPPA kernels have not been set. Call set_kernels() first.")
-        
-        # Extract plan components
-        coord = self.plan["coord"]
-        shape = self.plan["shape"]
-        ndim = self.plan["ndim"]
-        nsteps = self.plan["nsteps"]
-        
+                
         if shot_index is not None:
             # Process single shot
-            return self._process_single_shot(input_data, shot_index, coord, shape, ndim, nsteps)
+            return self._process_single_shot(input_data, shot_index)
         else:
             # Process entire dataset
-            return self._process_full_dataset(input_data, coord, shape, ndim, nsteps)
+            return self._process_full_dataset(input_data)
     
-    def _process_single_shot(self, shot_data, shot_index, coord, shape, ndim, nsteps):
+    def _process_single_shot(self, shot_data, shot_index):
         """
         Process a single shot for GROG interpolation.
         
@@ -153,14 +150,6 @@ class _GrogInterpolator:
             Data for a single shot with shape (readouts, ncoils).
         shot_index : tuple or int
             Index of the shot in the trajectory.
-        coord : np.ndarray
-            Coordinates array.
-        shape : tuple
-            Output shape.
-        ndim : int
-            Number of dimensions.
-        nsteps : int
-            Number of interpolation steps.
             
         Returns
         -------
@@ -170,38 +159,18 @@ class _GrogInterpolator:
             Grid indexes for the shot with shape (readouts, ndim).
         weights : np.ndarray
             Weights for the shot with shape (readouts, 1).
+            
         """
         # Convert shot_index to tuple if it's an integer
         if isinstance(shot_index, int):
             shot_index = (shot_index,)
-        
-        # Calculate the flat index for this shot
-        coord_shape = self.original_coord_shape[:-1]  # Exclude coordinate dimension
-        
-        # For readout-only case, adjust shot_index handling
-        if len(shot_index) < len(coord_shape) - 1:  # -1 for readouts dimension
-            # Incomplete index provided, assume it's for views/batches
-            remaining_dims = len(coord_shape) - len(shot_index) - 1  # -1 for readouts
-            shot_index = shot_index + (0,) * remaining_dims
-        
-        # Calculate multidimensional index without readouts
-        multi_index = shot_index + (slice(None),)
-        
-        # Get coordinates for this shot
-        shot_coord = self.coords[multi_index]
-        
-        # Build indexes by rounding coordinates
-        indexes = np.round(shot_coord).astype(int)
-        
-        # Calculate displacements from grid points
-        displacements = indexes - shot_coord
+            
+        # Add a dummy batch dimension
+        input_reshaped = shot_data[:, np.newaxis, :]  # (nsamples, 1, ncoils)
         
         # Convert displacements to table indices
-        lut = np.floor(10 * displacements).astype(int) + int(nsteps // 2)
-        lut_flat = _flatten_lut(lut, nsteps)
-        
-        # Reshape input to match interpolation format
-        input_reshaped = shot_data.reshape(-1, 1, shot_data.shape[-1])  # (nsamples, 1, ncoils)
+        lut = self.plan["lut"][shot_index]
+        lut_flat = _flatten_lut(lut, self.nsteps)
         
         # Create output array
         output = np.zeros_like(input_reshaped)
@@ -211,69 +180,10 @@ class _GrogInterpolator:
         
         # Remove batch dimension
         output = output[:, 0, :]  # (nsamples, ncoils)
-        
-        # Adjust indexes for the output grid
-        if np.isscalar(shape):
-            shape = [shape] * ndim
-        indexes = indexes + np.array(shape[:ndim][::-1]) // 2
-        indexes = indexes.astype(int)
-        
-        # Ensure bounds are within grid
-        for n in range(ndim):
-            outside = indexes[..., n] < 0
-            output[outside] = 0.0
-            indexes[..., n][outside] = 0
-            outside = indexes[..., n] >= shape[::-1][n]
-            indexes[..., n][outside] = shape[::-1][n] - 1
-            output[outside] = 0.0
-        
-        # Calculate weights
-        if self.weighting_mode == "count":
-            # Create flat index for unique counting
-            unfolding = [1] + list(np.cumprod(list(shape)[::-1]))[: ndim - 1]
-            flattened_idx = np.sum(indexes * np.array(unfolding, dtype=int)[:, np.newaxis], axis=1)
-            
-            # Count-based weights - inverse of occurrence count
-            unique_idx, inverse, counts = np.unique(flattened_idx, return_inverse=True, return_counts=True)
-            weights = 1 / counts[inverse]
-        else:  # distance-based
-            # Distance-based weights - closer samples get higher weights
-            distances = np.sqrt(np.sum(displacements**2, axis=-1))
-            
-            # Invert distances to get weights (closer = higher weight)
-            epsilon = 1e-10
-            distance_weights = 1.0 / (distances + epsilon)
-            
-            # Create flat index for unique grouping
-            unfolding = [1] + list(np.cumprod(list(shape)[::-1]))[: ndim - 1]
-            flattened_idx = np.sum(indexes * np.array(unfolding, dtype=int)[:, np.newaxis], axis=1)
-            
-            # Group by target grid point
-            unique_idx, inverse = np.unique(flattened_idx, return_inverse=True)
-            
-            # Initialize weights array
-            weights = np.zeros_like(distances)
-            
-            # For each unique grid point
-            for i, idx in enumerate(unique_idx):
-                # Get the indices of samples that map to this grid point
-                mask = (flattened_idx == idx)
                 
-                # Calculate normalized weights for this group
-                group_weights = distance_weights[mask]
-                norm_factor = np.sum(group_weights)
-                if norm_factor > 0:
-                    group_weights = group_weights / norm_factor
-                
-                # Assign the normalized weights
-                weights[mask] = group_weights
+        return output, self.plan["indexes"][shot_index], self.plan["weights"][shot_index][..., None]
         
-        # Reshape weights to have shape (..., 1)
-        weights = weights[..., np.newaxis]
-        
-        return output, indexes, weights
-    
-    def _process_full_dataset(self, input_data, coord, shape, ndim, nsteps):
+    def _process_full_dataset(self, input_data):
         """
         Process the entire dataset for GROG interpolation.
         
@@ -281,14 +191,6 @@ class _GrogInterpolator:
         ----------
         input_data : np.ndarray
             Full dataset with shape (..., ncoils).
-        coord : np.ndarray
-            Coordinates array.
-        shape : tuple
-            Output shape.
-        ndim : int
-            Number of dimensions.
-        nsteps : int
-            Number of interpolation steps.
             
         Returns
         -------
@@ -298,6 +200,7 @@ class _GrogInterpolator:
             Grid indexes with shape (..., ndim).
         weights : np.ndarray
             Weights with shape (..., 1).
+            
         """
         # Store original data shape for reshaping output
         original_shape = input_data.shape
@@ -308,17 +211,10 @@ class _GrogInterpolator:
         
         # Add a dummy batch dimension
         input_reshaped = input_flattened[:, np.newaxis, :]  # (nsamples, 1, ncoils)
-        
-        # Build indexes by rounding coordinates
-        coord_flat = coord.reshape(-1, ndim)
-        indexes_flat = np.round(coord_flat).astype(int)
-        
-        # Calculate displacements from grid points
-        displacements_flat = indexes_flat - coord_flat
-        
+                
         # Convert displacements to table indices
-        lut = np.floor(10 * displacements_flat).astype(int) + int(nsteps // 2)
-        lut_flat = _flatten_lut(lut, nsteps)
+        lut = self.plan["lut"]
+        lut_flat = _flatten_lut(lut, self.nsteps).ravel()
         
         # Create output array
         output_flat = np.zeros_like(input_reshaped)
@@ -329,71 +225,10 @@ class _GrogInterpolator:
         # Remove batch dimension
         output_flat = output_flat[:, 0, :]  # (nsamples, ncoils)
         
-        # Adjust indexes for the output grid
-        if np.isscalar(shape):
-            shape = [shape] * ndim
-        indexes_flat = indexes_flat + np.array(shape[:ndim][::-1]) // 2
-        indexes_flat = indexes_flat.astype(int)
-        
-        # Calculate weights
-        if self.weighting_mode == "count":
-            # Create flat index for unique counting
-            unfolding = [1] + list(np.cumprod(list(shape)[::-1]))[: ndim - 1]
-            flattened_idx = np.sum(indexes_flat * np.array(unfolding, dtype=int), axis=1)
-            
-            # Count-based weights - inverse of occurrence count
-            unique_idx, inverse, counts = np.unique(flattened_idx, return_inverse=True, return_counts=True)
-            weights_flat = 1 / counts[inverse]
-        else:  # distance-based
-            # Distance-based weights - closer samples get higher weight
-            distances = np.sqrt(np.sum(displacements_flat**2, axis=1))
-            
-            # Invert distances to get weights (closer = higher weight)
-            epsilon = 1e-10
-            distance_weights = 1.0 / (distances + epsilon)
-            
-            # Create flat index for unique grouping
-            unfolding = [1] + list(np.cumprod(list(shape)[::-1]))[: ndim - 1]
-            flattened_idx = np.sum(indexes_flat * np.array(unfolding, dtype=int), axis=1)
-            
-            # Group by target grid point
-            unique_idx, inverse = np.unique(flattened_idx, return_inverse=True)
-            
-            # Initialize weights array
-            weights_flat = np.zeros_like(distances)
-            
-            # For each unique grid point
-            for i, idx in enumerate(unique_idx):
-                # Get the indices of samples that map to this grid point
-                mask = (flattened_idx == idx)
-                
-                # Calculate normalized weights for this group
-                group_weights = distance_weights[mask]
-                norm_factor = np.sum(group_weights)
-                if norm_factor > 0:
-                    group_weights = group_weights / norm_factor
-                
-                # Assign the normalized weights
-                weights_flat[mask] = group_weights
-        
-        # Ensure bounds are within grid
-        for n in range(ndim):
-            outside = indexes_flat[:, n] < 0
-            output_flat[outside] = 0.0
-            indexes_flat[outside, n] = 0
-            outside = indexes_flat[:, n] >= shape[::-1][n]
-            indexes_flat[outside, n] = shape[::-1][n] - 1
-            output_flat[outside] = 0.0
-        
         # Reshape outputs back to original shapes
         output = output_flat.reshape(original_shape)
-        indexes = indexes_flat.reshape(self.original_coord_shape)
         
-        # Add extra dimension to weights
-        weights_flat = weights_flat[..., np.newaxis]
-        weights = weights_flat.reshape(self.original_coord_shape[:-1] + (1,))
-        
-        return output, indexes, weights
+        return output, self.plan["indexes"], self.plan["weights"][..., None]
     
     def _create_trajectory_plan(self):
         """
@@ -412,7 +247,7 @@ class _GrogInterpolator:
         # Get dimensions from coords
         ndim = coords.shape[-1]
         
-        # expand oversamp
+        # Expand oversamp
         if np.isscalar(oversamp):
             oversamp = tuple(ndim * [oversamp])
         elif len(oversamp) == 1:
@@ -420,24 +255,73 @@ class _GrogInterpolator:
         else:
             oversamp = tuple(oversamp)
             
+        # Apply oversampling
+        shape = [int(np.ceil(oversamp[n] * shape[n])) for n in range(len(shape))]
+            
         # Rescale coordinates for oversampling
-        rescaled_coords = np.copy(coords)
-        for i in range(ndim):
-            rescaled_coords[..., i] *= oversamp[i]
+        coords = rescale_coords(coords, shape)
+                
+        # Create indexes
+        indexes = np.round(coords)
         
+        # Get displacement
+        displacement = indexes - coords
+        
+        # Convert displacements to table indices
+        lut = np.floor(10.0 * displacement).astype(int) + int(nsteps // 2)
+        
+        # Adjust indexes for the output grid
+        if np.isscalar(shape):
+            shape = [shape] * ndim
+        indexes = indexes + np.array(shape[:ndim][::-1]) // 2
+        
+        # Enforce integer indexes
+        indexes = indexes.astype(int) 
+        
+        # Create flat index for unique counting
+        unfolding = [1] + list(np.cumprod(list(shape)[::-1]))[:ndim-1]
+        flattened_indexes = np.sum(indexes * np.array(unfolding, dtype=int), axis=-1)
+        
+        # Count-based weights - inverse of occurrence count
+        _shape = flattened_indexes.shape
+        unique_idx, inverse, counts = np.unique(flattened_indexes.ravel(), return_inverse=True, return_counts=True)
+        
+        # Calculate weights
+        if self.weighting_mode == "distance":
+            # Distance-based weights - closer samples get higher weight
+            distances = np.sqrt(np.sum(displacement**2, axis=-1))
+            
+            # Invert distances to get weights (closer = higher weight)
+            epsilon = 1e-10
+            weights = 1.0 / (distances + epsilon)
+            
+            # Ravel weights
+            weights = weights.ravel()
+
+            # Compute total weight per grid location
+            total_weight = np.zeros(flattened_indexes.max() + 1, dtype=weights.dtype)
+            np.add.at(total_weight, flattened_indexes, weights)  # accumulate weights per unique index
+            
+            # Normalize
+            weights = weights / total_weight[flattened_indexes]
+        else:
+            weights = 1 / counts[inverse]
+            
+        # Reshape back to original
+        weights = weights.reshape(*_shape)
+
         # Create plan dictionary
         plan = {
-            "coord": rescaled_coords,
-            "shape": shape,
-            "oversamp": oversamp,
-            "nsteps": nsteps,
-            "ndim": ndim,
+            "lut": lut,
+            "indexes": indexes,
+            "weights": weights,
+            "ndim": coords.shape[-1],
         }
         
         return plan
 
 
-# Utility functions
+# %% Utility functions
 def _flatten_lut(lut, nsteps):
     """Flatten LUT indices based on dimensionality."""
     ndim = lut.shape[-1]

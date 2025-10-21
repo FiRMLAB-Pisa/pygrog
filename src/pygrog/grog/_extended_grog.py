@@ -106,7 +106,7 @@ class _ExtendedGrogInterpolator:
         # Get number of coils from kernels
         n_coils = grappa_kernels["x"].shape[0]
             
-        # compute exponends
+        # Compute exponends
         radius = self.radius
         nsteps = self.plan["nsteps"]
         deltas = 2 * radius * (np.linspace(0, 1, nsteps) - 0.5)
@@ -475,7 +475,7 @@ class _ExtendedGrogInterpolator:
         signal_shape = coords.shape[len(stack_shape) : -1]
         ndim = coords.shape[-1]
 
-        # expand oversamp
+        # Expand oversamp
         if oversamp is None:
             if ndim == 2:
                 oversamp = 1.0
