@@ -38,7 +38,6 @@ class GROGInterpolator:
     
     def __init__(
         self,
-        interpolator: dict[str, NDArray],
         coords: NDArray,
         shape: list[int] | tuple[int, ...],
         stack_axes: list[int] | tuple[int, ...] | None = None,
@@ -48,12 +47,10 @@ class GROGInterpolator:
         weighting_mode: str = "distance",
     ):
         """
-        Create a new GROG interpolator with a precomputed plan.
+        Create a new GROG interpolator with trajectory information.
         
         Parameters
         ----------
-        interpolator: dict[str, NDArray]
-            Trained GROG interpolator.
         coords : NDArray
             Fourier domain coordinates array of shape ``(..., ndims)``.
         shape : list[int] | tuple[int, ...]
@@ -70,9 +67,17 @@ class GROGInterpolator:
             Non Cartesian samples accumulation mode.
             The default is ``"distance"``.
         """
-        # Create the plan
-        self.plan = self._create_plan(
-            interpolator=interpolator,
+        # Store configuration parameters
+        self.coords = coords
+        self.shape = shape
+        self.stack_axes = stack_axes
+        self.oversamp = oversamp
+        self.radius = radius
+        self.precision = precision
+        self.weighting_mode = weighting_mode
+        
+        # Create the trajectory-based part of the plan
+        self.plan = self._create_trajectory_plan(
             coords=coords,
             shape=shape,
             stack_axes=stack_axes,
@@ -81,6 +86,48 @@ class GROGInterpolator:
             precision=precision,
             weighting_mode=weighting_mode
         )
+        
+        # Initialize runtime attributes - these are NOT stored in the plan
+        self._grog_table = None
+        self._kernels_set = False
+    
+    def set_kernels(self, grappa_kernels: dict[str, NDArray]) -> None:
+        """
+        Set the GRAPPA kernels and compute the GROG table for interpolation.
+        
+        Parameters
+        ----------
+        grappa_kernels: dict[str, NDArray]
+            Dictionary of GRAPPA kernels with keys 'x', 'y', and optionally 'z'
+            for 3D interpolation.
+        """
+        # Check required keys in kernels
+        ndim = self.plan["ndim"]
+        if "x" not in grappa_kernels or "y" not in grappa_kernels:
+            raise ValueError("GRAPPA kernels must include 'x' and 'y' operators")
+        if ndim == 3 and "z" not in grappa_kernels:
+            raise ValueError("3D interpolation requires 'z' operator in GRAPPA kernels")
+            
+        # Get number of coils from kernels
+        n_coils = grappa_kernels["x"].shape[0]
+            
+        # compute exponends
+        radius = self.radius
+        nsteps = self.plan["nsteps"]
+        deltas = 2 * radius * (np.linspace(0, 1, nsteps) - 0.5)
+        
+        # pre-compute partial operators
+        Dx = _grog_power(grappa_kernels["x"], deltas)  # (nsteps, nc, nc)
+        Dy = _grog_power(grappa_kernels["y"], deltas)  # (nsteps, nc, nc)
+        if "z" in grappa_kernels and grappa_kernels["z"] is not None:
+            Dz = _grog_power(grappa_kernels["z"], deltas)  # (nsteps, nc, nc), 3D only
+        else:
+            Dz = None
+            
+        # Compute grog table (not stored in plan)
+        self._grog_table = _prepare_grog_table(Dx, Dy, Dz, nsteps, ndim)
+        self._n_coils = n_coils
+        self._kernels_set = True
     
     @classmethod
     def from_file(cls, filepath: str | pathlib.Path) -> "GROGInterpolator":
@@ -111,6 +158,14 @@ class GROGInterpolator:
                 interpolator.plan = pickle.load(f)
         else:
             raise ValueError(f"Unsupported file extension: {filepath.suffix}")
+        
+        # Initialize runtime attributes
+        interpolator._grog_table = None
+        interpolator._kernels_set = False
+        
+        # Set attributes from plan
+        interpolator.radius = interpolator.plan.get("radius", 0.75)
+        interpolator.precision = interpolator.plan.get("precision", 1)
             
         return interpolator
     
@@ -162,6 +217,9 @@ class GROGInterpolator:
         indexes : NDArray
             Sampled k-space points indexes.
         """
+        if not self._kernels_set:
+            raise RuntimeError("GRAPPA kernels have not been set. Call set_kernels() first.")
+            
         if shot_index is not None:
             # Process single shot with the given index
             return self._apply_shot(input_data, shot_index)
@@ -235,6 +293,10 @@ class GROGInterpolator:
         # Perform interpolation
         n_coils = shot_data.shape[-1]
         
+        # Check coil compatibility
+        if n_coils != self._n_coils:
+            raise ValueError(f"Input data has {n_coils} coils but kernels expect {self._n_coils}")
+        
         # Prepare data for interpolation: (readout, 1, coils)
         shot_data_reshaped = shot_data.reshape(shot_data.shape[0], 1, n_coils)
         
@@ -251,7 +313,7 @@ class GROGInterpolator:
             bin_starts,
             bin_counts,
             sorted_grog_indices,
-            self.plan["grog_table"],
+            self._grog_table,
         )
         
         # Reshape output: (targets, coils)
@@ -290,7 +352,6 @@ class GROGInterpolator:
             K-space point indexes
         """
         # Extract plan components
-        grog_table = self.plan["grog_table"]
         source_indices = self.plan["source_indices"]
         sample_weights = self.plan["sample_weights"]
         bin_starts = self.plan["bin_starts"]
@@ -308,8 +369,8 @@ class GROGInterpolator:
         n_coils = dataset.shape[-1]
         
         # Check compatibility
-        if n_coils != self.plan["n_coils"]:
-            raise ValueError(f"Input data has {n_coils} coils but plan expects {self.plan['n_coils']}")
+        if n_coils != self._n_coils:
+            raise ValueError(f"Input data has {n_coils} coils but kernels expect {self._n_coils}")
         
         # reshape data to (nsamples, nbatches, ncoils)
         reshaped_data = dataset.reshape(-1, n_coils)  # Flatten all dimensions except coils
@@ -326,7 +387,7 @@ class GROGInterpolator:
             bin_starts,
             bin_counts,
             grog_indices,
-            grog_table,
+            self._grog_table,
         )
         
         # Reshape output: (batches, coils, unique_targets) -> (batches, unique_targets, coils)
@@ -359,9 +420,8 @@ class GROGInterpolator:
         """Get the output shape of the interpolated data."""
         return self.plan["output_shape"]
         
-    @staticmethod
-    def _create_plan(
-        interpolator: dict[str, NDArray],
+    def _create_trajectory_plan(
+        self,
         coords: NDArray,
         shape: list[int] | tuple[int, ...],
         stack_axes: list[int] | tuple[int, ...] | None = None,
@@ -371,15 +431,10 @@ class GROGInterpolator:
         weighting_mode: str = "distance",
     ) -> dict[str, Any]:
         """
-        Create a GROG interpolation plan that can be reused and cached.
-        
-        This function prepares all the coordinate-dependent parts of the GROG
-        interpolation, which can be saved and reused for data with the same trajectory.
+        Create the trajectory-dependent part of a GROG interpolation plan.
         
         Parameters
         ----------
-        interpolator: dict[str, NDArray]
-            Trained GROG interpolator.
         coords : NDArray
             Fourier domain coordinates array of shape ``(..., ndims)``.
         shape : list[int] | tuple[int, ...]
@@ -399,7 +454,7 @@ class GROGInterpolator:
         Returns
         -------
         plan : dict[str, Any]
-            A dictionary containing all information needed for interpolation.
+            A dictionary containing trajectory-dependent information for interpolation.
         """
         if radius > 1.0:
             raise ValueError(f"Maximum GRAPPA shift is 1.0, requested {radius}")
@@ -417,9 +472,6 @@ class GROGInterpolator:
         nsteps = 2 * radius / 10 ** (-precision) + 1
         nsteps = int(nsteps)
 
-        # compute exponends
-        deltas = 2 * radius * (np.linspace(0, 1, nsteps) - 0.5)
-
         # Get dimensions from coords
         if stack_axes is None:
             stack_shape = ()
@@ -427,14 +479,6 @@ class GROGInterpolator:
             stack_shape = coords.shape[: len(stack_axes)]
         signal_shape = coords.shape[len(stack_shape) : -1]
         ndim = coords.shape[-1]
-
-        # pre-compute partial operators
-        Dx = _grog_power(interpolator["x"], deltas)  # (nsteps, nc, nc)
-        Dy = _grog_power(interpolator["y"], deltas)  # (nsteps, nc, nc)
-        if "z" in interpolator and interpolator["z"] is not None:
-            Dz = _grog_power(interpolator["z"], deltas)  # (nsteps, nc, nc), 3D only
-        else:
-            Dz = None
 
         # expand oversamp
         if oversamp is None:
@@ -509,17 +553,14 @@ class GROGInterpolator:
         )
 
         # Calculate readout (view, point) indices for shot-by-shot processing
-        # readout_size = signal_shape[-1] if len(signal_shape) > 1 else signal_shape[0]
         source_readout_indices = source_indices % n_samples
         source_stack_indices = stack_coords_flat[source_indices]
 
-        # precompute grog table
-        grog_table = _prepare_grog_table(Dx, Dy, Dz, nsteps, ndim)
-
-        # Create and return the plan
+        # Create trajectory-dependent part of the plan
         plan = {
-            # GROG operator table
-            "grog_table": grog_table.astype(np.complex64),
+            # Configuration parameters
+            "radius": radius,
+            "precision": precision,
             
             # Source and target indices
             "source_indices": source_indices.astype(np.int32),  
@@ -544,14 +585,15 @@ class GROGInterpolator:
             "stack_shape": stack_shape,
             "signal_shape": signal_shape,
             "output_shape": output_shape,
-            "n_coils": interpolator["x"].shape[0],  # Number of coils from GROG operator
+            "ndim": ndim,
+            "nsteps": nsteps,
         }
         
         return plan
 
 
 def groginterp(
-    interpolator: dict[str, NDArray],
+    grappa_kernels: dict[str, NDArray],
     input: NDArray,
     coords: NDArray,
     shape: list[int] | tuple[int, ...],
@@ -566,6 +608,9 @@ def groginterp(
 
     Parameters
     ----------
+    grappa_kernels : dict[str, NDArray]
+        Dictionary of GRAPPA kernels with keys 'x', 'y', and optionally 'z'
+        for 3D interpolation.
     input : NDArray
         Input Non-Cartesian kspace with coils as the rightmost dimension:
         ``(batch1,...,batchN,stack1,...,stackN,view,readout,coils)``
@@ -574,8 +619,6 @@ def groginterp(
     shape : list[int] | tuple[int, ...]
         Cartesian grid size of shape ``(ndim,)``.
         If scalar, isotropic matrix is assumed.
-    interpolator: dict[str, NDArray]
-        Trained GROG interpolator.
     stack_axes: list[int] | tuple[int, ...] | None
         Indices marking stack axes. The default is ``None``.
     oversamp: float | list[float] | tuple[float, ...] | None
@@ -621,9 +664,8 @@ def groginterp(
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore")
         
-        # Use the class implementation
+        # Create interpolator with trajectory information
         interpolator_obj = GROGInterpolator(
-            interpolator=interpolator,
             coords=coords,
             shape=shape,
             stack_axes=stack_axes,
@@ -633,7 +675,8 @@ def groginterp(
             weighting_mode=weighting_mode
         )
         
-        # Apply interpolation
+        # Set kernels and apply interpolation
+        interpolator_obj.set_kernels(grappa_kernels)
         data, indexes = interpolator_obj(input)
 
     # enforce correct device

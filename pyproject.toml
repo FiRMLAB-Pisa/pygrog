@@ -40,6 +40,8 @@ classifiers = [  # Optional
 
 dependencies = [
     "numpy",
+    "scipy",
+    "numba",
     "mri-nufft",
     "sigpy",
     "torch",
