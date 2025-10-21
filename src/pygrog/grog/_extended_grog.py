@@ -111,7 +111,7 @@ class _ExtendedGrogInterpolator:
         nsteps = self.plan["nsteps"]
         deltas = 2 * radius * (np.linspace(0, 1, nsteps) - 0.5)
         
-        # pre-compute partial operators
+        # Pre-compute partial operators
         Dx = _grog_power(grappa_kernels["x"], deltas)  # (nsteps, nc, nc)
         Dy = _grog_power(grappa_kernels["y"], deltas)  # (nsteps, nc, nc)
         if "z" in grappa_kernels and grappa_kernels["z"] is not None:
@@ -604,17 +604,17 @@ def prepare_interpolation_data(
         n_stacks, unsorted_indices, stack_coords
     )
 
-    # get the unique bins and the inverse mapping:
+    # Get the unique bins and the inverse mapping:
     unique_bins, inverse = _unique(unsorted_indices_idx, return_inverse=True)
 
-    # use the inverse mapping to get a sort order that groups identical bins together:
+    # Use the inverse mapping to get a sort order that groups identical bins together:
     sort_order = np.argsort(inverse)
 
-    # apply the sort order to both arrays:
+    # Apply the sort order to both arrays:
     bin_idx = unsorted_indices_idx[sort_order]
     bin_val = unsorted_indices_val[sort_order]
 
-    # now, using _unique on the sorted bin_idx, get the start indices and counts:
+    # Now, using _unique on the sorted bin_idx, get the start indices and counts:
     unique_bins, bin_starts, bin_counts = _unique(
         bin_idx, return_index=True, return_counts=True
     )
@@ -623,12 +623,12 @@ def prepare_interpolation_data(
     stack_indices = unique_bins[:, 0]
     target_indices = unique_bins[:, 1]
 
-    # compute distances
+    # Compute distances
     target_coords = grid[np.repeat(target_indices, bin_counts, axis=0), :]
     source_coords = coords[bin_val, :]
     distances = target_coords - source_coords
 
-    # compute weights
+    # Compute weights
     ndim = coords.shape[-1]
     if weighting_mode == "distance":
         weight_scale = ndim**0.5 * radius * 1.00001
@@ -636,7 +636,7 @@ def prepare_interpolation_data(
     elif weighting_mode == "average":
         weights = np.ones(distances.shape[0], dtype=np.float32)
 
-    # compute table index
+    # Compute table index
     tab_idx = (radius + np.round(distances * pfac) / pfac) / stepsize
     tab_idx = np.round(tab_idx).astype(np.float32)
     tab_flattening = np.asarray([1.0, nsteps, nsteps**2], dtype=np.float32)
@@ -736,11 +736,11 @@ def flatten_indices(n_stacks, indices, stack_coords):
     """Flatten indices array from KD-tree results."""
     counts = np.asarray([len(index) for index in indices])
 
-    # find nonzeros
+    # Find nonzeros
     nonzeros = np.where(counts)[0]
     counts = counts[nonzeros]
 
-    # build
+    # Build
     flattened_indices_val = np.concatenate(indices[nonzeros])
     flattened_indices_idx = np.repeat(nonzeros, counts)
     flattened_indices_idx = np.stack(
@@ -794,7 +794,7 @@ def do_interpolation(
     nbatches = input_data.shape[1]
     ncoils = input_data.shape[2]
 
-    # enforce datatype
+    # Enforce datatype
     input_data = input_data.astype(np.complex64)
     source_indices = source_indices.astype(np.int32)
     sample_weights = sample_weights.astype(np.float32)
@@ -804,10 +804,10 @@ def do_interpolation(
     grog_indices = grog_indices.astype(np.int32)
     grog_table = grog_table.astype(np.complex64)
 
-    # preallocate output
+    # Preallocate output
     output = np.zeros((len(target_indices), nbatches, ncoils), dtype=np.complex64)
 
-    # perform interpolation
+    # Perform interpolation
     _interpolation(
         output,
         input_data,
@@ -857,10 +857,10 @@ def _interpolation(
             idx = bin_start + b
             source_index = source_indices[idx]
 
-            # get weight
+            # Get weight
             total_weight += weights[idx]
 
-            # perform interpolation for each element in batch
+            # Perform interpolation for each element in batch
             for batch in range(nbatches):
                 _matvec(
                     output[n, batch],
@@ -868,6 +868,6 @@ def _interpolation(
                     weights[idx] * input_data[source_index, batch],
                 )
 
-        # normalize
+        # Normalize
         if total_weight > 0:
             output[n] = output[n] / total_weight
