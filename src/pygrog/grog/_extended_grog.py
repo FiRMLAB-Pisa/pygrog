@@ -34,8 +34,8 @@ class _ExtendedGrogInterpolator:
         self,
         coords: NDArray,
         shape: list[int] | tuple[int, ...],
-        stack_axes: list[int] | tuple[int, ...] | None = None,
-        oversamp: float | list[float] | tuple[float, ...] | None = None,
+        stack_axes: list[int] | tuple[int, ...] = None,
+        oversamp: float | list[float] | tuple[float, ...] = 1.0,
         radius: float = 0.75,
         precision: int = 1,
         weighting_mode: str = "distance",
@@ -52,14 +52,16 @@ class _ExtendedGrogInterpolator:
         stack_axes: list[int] | tuple[int, ...] | None
             Indices marking stack axes. The default is None.
         oversamp: float | list[float] | tuple[float, ...] | None
-            Cartesian grid oversampling factor. The default is ``None``
+            Cartesian grid oversampling factor. The default is ``1.0``
         radius: float
             Spreading radius. The default is ``0.75``.
         precision: int
             Number of decimal digits in GROG kernel power. The default is ``1``.
-        weighting_mode: str
-            Non Cartesian samples accumulation mode.
-            The default is ``"distance"``.
+            This determines the number of steps (nsteps = 2*10^precision + 1)
+        weighting_mode : str, optional
+            Method for Non-Cartesian samples accumulation. Options are:
+            - 'count': inverse of counts per grid point
+            - 'distance': weighting based on distance from grid point (default)
         """
         # Store configuration parameters
         self.coords = coords
@@ -198,6 +200,7 @@ class _ExtendedGrogInterpolator:
             Input Non-Cartesian kspace with coils as the rightmost dimension:
             - When shot_index=None: shape ``(batch1,...,batchN,stack1,...,stackN,view,readout,coils)``
             - When shot_index is provided: shape ``(readout,coils)``
+            
         shot_index : tuple[int, ...] | None, optional
             Index tuple for processing a single shot, representing ``(batch_idx1,...,batch_idxN,
             stack_idx1,...,stack_idxN,view_idx)``. 
@@ -210,6 +213,7 @@ class _ExtendedGrogInterpolator:
             Output sparse Cartesian kspace.
         indexes : NDArray
             Sampled k-space points indexes.
+
         """
         if not self._kernels_set:
             raise RuntimeError("GRAPPA kernels have not been set. Call set_kernels() first.")
@@ -303,7 +307,6 @@ class _ExtendedGrogInterpolator:
             shot_data_reshaped,
             sorted_source_indices,
             sorted_weights,
-            unique_targets,
             bin_starts,
             bin_counts,
             sorted_grog_indices,
@@ -748,7 +751,6 @@ def do_interpolation(
         input_data,
         source_indices,
         sample_weights,
-        target_indices,
         bin_starts,
         bin_counts,
         grog_indices,
@@ -773,7 +775,6 @@ def _interpolation(
     input_data,
     source_indices,
     weights,
-    target_indices,
     bin_starts,
     bin_counts,
     grog_indices,
@@ -806,3 +807,29 @@ def _interpolation(
         # Normalize
         if total_weight > 0:
             output[n] = output[n] / total_weight
+            
+@nb.njit(fastmath=True, cache=True, parallel=True)  # pragma: no cover
+def _weight_normalization(
+    output,
+    source_indices,
+    weights,
+    bin_starts,
+    bin_counts,
+):
+    """Numba-optimized interpolation kernel."""
+    nsamples = output.shape[0]
+
+    for n in nb.prange(nsamples):
+        bin_start = bin_starts[n]
+        bin_count = bin_counts[n]
+        total_weight = 0.0
+
+        for b in range(bin_count):
+            idx = bin_start + b
+
+            # Get weight
+            total_weight += weights[idx]
+
+        # Normalize
+        if total_weight > 0:
+            output[n] = 1 / total_weight

@@ -5,6 +5,8 @@ __all__ = ["_GrogInterpolator"]
 import numpy as np
 import numba as nb
 
+from numpy.typing import NDArray
+
 from ._utils import rescale_coords, prepare_grog_table, grog_power
 
 class _GrogInterpolator:
@@ -17,11 +19,11 @@ class _GrogInterpolator:
     
     def __init__(
         self,
-        coords,
-        shape,
-        oversamp=1.0,
-        precision=1,
-        weighting_mode="count",
+        coords: NDArray,
+        shape: list[int] | tuple[int, ...],
+        oversamp: float | list[float] | tuple[float, ...] = 1.0,
+        precision: int = 1,
+        weighting_mode: str = "count",
     ):
         """
         Create a new GROG interpolator with trajectory information.
@@ -38,7 +40,7 @@ class _GrogInterpolator:
             Number of decimal digits in GROG kernel power. The default is ``1``.
             This determines the number of steps (nsteps = 2*10^precision + 1)
         weighting_mode : str, optional
-            Method for weighting samples. Options are:
+            Method for Non-Cartesian samples accumulation. Options are:
             - 'count': inverse of counts per grid point (default)
             - 'distance': weighting based on distance from grid point
         """
@@ -103,44 +105,48 @@ class _GrogInterpolator:
         self._n_coils = n_coils
         self._kernels_set = True
     
-    def __call__(self, input_data, shot_index=None):
+    def __call__(
+        self, 
+        input_data: NDArray, 
+        shot_index: tuple[int, ...] | None = None
+    ) -> tuple[NDArray, NDArray, NDArray]:
         """
         Apply the GROG interpolation to input data.
         
         Parameters
         ----------
-        input_data : np.ndarray
-            Input Non-Cartesian kspace data. When shot_index is None,
-            shape should be (..., ncoils). When shot_index is provided,
-            shape should be (readouts, ncoils) for a single shot.
-            
+        input_data : NDArray
+            Input Non-Cartesian kspace data. When ``shot_index`` is ``None``,
+            shape should be ``(..., ncoils)``. When ``shot_index`` is provided,
+            shape should be ``(readouts, ncoils)`` for a single shot.
+         
         shot_index : tuple or int, optional
             Index of the shot to process. If provided, only interpolates
-            data for this specific shot. Default is None (process all data).
+            data for this specific shot. Default is ``None`` (process all data).
         
         Returns
         -------
-        output : np.ndarray
+        output : NDArray
             Output sparse Cartesian kspace with same shape as input.
-        indexes : np.ndarray
-            Sampled k-space points indexes with shape (..., ndim).
-        weights : np.ndarray
-            Sample weights with shape (..., 1).
-            
+        indexes : NDArray
+            Sampled k-space points indexes with shape ``(..., ndim)``.
+        weights : NDArray
+            Sample weights with shape ``(..., 1)``.
+
         """
         if not self._kernels_set:
             raise RuntimeError("GRAPPA kernels have not been set. Call set_kernels() first.")
                 
         if shot_index is not None:
             # Process single shot
-            return self._process_single_shot(input_data, shot_index)
+            return self._apply_shot(input_data, shot_index)
         else:
             # Process entire dataset
-            return self._process_full_dataset(input_data)
+            return self._apply_whole_dataset(input_data)
     
-    def _process_single_shot(self, shot_data, shot_index):
+    def _apply_shot(self, shot_data, shot_index):
         """
-        Process a single shot for GROG interpolation.
+        Apply GROG interpolation to a single shot.
         
         Parameters
         ----------
@@ -181,9 +187,9 @@ class _GrogInterpolator:
                 
         return output, self.plan["indexes"][shot_index], self.plan["weights"][shot_index][..., None]
         
-    def _process_full_dataset(self, input_data):
+    def _apply_whole_dataset(self, input_data):
         """
-        Process the entire dataset for GROG interpolation.
+        Apply GROG interpolation to the entire dataset at once.
         
         Parameters
         ----------
