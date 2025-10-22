@@ -1,6 +1,6 @@
 """Coordinates scaling helper."""
 
-__all__ = ["rescale_coords", "prepare_grog_table", "grog_power"]
+__all__ = ["build_shot_coords", "rescale_coords", "prepare_grog_table", "grog_power"]
 
 import warnings
 
@@ -15,6 +15,38 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from sigpy import get_device
 
+
+def build_shot_coords(coords: NDArray) -> NDArray:
+    """
+    Utility function to build shot coordinates array.
+    
+    Here, it assume that shots are acquired sequentially
+    from leftmost axes to rightmost. For more advanced
+    scheduling, user should build it manually accordingly.
+
+    Parameters
+    ----------
+    coords : NDArray
+        Non Cartesian coordinates of shape ``(..., nsamples, ndims)``.
+        Here, ``ndims`` represent the encoding direction with following axes
+        order:
+
+            * ``2D imaging``: ``(x, y)``
+            * ``3D imaging``: ``(x, y, z)``
+
+
+    Returns
+    -------
+    NDArray
+        ``shot_coords`` array of shape ``(..., nsamples)``.
+
+    """
+    shape = coords.shape[:-2] # exclute readout, axes
+    if shape:
+        shot_coords = np.arange(np.prod(shape).item()).reshape(*shape)
+        shot_coords, _ = np.broadcast_arrays(shot_coords[..., None], coords[..., 0])
+        return shot_coords
+    return None
 
 @with_numpy_cupy
 def rescale_coords(coords: NDArray, amp: float | NDArray) -> NDArray:
