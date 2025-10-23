@@ -1,0 +1,116 @@
+"""Autocalibration region extraction subroutines."""
+
+__all__ = ["extract_acr"]
+
+import numpy as np
+
+from numpy.typing import NDArray
+from mrinufft._array_compat import with_numpy_cupy
+
+from .. import _sigpy
+from .._utils import rescale_coords
+
+@with_numpy_cupy
+def extract_acr(
+    data: NDArray,
+    cal_width: int = 24,
+    ndim: int = None,
+    mask: NDArray = None,
+    coords: NDArray = None,
+    weights: NDArray = None,
+    shape: int = None,
+) -> tuple[NDArray, NDArray | None] | tuple[NDArray, NDArray, NDArray | None]:
+    """
+    Extract calibration region from input dataset.
+
+    Parameters
+    ----------
+    data : NDArray
+        Input k-space dataset of shape ``(*others, coils, k2, k1, k0)``
+    cal_width : int, optional
+        Calibration region size. The default is ``24``.
+    ndim : int, optional
+        Number of spatial dimensions. Required for Cartesian datasets.
+        The default is ``None``.
+    mask : NDArray, optional
+        Sampling mask for Cartesian datasets of shape ``(*others, coils, k2, k1, k0)``.
+    coords : NDArray, optional
+        Fourier domain coordinate array of shape ``(*others, coils, k2, k1, k0, ndim)``.
+        Required for Non Cartesian datasets. 
+        The default is ``None``.
+    weights : NDArray, optional
+        K-space density compensation of shape ``(*others, coils, k2, k1, k0)``. 
+        The default is ``None``.
+    shape : int, optional
+        Matrix size of shape ``(ndim,)``.
+        Required for Non Cartesian datasets. The default is ``None``.
+
+    Raises
+    ------
+    ValueError
+        If ``ndim`` is not provided for Cartesian datasets (``trajectory = None``) or
+        ``shape`` is not provided for Non Cartesian datasets (``trajectory != None``).
+
+    Returns
+    -------
+    cal_data : ArrayLike
+        Calibration dataset of shape ``(*others_cal, coils, k2_cal, k1_cal, k0_cal)``
+    cal_mask : ArrayLike, optional
+        Sampling mask for calibration dataset of shape ``(*others_cal, coils, k2_cal, k1_cal, k0_cal)`` (Cartesian).
+    cal_coords : ArrayLike, optional
+        Trajectory for calibration dataset of shape ``(*others_cal, coils, k2_cal, k1_cal, k0_cal, ndim)`` (Non Cartesian).
+    cal_weights : ArrayLike, optional
+        Density compensation for calibration dataset of shape ``(*others_cal, coils, k2_cal, k1_cal, k0_cal)`` (Non Cartesian).
+
+    """
+    if coords is None:
+        if ndim is None:
+            raise ValueError(
+                "Please provide number of spatial dimensions for Cartesian datasets"
+            )
+        shape = list(data.shape[-ndim:])
+        _data = _sigpy.resize(data, list(data.shape[:-ndim]) + ndim * [cal_width])
+        if mask is not None:
+            _mask = _sigpy.resize(mask, ndim * [cal_width])
+            return _data, _mask
+        return _data
+    else:
+        if shape is None:
+            raise ValueError("Please provide matrix size for Non Cartesian datasets")
+
+        # get indexes for calibration samples
+        coords = rescale_coords(
+            coords, shape
+        )  # enforce scaling between (-0.5 * npix, 0.5 * npix)
+        if np.allclose(coords[..., -1], np.round(coords[..., -1])):
+            stack = True
+            cal_idx = (coords[..., :2] ** 2).sum(axis=-1) ** 0.5 <= (0.5 * cal_width)
+            cal_idx = cal_idx.reshape(-1, cal_idx.shape[-1])
+            cal_idx = cal_idx.prod(axis=0)
+            cal_idx_z = abs(coords[..., -1]) <= (0.5 * cal_width)
+            cal_idx_z = cal_idx_z.reshape(-1, cal_idx.shape[-1])
+            cal_idx_z = cal_idx_z.prod(axis=-1).astype(bool)
+        else:
+            stack = False
+            cal_idx = (coords**2).sum(axis=-1) ** 0.5 <= (0.5 * cal_width)
+            cal_idx = cal_idx.reshape(-1, cal_idx.shape[-1])
+            cal_idx = cal_idx.prod(axis=0)
+        cal_idx = cal_idx.astype(bool)
+
+        # select data
+        _data = data[..., cal_idx]
+        _coords = coords[..., cal_idx, :]
+        if weights is not None:
+            _weights = weights[..., cal_idx]
+        else:
+            _weights = None
+
+        if stack:
+            _data = _data[..., cal_idx_z, :]
+            _coords = _coords[..., cal_idx_z, :, :]
+            if weights is not None:
+                _weights = _weights[..., cal_idx_z, :]
+            else:
+                _weights = None
+
+        return _data, _coords, _weights
