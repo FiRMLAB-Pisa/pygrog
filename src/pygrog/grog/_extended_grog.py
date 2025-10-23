@@ -13,7 +13,7 @@ from numpy.typing import NDArray
 import numpy as np
 import numba as nb
 
-from ._utils import rescale_coords, prepare_grog_table, grog_power
+from _utils import rescale_coords, prepare_grog_table, grog_power
 
 class _ExtendedGrogInterpolator:
     """

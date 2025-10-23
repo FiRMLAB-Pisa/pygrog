@@ -1,357 +1,174 @@
-"""Python implementation of the GRAPPA operator formalism."""
+"""
+"""
 
-__all__ = ["_GrogInterpolator"]
+__all__ = []
+
+import gc
+
+from types import SimpleNamespace
 
 import numpy as np
-import numba as nb
 
-from numpy.typing import NDArray
+from scipy.spatial import KDTree
 
-from ._utils import rescale_coords, prepare_grog_table, grog_power
-
-class _GrogInterpolator:
-    """
-    GRAPPA Operator Gridding (GROG) interpolator class.
+def _CreateGrogPlan(
+    shape, 
+    coords, 
+    oversamp=None, 
+    radius=0.75, 
+    time_map=None
+):
+    ndim = coords.shape[-1]
+    nsamples = coords.shape[-2]
     
-    This class handles the creation of GROG interpolation plans and
-    their application to non-Cartesian k-space data.
-    """
+    # Preprocess args
+    shape = _default_shape(ndim, shape)
+    oversamp = _default_oversamp(ndim, oversamp)
+    coords = _rescale_coords(coords, shape[-ndim:])
     
-    def __init__(
-        self,
-        coords: NDArray,
-        shape: list[int] | tuple[int, ...],
-        oversamp: float | list[float] | tuple[float, ...] = 1.0,
-        precision: int = 1,
-        weighting_mode: str = "count",
-    ):
-        """
-        Create a new GROG interpolator with trajectory information.
-        
-        Parameters
-        ----------
-        coords : np.ndarray
-            Fourier domain coordinates array of shape ``(stack1...stackN, view, readouts, ndims)``.
-        shape : list[int] | tuple[int, ...]
-            Cartesian grid size of shape ``(ndim,)``.
-        oversamp : float | list[float] | tuple[float, ...], optional
-            Cartesian grid oversampling factor. The default is ``1.0``
-        precision : int, optional
-            Number of decimal digits in GROG kernel power. The default is ``1``.
-            This determines the number of steps (nsteps = 2*10^precision + 1)
-        weighting_mode : str, optional
-            Method for Non-Cartesian samples accumulation. Options are:
-            - 'count': inverse of counts per grid point (default)
-            - 'distance': weighting based on distance from grid point
-        """
-        # Store configuration parameters
-        self.coords = coords
-        self.original_coord_shape = coords.shape
-        self.shape = shape
-        self.oversamp = oversamp
-        self.precision = precision
-        self.weighting_mode = weighting_mode
-        
-        if weighting_mode not in ["count", "distance"]:
-            raise ValueError("weighting_mode must be either 'count' or 'distance'")
-        
-        # calculate interpolation stepsize based on precision
-        pfac = 10.0**precision
-        radius = 0.5  # maximum shift is 0.5 in either direction
-        self.radius = np.ceil(pfac * radius) / pfac
-        self.nsteps = int(2 * self.radius / 10**(-precision) + 1)  # ensure odd number
-        
-        # Create the trajectory-based part of the plan
-        self.plan = self._create_trajectory_plan()
-        
-        # Initialize runtime attributes
-        self._grog_table = None
-        self._kernels_set = False
-        
-    def set_kernels(self, grappa_kernels):
-        """
-        Set the GRAPPA kernels and compute the GROG table for interpolation.
-        
-        Parameters
-        ----------
-        grappa_kernels : dict
-            Dictionary of GRAPPA kernels with keys 'x', 'y', and optionally 'z'
-            for 3D interpolation.
-        """
-        # Check required keys in kernels
-        ndim = self.plan["ndim"]
-        if "x" not in grappa_kernels or "y" not in grappa_kernels:
-            raise ValueError("GRAPPA kernels must include 'x' and 'y' operators")
-        if ndim == 3 and "z" not in grappa_kernels:
-            raise ValueError("3D interpolation requires 'z' operator in GRAPPA kernels")
-            
-        # Get number of coils from kernels
-        n_coils = grappa_kernels["x"].shape[0]
-            
-        # compute exponentials
-        nsteps = self.nsteps
-        deltas = (np.arange(nsteps) - (nsteps - 1) // 2) / (nsteps - 1)
-        
-        # pre-compute partial operators
-        Dx = grog_power(grappa_kernels["x"], deltas)  # (nsteps, nc, nc)
-        Dy = grog_power(grappa_kernels["y"], deltas)  # (nsteps, nc, nc)
-        if "z" in grappa_kernels and grappa_kernels["z"] is not None:
-            Dz = grog_power(grappa_kernels["z"], deltas)  # (nsteps, nc, nc), 3D only
-        else:
-            Dz = None
-            
-        # Compute grog table
-        self._grog_table = prepare_grog_table(Dx, Dy, Dz, nsteps, ndim)
-        self._n_coils = n_coils
-        self._kernels_set = True
+    # Create grid
+    grid = _create_grid(ndim, shape, oversamp)
     
-    def __call__(
-        self, 
-        input_data: NDArray, 
-        shot_index: tuple[int, ...] | None = None
-    ) -> tuple[NDArray, NDArray, NDArray]:
-        """
-        Apply the GROG interpolation to input data.
-        
-        Parameters
-        ----------
-        input_data : NDArray
-            Input Non-Cartesian kspace data. When ``shot_index`` is ``None``,
-            shape should be ``(..., ncoils)``. When ``shot_index`` is provided,
-            shape should be ``(readouts, ncoils)`` for a single shot.
-         
-        shot_index : tuple or int, optional
-            Index of the shot to process. If provided, only interpolates
-            data for this specific shot. Default is ``None`` (process all data).
-        
-        Returns
-        -------
-        output : NDArray
-            Output sparse Cartesian kspace with same shape as input.
-        indexes : NDArray
-            Sampled k-space points indexes with shape ``(..., ndim)``.
-        weights : NDArray
-            Sample weights with shape ``(..., 1)``.
-
-        """
-        if not self._kernels_set:
-            raise RuntimeError("GRAPPA kernels have not been set. Call set_kernels() first.")
-                
-        if shot_index is not None:
-            # Process single shot
-            return self._apply_shot(input_data, shot_index)
-        else:
-            # Process entire dataset
-            return self._apply_whole_dataset(input_data)
+    # Create KDTree
+    kdtree = KDTree(grid)
     
-    def _apply_shot(self, shot_data, shot_index):
-        """
-        Apply GROG interpolation to a single shot.
-        
-        Parameters
-        ----------
-        shot_data : np.ndarray
-            Data for a single shot with shape (readouts, ncoils).
-        shot_index : tuple or int
-            Index of the shot in the trajectory.
-            
-        Returns
-        -------
-        output : np.ndarray
-            Interpolated data for the shot with same shape as input.
-        indexes : np.ndarray
-            Grid indexes for the shot with shape (readouts, ndim).
-        weights : np.ndarray
-            Weights for the shot with shape (readouts, 1).
-            
-        """
-        # Convert shot_index to tuple if it's an integer
-        if isinstance(shot_index, int):
-            shot_index = (shot_index,)
-            
-        # Add a dummy batch dimension
-        input_reshaped = shot_data[:, np.newaxis, :]  # (nsamples, 1, ncoils)
-        
-        # Convert displacements to table indices
-        lut = self.plan["lut"][shot_index]
-        lut_flat = _flatten_lut(lut, self.nsteps)
-        
-        # Create output array
-        output = np.zeros_like(input_reshaped)
-        
-        # Perform interpolation
-        _interp(output, input_reshaped, self._grog_table, lut_flat)
-        
-        # Remove batch dimension
-        output = output[:, 0, :]  # (nsamples, ncoils)
-                
-        return output, self.plan["indexes"][shot_index], self.plan["weights"][shot_index][..., None]
-        
-    def _apply_whole_dataset(self, input_data):
-        """
-        Apply GROG interpolation to the entire dataset at once.
-        
-        Parameters
-        ----------
-        input_data : np.ndarray
-            Full dataset with shape (..., ncoils).
-            
-        Returns
-        -------
-        output : np.ndarray
-            Interpolated data with same shape as input.
-        indexes : np.ndarray
-            Grid indexes with shape (..., ndim).
-        weights : np.ndarray
-            Weights with shape (..., 1).
-            
-        """
-        # Store original data shape for reshaping output
-        original_shape = input_data.shape
-        
-        # Reshape input for processing
-        ncoils = original_shape[-1]
-        input_flattened = input_data.reshape(-1, ncoils)
-        
-        # Add a dummy batch dimension
-        input_reshaped = input_flattened[:, np.newaxis, :]  # (nsamples, 1, ncoils)
-                
-        # Convert displacements to table indices
-        lut = self.plan["lut"]
-        lut_flat = _flatten_lut(lut, self.nsteps).ravel()
-        
-        # Create output array
-        output_flat = np.zeros_like(input_reshaped)
-        
-        # Perform interpolation
-        _interp(output_flat, input_reshaped, self._grog_table, lut_flat)
-        
-        # Remove batch dimension
-        output_flat = output_flat[:, 0, :]  # (nsamples, ncoils)
-        
-        # Reshape outputs back to original shapes
-        output = output_flat.reshape(original_shape)
-        
-        return output, self.plan["indexes"], self.plan["weights"][..., None]
+    # Query Cartesian points within given radius from each sample
+    _samples_map = kdtree.query_ball_point(coords.reshape(-1, ndim), r=radius, workers=-1)
     
-    def _create_trajectory_plan(self):
-        """
-        Create the trajectory-dependent part of a GROG interpolation plan.
-            
-        Returns
-        -------
-        plan : dict
-            A dictionary containing trajectory-dependent information for interpolation.
-        """
-        coords = self.coords
-        shape = self.shape
-        oversamp = self.oversamp
-        nsteps = self.nsteps
-        
-        # Get dimensions from coords
-        ndim = coords.shape[-1]
-        
-        # Expand oversamp
-        if np.isscalar(oversamp):
-            oversamp = tuple(ndim * [oversamp])
-        elif len(oversamp) == 1:
-            oversamp = tuple(ndim * oversamp[0])
-        else:
-            oversamp = tuple(oversamp)
-            
-        # Apply oversampling
-        shape = [int(np.ceil(oversamp[n] * shape[n])) for n in range(len(shape))]
-            
-        # Rescale coordinates for oversampling
-        coords = rescale_coords(coords, shape)
-                
-        # Create indexes
-        indexes = np.round(coords)
-        
-        # Get displacement
-        displacement = indexes - coords
-        
-        # Convert displacements to table indices
-        lut = np.floor(10.0 * displacement).astype(int) + int(nsteps // 2)
-        
-        # Adjust indexes for the output grid
-        if np.isscalar(shape):
-            shape = [shape] * ndim
-        indexes = indexes + np.array(shape[:ndim][::-1]) // 2
-        
-        # Enforce integer indexes
-        indexes = indexes.astype(int) 
-        
-        # Create flat index for unique counting
-        unfolding = [1] + list(np.cumprod(list(shape)[::-1]))[:ndim-1]
-        flattened_indexes = np.sum(indexes * np.array(unfolding, dtype=int), axis=-1)
-        
-        # Count-based weights - inverse of occurrence count
-        _shape = flattened_indexes.shape
-        unique_idx, inverse, counts = np.unique(flattened_indexes.ravel(), return_inverse=True, return_counts=True)
-        
-        # Calculate weights
-        if self.weighting_mode == "distance":
-            # Distance-based weights - closer samples get higher weight
-            distances = np.sqrt(np.sum(displacement**2, axis=-1))
-            
-            # Invert distances to get weights (closer = higher weight)
-            epsilon = 1e-10
-            weights = 1.0 / (distances + epsilon)
-            
-            # Ravel weights
-            weights = weights.ravel()
+    # Count number of Cartesian target for each sample
+    num_targets_per_source = [len(el) for el in _samples_map]
+    
+    # Find max number of targets per source
+    max_num_targets_per_source = np.max(num_targets_per_source)
+    
+    # Pad to have equal number of targets per each source 
+    pad = [max_num_targets_per_source - count for count in num_targets_per_source]
+    
+    # Build weights
+    weights = [1 / count if count else 0.0 for count in num_targets_per_source]
+    weights = np.asarray(weights, dtype=np.float32)[..., None]
+    weights = np.repeat(weights, max_num_targets_per_source, -1)
+    
+    cols = np.arange(max_num_targets_per_source)
+    mask = cols >= (max_num_targets_per_source - np.asarray(pad)[:, None])
+    weights[mask] = 0.0
+    
+    # Pad samples_map
+    # Compute lengths
+    lens = np.asarray(num_targets_per_source)
+    samples_map = np.zeros((_samples_map.shape[0], max_num_targets_per_source), dtype=np.int32)
+    
+    # Flatten data
+    _samples_map = np.concatenate(_samples_map)
+    
+    # Build fancy indices
+    row_idx = np.repeat(np.arange(len(samples_map)), lens)
+    col_idx = np.concatenate([np.arange(l) for l in lens])
+    
+    # Fancy assignment
+    samples_map[row_idx, col_idx] = _samples_map
+    
+    # Free some memory
+    del _samples_map
+    del row_idx
+    del col_idx
+    del mask
+    del pad
+    gc.collect()
+    
+    # Reshape indexes map
+    samples_map = samples_map.reshape(*coords.shape[:-2], nsamples * max_num_targets_per_source)
+    
+    # Reshape weighs
+    weights = weights.reshape(*coords.shape[:-2], nsamples * max_num_targets_per_source)
 
-            # Compute total weight per grid location
-            total_weight = np.zeros(flattened_indexes.max() + 1, dtype=weights.dtype)
-            np.add.at(total_weight, flattened_indexes, weights)  # accumulate weights per unique index
-            
-            # Normalize
-            weights = weights / total_weight[flattened_indexes]
-        else:
-            weights = 1 / counts[inverse]
-            
-        # Reshape back to original
-        weights = weights.reshape(*_shape)
-
-        # Create plan dictionary
-        plan = {
-            "lut": lut,
-            "indexes": indexes,
-            "weights": weights,
-            "ndim": coords.shape[-1],
-        }
-        
-        return plan
-
-
-# %% Utility functions
-def _flatten_lut(lut, nsteps):
-    """Flatten LUT indices based on dimensionality."""
-    ndim = lut.shape[-1]
-    if ndim == 2:
-        return lut[..., 0] + lut[..., 1] * nsteps
-    else:  # ndim == 3
-        return lut[..., 0] + lut[..., 1] * nsteps + lut[..., 2] * nsteps**2
-
-@nb.njit(fastmath=True, cache=True)  # pragma: no cover
-def _dot_product(out, in_a, in_b):
-    """Matrix-vector multiplication helper."""
-    row, col = in_b.shape
-    for i in range(row):
-        for j in range(col):
-            out[j] += in_b[i][j] * in_a[j]
-    return out
-
-
-@nb.njit(fastmath=True, parallel=True)  # pragma: no cover
-def _interp(data_out, data_in, interp, lut):
-    """Numba-optimized interpolation kernel."""
-    nsamples, batch_size, _ = data_in.shape
-    for i in nb.prange(nsamples * batch_size):
-        sample = i // batch_size
-        batch = i % batch_size
-        idx = lut[sample]
-        _dot_product(
-            data_out[sample][batch], data_in[sample][batch], interp[idx]
+    # Get Cartesian coordinates
+    cart_output_coords = np.stack([grid[samples_map, ax] for ax in range(ndim)], axis=-1)
+    
+    # Get distances
+    distances = cart_output_coords - np.repeat(coords, max_num_targets_per_source, axis=-2)
+    
+    # Time map
+    if time_map is not None:
+        time_map, _ = np.broadcast_arrays(time_map, coords[..., 0])
+        time_map = np.repeat(time_map, max_num_targets_per_source, -1)
+    
+    return SimpleNamespace(
+        shape=shape, 
+        oversamp=oversamp, 
+        radius=radius, 
+        kernel_width=max_num_targets_per_source,
+        distances=distances,
+        indexes=samples_map,
+        weights=weights,
+        time_map=time_map,
         )
+
+def _GrogRegridder():
+    ...
+
+#%% Subroutines
+def _default_shape(ndim, shape):
+    if np.isscalar(shape):
+        shape = ndim * [shape]
+        
+    shape = tuple(shape)
+        
+    return shape
+    
+
+def _default_oversamp(ndim, oversamp):
+    if oversamp is None:
+        if ndim == 2:
+            oversamp = (1.0, 1.0)
+        else:
+            oversamp = (1.0, 1.0, 1.2)
+    
+    if np.isscalar(oversamp):
+        oversamp = ndim * [oversamp]
+        
+    oversamp = tuple(oversamp)
+    if len(oversamp) != ndim:
+        raise ValueError(f"Oversampling {oversamp }does not match number of dimensions {ndim}")
+        
+    return oversamp
+    
+
+def _create_grid(ndim, shape, oversamp):
+    grid = np.meshgrid(
+        *[
+            np.linspace(
+                -shape[n] // 2, shape[n] // 2 - 1, int(np.ceil(oversamp[n] * shape[n]))
+            )
+            for n in range(ndim)
+        ],
+        indexing="ij",
+    )
+    return np.stack([ax.ravel() for ax in grid], axis=-1).astype(np.float32)
+
+
+def _rescale_coords(coords, amp):
+    cmax = abs(coords).reshape(-1, coords.shape[-1]).max(axis=0)
+    if np.isscalar(amp):
+        amp = coords.shape[-1] * [amp]
+    return 0.5 * np.asarray(amp, dtype=coords.dtype) * coords / cmax
+
+
+def _compute_interpolator(samples_map, distances, radius, interp_kernel, precision):
+    ndims = distances.shape[-1]
+    pfac = 10.0**precision
+    stepsize = 10 ** (-precision)
+    nsteps = 2 * radius / 10 ** (-precision) + 1
+    nsteps = int(nsteps)
+        
+    # We can now use distances to compute the kernel table index, i.e.,
+    # the index in the precompute kernel table to select the appropriate precomputed
+    # interpolation kernel to grid each Non Cartesian sample to the target Cartesian location.
+    interp_idx = (radius + np.round(distances * pfac) / pfac) / stepsize
+    interp_idx = np.round(interp_idx).astype(np.float32)
+    
+    interp_idx *= np.asarray([1.0, nsteps, nsteps**2], dtype=np.float32)[:ndims]
+    interp_idx = np.round(interp_idx).astype(np.int32).sum(axis=-1)
+        
+    return SimpleNamespace(idx=interp_idx, kernel=interp_kernel)
+    
