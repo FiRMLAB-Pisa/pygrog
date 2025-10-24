@@ -11,6 +11,31 @@ import numpy as np
 
 from scipy.spatial import KDTree
 
+
+class GrogInterpolator:
+    
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def from_file(self):
+        ...
+        
+    def to_file(self):
+        ...
+        
+    def calc_grappa_kernel(self):
+        ...
+        
+    def interpolate(self):
+        ...
+        
+    def __call__(self):
+        return self.interpolate()
+        
+    
+    
+# %%
 def _CreateGrogPlan(
     shape, 
     coords, 

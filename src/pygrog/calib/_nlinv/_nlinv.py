@@ -54,15 +54,15 @@ def nlinv_calib(
     Parameters
     ----------
     y : NDArray[complex]
-        Input k-space dataset of shape ``(*others, coils, k2, k1, k0)``
+        Input k-space dataset of shape ``(coils, k2, k1, k0)``
     cal_width : int, optional
         Calibration region size. The default is ``20``.
     coords : NDArray, optional
-        Fourier domain coordinate array of shape ``(*others, coils, k2, k1, k0, ndim)``.
+        Fourier domain coordinate array of shape ``(coils, k2, k1, k0, ndim)``.
         Required for Non Cartesian datasets. 
         The default is ``None``.
     weights : NDArray, optional
-        K-space density compensation of shape ``(*others, coils, k2, k1, k0)``. 
+        K-space density compensation of shape ``(coils, k2, k1, k0)``. 
         The default is ``None``.
     shape : int, optional
         Matrix size of shape ``(ndim,)``.
@@ -71,7 +71,7 @@ def nlinv_calib(
         Number of spatial dimensions. Required for Cartesian datasets.
         The default is ``None``.
     mask : NDArray, optional
-        Sampling mask for Cartesian datasets of shape ``(*others, coils, k2, k1, k0)``.
+        Sampling mask for Cartesian datasets of shape ``(coils, k2, k1, k0)``.
     oversamp : float, optional
         Oversampling factor. The default is ``1.25``.
         Used for Non Cartesian only.
@@ -111,9 +111,9 @@ def nlinv_calib(
     Returns
     -------
     smaps : NDArray[complex]
-        Coil sensitivity maps of shape ``(n_coils, z, y, x)``.
+        Coil sensitivity maps of shape ``(coils, z, y, x)``.
     acr : NDArray[complex]
-        Autocalibration k-space region of shape ``(n_coils, z_cal, y_cal, x_cal)``.
+        Autocalibration k-space region of shape ``(coils, z_cal, y_cal, x_cal)``.
     image : NDArray[complex], optional
         Reconstructed magnetization of shape ``(z_cal, y_cal, x_cal)``. Only returned
         if ``ret_image == True``
@@ -129,7 +129,7 @@ def nlinv_calib(
         NONCART, oshape, cshape, cshape0, mask, y, _nlinv = _setup_cartesian(
             y,
             ndim,
-            mask,
+            mask[0],
             cal_width,
             sobolev_width,
             sobolev_deg,
@@ -147,8 +147,8 @@ def nlinv_calib(
         ) = _setup_noncartesian(
             y,
             shape[::-1], # 'xyz' -> 'zyx'
-            coords[...,::-1], # 'xyz' -> 'zyx'
-            weights,
+            coords[...,::-1][0], # 'xyz' -> 'zyx'
+            weights[0],
             cal_width,
             oversamp,
             eps,
