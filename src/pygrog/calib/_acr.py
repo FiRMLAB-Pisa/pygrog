@@ -12,13 +12,13 @@ from .._utils import rescale_coords
 
 @with_numpy_cupy
 def extract_acr(
-    data: NDArray,
+    data: NDArray[complex],
     cal_width: int = 24,
-    ndim: int = None,
-    mask: NDArray = None,
-    coords: NDArray = None,
-    weights: NDArray = None,
-    shape: int = None,
+    coords: NDArray[float] | None = None,
+    weights: NDArray[float] | None = None,
+    shape: int | None = None,
+    ndim: int | None = None,
+    mask: NDArray[bool] | None = None,
 ) -> tuple[NDArray, NDArray | None] | tuple[NDArray, NDArray, NDArray | None]:
     """
     Extract calibration region from input dataset.
@@ -29,11 +29,6 @@ def extract_acr(
         Input k-space dataset of shape ``(*others, coils, k2, k1, k0)``
     cal_width : int, optional
         Calibration region size. The default is ``24``.
-    ndim : int, optional
-        Number of spatial dimensions. Required for Cartesian datasets.
-        The default is ``None``.
-    mask : NDArray, optional
-        Sampling mask for Cartesian datasets of shape ``(*others, coils, k2, k1, k0)``.
     coords : NDArray, optional
         Fourier domain coordinate array of shape ``(*others, coils, k2, k1, k0, ndim)``.
         Required for Non Cartesian datasets. 
@@ -44,6 +39,11 @@ def extract_acr(
     shape : int, optional
         Matrix size of shape ``(ndim,)``.
         Required for Non Cartesian datasets. The default is ``None``.
+    ndim : int, optional
+        Number of spatial dimensions. Required for Cartesian datasets.
+        The default is ``None``.
+    mask : NDArray, optional
+        Sampling mask for Cartesian datasets of shape ``(*others, coils, k2, k1, k0)``.
 
     Raises
     ------

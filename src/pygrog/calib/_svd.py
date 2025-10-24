@@ -20,11 +20,11 @@ from ._acr import extract_acr
 def estimate_coil_subspace(
     data: NDArray[complex],
     num_coils: int = None,
-    explained_variance_ratio: float = None,
+    explained_variance_ratio: float | None = None,
     cal_width: int = 24,
-    ndim: int = None,
-    coords: NDArray[complex] = None,
+    coords: NDArray[float] | None = None,
     shape: int = None,
+    ndim: int | None = None,
 ) -> SVDCompression:
     """
     Estimate Bloch subspace basis.
@@ -39,9 +39,6 @@ def estimate_coil_subspace(
     explained_variance_ratio : float, optional
         Explained variance ratio for the given basis size. User can either specify this
         or the desired subspace size.
-    ndim : int, optional
-        Number of spatial dimensions. Required for Cartesian datasets.
-        The default is ``None``.
     coords : NDArray, optional
         Fourier domain coordinate array of shape ``(*others, coils, k2, k1, k0, ndim)``.
         Required for Non Cartesian datasets. 
@@ -49,6 +46,9 @@ def estimate_coil_subspace(
     shape : int, optional
         Matrix size of shape ``(ndim,)``.
         Required for Non Cartesian datasets. The default is ``None``.
+    ndim : int, optional
+        Number of spatial dimensions. Required for Cartesian datasets.
+        The default is ``None``.
 
     Returns
     -------
@@ -91,11 +91,11 @@ def estimate_coil_subspace(
 def compress_coil(
     data: NDArray[complex],
     num_coils: int = None,
-    explained_variance_ratio: float = None,
+    explained_variance_ratio: float | None = None,
     cal_width: int = 24,
-    ndim: int = None,
-    coords: NDArray[float] = None,
-    shape: int = None,
+    coords: NDArray[float] | None = None,
+    shape: int | None = None,
+    ndim: int | None = None,
 ) -> NDArray[complex]:
     """
     Compress data along ``coil`` axis.
@@ -110,9 +110,6 @@ def compress_coil(
     explained_variance_ratio : float, optional
         Explained variance ratio for the given basis size. User can either specify this
         or the desired subspace size.
-    ndim : int, optional
-        Number of spatial dimensions. Required for Cartesian datasets.
-        The default is ``None``.
     coords : NDArray, optional
         Fourier domain coordinate array of shape ``(*others, coils, k2, k1, k0, ndim)``.
         Required for Non Cartesian datasets. 
@@ -120,6 +117,9 @@ def compress_coil(
     shape : int, optional
         Matrix size of shape ``(ndim,)``.
         Required for Non Cartesian datasets. The default is ``None``.
+    ndim : int, optional
+        Number of spatial dimensions. Required for Cartesian datasets.
+        The default is ``None``.
 
     Returns
     -------
@@ -163,8 +163,8 @@ class SVDCompression:
     def __init__(
         self,
         training_data: NDArray[complex],
-        num_coeff: int = None,
-        explained_variance_ratio: float = None,
+        num_coeff: int | None = None,
+        explained_variance_ratio: float | None = None,
     ):
         if num_coeff is None and explained_variance_ratio is None:
             raise ValueError("Please specify 'num_coeff' or 'explained_variance_ratio'.")
