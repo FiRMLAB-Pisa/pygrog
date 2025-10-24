@@ -46,6 +46,8 @@ dependencies = [
     "sigpy",
     "torch",
     "ipywidgets",
+    "ismrmrd",
+    "h5py",
 ]
 
 [project.optional-dependencies] # Optional

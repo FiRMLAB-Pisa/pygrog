@@ -40,7 +40,7 @@ def estimate_coil_subspace(
         Explained variance ratio for the given basis size. User can either specify this
         or the desired subspace size.
     coords : NDArray, optional
-        Fourier domain coordinate array of shape ``(*others, coils, k2, k1, k0, ndim)``.
+        Fourier domain coordinate array of shape ``(*others, 1, k2, k1, k0, ndim)``.
         Required for Non Cartesian datasets. 
         The default is ``None``.
     shape : int, optional
@@ -111,7 +111,7 @@ def compress_coil(
         Explained variance ratio for the given basis size. User can either specify this
         or the desired subspace size.
     coords : NDArray, optional
-        Fourier domain coordinate array of shape ``(*others, coils, k2, k1, k0, ndim)``.
+        Fourier domain coordinate array of shape ``(*others, 1, k2, k1, k0, ndim)``.
         Required for Non Cartesian datasets. 
         The default is ``None``.
     shape : int, optional

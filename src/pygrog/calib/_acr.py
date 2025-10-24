@@ -19,22 +19,22 @@ def extract_acr(
     shape: int | None = None,
     ndim: int | None = None,
     mask: NDArray[bool] | None = None,
-) -> tuple[NDArray, NDArray | None] | tuple[NDArray, NDArray, NDArray | None]:
+) -> tuple[NDArray[complex], NDArray[bool] | None] | tuple[NDArray[complex], NDArray[float], NDArray[float] | None]:
     """
     Extract calibration region from input dataset.
 
     Parameters
     ----------
     data : NDArray
-        Input k-space dataset of shape ``(*others, coils, k2, k1, k0)``
+        Input k-space dataset of shape ``(*others, coils, k2, k1, k0)``.
     cal_width : int, optional
         Calibration region size. The default is ``24``.
-    coords : NDArray, optional
-        Fourier domain coordinate array of shape ``(*others, coils, k2, k1, k0, ndim)``.
+    coords : NDArray[float], optional
+        Fourier domain coordinate array of shape ``(*others, 1, k2, k1, k0, ndim)``.
         Required for Non Cartesian datasets. 
         The default is ``None``.
-    weights : NDArray, optional
-        K-space density compensation of shape ``(*others, coils, k2, k1, k0)``. 
+    weights : NDArray[float], optional
+        K-space density compensation of shape ``(*others, 1, k2, k1, k0)``. 
         The default is ``None``.
     shape : int, optional
         Matrix size of shape ``(ndim,)``.
@@ -42,8 +42,8 @@ def extract_acr(
     ndim : int, optional
         Number of spatial dimensions. Required for Cartesian datasets.
         The default is ``None``.
-    mask : NDArray, optional
-        Sampling mask for Cartesian datasets of shape ``(*others, coils, k2, k1, k0)``.
+    mask : NDArray[bool], optional
+        Sampling mask for Cartesian datasets of shape ``(*others, 1, k2, k1, k0)``.
 
     Raises
     ------
@@ -53,14 +53,14 @@ def extract_acr(
 
     Returns
     -------
-    cal_data : ArrayLike
+    cal_data : NDArray[complex]
         Calibration dataset of shape ``(*others_cal, coils, k2_cal, k1_cal, k0_cal)``
-    cal_mask : ArrayLike, optional
-        Sampling mask for calibration dataset of shape ``(*others_cal, coils, k2_cal, k1_cal, k0_cal)`` (Cartesian).
-    cal_coords : ArrayLike, optional
-        Trajectory for calibration dataset of shape ``(*others_cal, coils, k2_cal, k1_cal, k0_cal, ndim)`` (Non Cartesian).
-    cal_weights : ArrayLike, optional
-        Density compensation for calibration dataset of shape ``(*others_cal, coils, k2_cal, k1_cal, k0_cal)`` (Non Cartesian).
+    cal_mask : NDArray[bool], optional
+        Sampling mask for calibration dataset of shape ``(*others_cal, 1, k2_cal, k1_cal, k0_cal)`` (Cartesian).
+    cal_coords : NDArray[float], optional
+        Trajectory for calibration dataset of shape ``(*others_cal, coi1ls, k2_cal, k1_cal, k0_cal, ndim)`` (Non Cartesian).
+    cal_weights : NDArray[float], optional
+        Density compensation for calibration dataset of shape ``(*others_cal, 1, k2_cal, k1_cal, k0_cal)`` (Non Cartesian).
 
     """
     if coords is None:

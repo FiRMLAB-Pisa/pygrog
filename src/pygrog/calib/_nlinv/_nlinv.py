@@ -53,16 +53,16 @@ def nlinv_calib(
 
     Parameters
     ----------
-    y : NDArray[complex]
-        Input k-space dataset of shape ``(coils, k2, k1, k0)``
+    data : NDArray[complex]
+        Input k-space dataset of shape ``(coils, k2, k1, k0)``.
     cal_width : int, optional
         Calibration region size. The default is ``20``.
     coords : NDArray, optional
-        Fourier domain coordinate array of shape ``(coils, k2, k1, k0, ndim)``.
+        Fourier domain coordinate array of shape ``(1, k2, k1, k0, ndim)``.
         Required for Non Cartesian datasets. 
         The default is ``None``.
     weights : NDArray, optional
-        K-space density compensation of shape ``(coils, k2, k1, k0)``. 
+        K-space density compensation of shape ``(1, k2, k1, k0)``. 
         The default is ``None``.
     shape : int, optional
         Matrix size of shape ``(ndim,)``.
@@ -71,7 +71,7 @@ def nlinv_calib(
         Number of spatial dimensions. Required for Cartesian datasets.
         The default is ``None``.
     mask : NDArray, optional
-        Sampling mask for Cartesian datasets of shape ``(coils, k2, k1, k0)``.
+        Sampling mask for Cartesian datasets of shape ``(1, k2, k1, k0)``.
     oversamp : float, optional
         Oversampling factor. The default is ``1.25``.
         Used for Non Cartesian only.
@@ -117,6 +117,18 @@ def nlinv_calib(
     image : NDArray[complex], optional
         Reconstructed magnetization of shape ``(z_cal, y_cal, x_cal)``. Only returned
         if ``ret_image == True``
+            
+    Notes
+    -----
+    Implements the NLINV algorithm as described in [1]_.
+
+    References
+    ----------
+    .. [1] Uecker, M., Hohage, T., Block, K.T. and Frahm, J. (2008), 
+           Image reconstruction by regularized nonlinear inversion—
+           Joint estimation of coil sensitivities and image content†. 
+           Magn. Reson. Med., 60: 674-682. 
+           https://doi.org/10.1002/mrm.21691
 
     """
     y = data
