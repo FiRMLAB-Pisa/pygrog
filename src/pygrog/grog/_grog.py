@@ -142,7 +142,7 @@ class GrogInterpolator:
         oshape = np.asarray(self.plan.shape) * np.asarray(self.plan.oversamp)
         oshape = np.ceil(oshape).astype(int).tolist()
         return SimpleNamespace(
-            shape=self.plan.shape, 
+            shape=tuple(self.plan.shape), 
             oshape=tuple(oshape),
             indexes=self.plan.indexes, 
             weights=self.plan.weights, 
@@ -233,6 +233,8 @@ class GrogInterpolator:
         
         interp_idx *= np.asarray([1.0, nsteps, nsteps**2], dtype=np.float32)[:ndim]
         interp_idx = np.round(interp_idx).astype(np.int32).sum(axis=-1)
+        interp_idx[interp_idx < 0] = 0
+        interp_idx[interp_idx > interp_kernel.shape[0] - 1] = interp_kernel.shape[0]  - 1
             
         self._interpolator = SimpleNamespace(idx=interp_idx, kernel=interp_kernel, width=self.plan.kernel_width)
         self._interpolator_set = True
@@ -301,10 +303,13 @@ class GrogInterpolator:
         # Apply regridding
         output = _GrogRegridder(data, self._interpolator, shot_index)
         
+        # Force garbage collection
+        gc.collect()
+        
         # If required, reconstruct
         if ret_image:
             ...
-            
+                        
         return output
             
     def __call__(
@@ -432,22 +437,20 @@ def _GrogRegridder(data, interpolator, shot_idx):
     else:
         data = data[:, None, :] # (k0', coil) -> (k0', 1, coil)
     data = np.ascontiguousarray(data)
-
-    # Allocate output
-    output = np.zeros_like(data) # (samples, batches, coil) or (k0', 1, coil)
     
     # Actual interpolation
-    _interpolate(output, data, indexes, interpolator.kernel)
+    _interpolate(data, indexes, interpolator.kernel)
     
     # Reshape back
     if shot_idx is None:
-        output = output.swapaxes(0, 1) # (samples, batches, coil) -> (batches, samples, coil) 
-        output = output.reshape(data_shape) # (batches, samples, coil) -> (*other, 1, k2, k1, k0', coil)
-        output = output.swapaxes(-5, -1)[..., 0]  # (*other, 1, k2, k1, k0, coil) -> (*other, coil, k2, k1, k0)
+        data = data.swapaxes(0, 1) # (samples, batches, coil) -> (batches, samples, coil) 
+        data = data.reshape(data_shape) # (batches, samples, coil) -> (*other, 1, k2, k1, k0', coil)
+        data = data.swapaxes(-5, -1)[..., 0]  # (*other, 1, k2, k1, k0, coil) -> (*other, coil, k2, k1, k0)
     else:
-        output = output[:, 0, :].T # (k0', 1, coil) -> (coil, k0')
+        data = data[:, 0, :].T # (k0', 1, coil) -> (coil, k0')
         
-    return np.ascontiguousarray(output)
+    # Make sure output is contiguous
+    return np.ascontiguousarray(data)
     
 #%% Subroutines
 def _store_plan_inside_mrd(dset, plan):
@@ -555,23 +558,29 @@ def _compute_interpolator(samples_map, distances, radius, interp_kernel, precisi
     return SimpleNamespace(idx=interp_idx, kernel=interp_kernel)
 
 # %% Numba helpers
-@nb.njit(fastmath=True, cache=True, inline="always")  # pragma: no cover
-def _matvec(y, A, x):
-    ni, nj = A.shape
-    for i in range(ni):
-        for j in range(nj):
-            y[i] += A[i][j] * x[j]
-            
-@nb.njit(fastmath=True, cache=True, inline="always")  # pragma: no cover
-def _interpolate(output, data, indexes, kernel):
-    nbatches, nsamples, ncoils = output.shape
-    
+@nb.njit(parallel=True, fastmath=True, cache=True, inline="always")
+def _interpolate(data, indexes, kernel):
+    """
+    Numba-friendly interpolation: data is expected with shape (nsamples, nbatches, ncoils)
+    kernel is an array of shape (n_kernels, ncoils, ncoils)
+    indexes is an integer array of length nsamples selecting a kernel per-sample.
+
+    For each sample n and batch b:
+        data[n, b, :] := kernel[indexes[n]] @ data[n, b, :]
+    Implemented with explicit loops to avoid .dot attribute lookups and shape-checks
+    that prevent good extraction/hoisting in Numba.
+    """
+    nsamples, nbatches, ncoils = data.shape
+
     for n in nb.prange(nsamples):
-        kernel_value = kernel[indexes[n]] 
+        kv = kernel[indexes[n]]  # (ncoils, ncoils)
         for b in range(nbatches):
-            for batch in range(nbatches):
-                _matvec(
-                    output[n, batch], # (ncoils,)
-                    kernel_value, # (ncoils, ncoils)
-                    data[n, b], # (ncoils,)
-                )
+            # compute result in-place (overwrites data[n, b, :])
+            # Use an explicit mat-vec multiply so Numba can optimize it better.
+            # temp accumulator per output component i
+            for i in range(ncoils):
+                s = 0.0
+                # kv[i, j] times data[n, b, j]
+                for j in range(ncoils):
+                    s += kv[i, j] * data[n, b, j]
+                data[n, b, i] = s
