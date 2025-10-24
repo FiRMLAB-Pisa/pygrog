@@ -1,6 +1,5 @@
 """GROG interpolation routines."""
 
-__all__ = ["_ExtendedGrogInterpolator", "_GrogInterpolator"]
+__all__ = ["GrogInterpolator"]
 
-from ._grog import _GrogInterpolator
-from ._extended_grog import _ExtendedGrogInterpolator
+from ._grog import GrogInterpolator

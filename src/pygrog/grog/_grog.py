@@ -130,6 +130,24 @@ class GrogInterpolator:
             time_map: NDArray[float] | None = None,
     ):
         self.plan = _CreateGrogPlan(shape, coords, oversamp, radius, time_map)
+        
+    def metadata(self):
+        """
+        Return metadata associated with Cartesian dataset.
+        
+        These can be used to convert sparse into dense Cartesian data,
+        in order to get an image.
+
+        """
+        oshape = np.asarray(self.plan.shape) * np.asarray(self.plan.oversamp)
+        oshape = np.ceil(oshape).astype(int).tolist()
+        return SimpleNamespace(
+            shape=self.plan.shape, 
+            oshape=tuple(oshape),
+            indexes=self.plan.indexes, 
+            weights=self.plan.weights, 
+            time_map=self.plan.time_map,
+            )
     
     @classmethod
     def from_file(cls, filepath: str | pathlib.Path) -> "GrogInterpolator":

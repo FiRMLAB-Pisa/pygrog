@@ -13,8 +13,7 @@ from scipy.linalg import fractional_matrix_power as fmp
 
 from mrinufft._array_compat import with_numpy
 
-from ..linalg import lstsq
-
+from .._linalg import lstsq
 
 def KernelTable(
         train_data: NDArray[complex], 
