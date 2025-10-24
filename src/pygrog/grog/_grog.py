@@ -7,6 +7,7 @@ import os
 import pathlib
 
 from types import SimpleNamespace
+from itertools import chain
 from numpy.typing import NDArray
 
 import h5py
@@ -339,52 +340,48 @@ def _CreateGrogPlan(
     # Create grid
     grid = _create_grid(ndim, shape, oversamp)
     
-    # Create KDTree
-    kdtree = KDTree(grid)
+    # Create KDTree for grid
+    kdtree_grid = KDTree(grid)
+       
+    # Create KDTree for grid
+    kdtree_coords = KDTree(coords.reshape(-1, coords.shape[-1]))
+    
+    # Query Non Cartesian points within given radius from each grid point
+    weights = kdtree_coords.query_ball_point(grid, r=radius, workers=-1)
+    weights = [len(w) for w in weights]
+    weights = np.asarray([1.0 / w if w != 0.0 else 0.0 for w in weights])
     
     # Query Cartesian points within given radius from each sample
-    _samples_map = kdtree.query_ball_point(coords.reshape(-1, ndim), r=radius, workers=-1)
-    
+    _samples_map = kdtree_grid.query_ball_point(coords.reshape(-1, ndim), r=radius, workers=-1)
+ 
     # Count number of Cartesian target for each sample
-    num_targets_per_source = [len(el) for el in _samples_map]
+    num_targets_per_source = np.asarray([len(el) for el in _samples_map])
     
     # Find max number of targets per source
     max_num_targets_per_source = np.max(num_targets_per_source)
-    
-    # Pad to have equal number of targets per each source 
-    pad = [max_num_targets_per_source - count for count in num_targets_per_source]
-    
-    # Build weights
-    weights = [1 / count if count else 0.0 for count in num_targets_per_source]
-    weights = np.asarray(weights, dtype=np.float32)[..., None]
-    weights = np.repeat(weights, max_num_targets_per_source, -1)
-    
+        
+    # Mask of true samples
     cols = np.arange(max_num_targets_per_source)
-    mask = cols >= (max_num_targets_per_source - np.asarray(pad)[:, None])
-    weights[mask] = 0.0
+    mask = cols >= num_targets_per_source[:, None]
     
-    # Pad samples_map
-    # Compute lengths
-    lens = np.asarray(num_targets_per_source)
-    samples_map = np.zeros((_samples_map.shape[0], max_num_targets_per_source), dtype=np.int32)
-    
-    # Flatten data
-    _samples_map = np.concatenate(_samples_map)
-    
-    # Build fancy indices
-    row_idx = np.repeat(np.arange(len(samples_map)), lens)
-    col_idx = np.concatenate([np.arange(l) for l in lens])
-    
-    # Fancy assignment
+    # Get Indexes
+    samples_map = np.zeros((_samples_map.shape[0], max_num_targets_per_source), dtype=np.int32)    
+    _samples_map = np.fromiter(chain.from_iterable(_samples_map), dtype=np.int32)  
+    row_idx = np.repeat(np.arange(samples_map.shape[0]), num_targets_per_source)
+    col_idx = np.concatenate([np.arange(l) for l in num_targets_per_source])    
     samples_map[row_idx, col_idx] = _samples_map
     
-    # Free some memory
-    del _samples_map
-    del row_idx
-    del col_idx
-    del mask
-    del pad
-    gc.collect()
+    # Get weights
+    weights = weights[samples_map]
+    weights[mask] = 0.0
+    
+    # Get Cartesian coordinates
+    cart_output_coords = np.stack([grid[samples_map, ax] for ax in range(ndim)], axis=-1)
+    cart_output_coords[mask, :] = 0.0
+
+    # Get distances
+    distances = cart_output_coords - np.repeat(coords.reshape(-1, 1, coords.shape[-1]), max_num_targets_per_source, axis=-2)
+    distances[mask, :] = 0.0
     
     # Reshape indexes map
     samples_map = samples_map.reshape(*coords.shape[:-2], nsamples * max_num_targets_per_source)
@@ -392,16 +389,19 @@ def _CreateGrogPlan(
     # Reshape weighs
     weights = weights.reshape(*coords.shape[:-2], nsamples * max_num_targets_per_source)
 
-    # Get Cartesian coordinates
-    cart_output_coords = np.stack([grid[samples_map, ax] for ax in range(ndim)], axis=-1)
+    # Reshape Cartesian coordinates
+    cart_output_coords = cart_output_coords.reshape(*coords.shape[:-2], nsamples * max_num_targets_per_source, -1)
     
-    # Get distances
-    distances = cart_output_coords - np.repeat(coords, max_num_targets_per_source, axis=-2)
-    
+    # Reshape distances
+    distances = distances.reshape(*coords.shape[:-2], nsamples * max_num_targets_per_source, -1)
+
     # Time map
     if time_map is not None:
         time_map, _ = np.broadcast_arrays(time_map, coords[..., 0])
+        time_map = time_map.ravel()[:, None]
         time_map = np.repeat(time_map, max_num_targets_per_source, -1)
+        time_map[mask] = 0.0
+        time_map = time_map.reshape(*coords.shape[:-2], nsamples * max_num_targets_per_source)
     
     return SimpleNamespace(
         shape=shape, 
