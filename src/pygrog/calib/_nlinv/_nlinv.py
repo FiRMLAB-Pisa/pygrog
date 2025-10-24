@@ -25,7 +25,7 @@ from ._nlinv_op import CartesianNlinvOp, NonCartesianNlinvOp
 @with_numpy_cupy
 def nlinv_calib(
     data: NDArray[complex],
-    cal_width: int | None = None,
+    cal_width: int = 20,
     coords: NDArray[float] | None = None,
     weights: NDArray[float] | None = None,
     shape: list[int] | tuple[int] | None = None,
@@ -56,7 +56,7 @@ def nlinv_calib(
     y : NDArray[complex]
         Input k-space dataset of shape ``(*others, coils, k2, k1, k0)``
     cal_width : int, optional
-        Calibration region size. The default is ``24``.
+        Calibration region size. The default is ``20``.
     coords : NDArray, optional
         Fourier domain coordinate array of shape ``(*others, coils, k2, k1, k0, ndim)``.
         Required for Non Cartesian datasets. 

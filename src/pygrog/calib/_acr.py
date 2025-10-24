@@ -13,7 +13,7 @@ from .._utils import rescale_coords
 @with_numpy_cupy
 def extract_acr(
     data: NDArray[complex],
-    cal_width: int = 24,
+    cal_width: int = 20,
     coords: NDArray[float] | None = None,
     weights: NDArray[float] | None = None,
     shape: int | None = None,
