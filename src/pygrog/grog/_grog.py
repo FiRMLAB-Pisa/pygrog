@@ -330,88 +330,61 @@ def _CreateGrogPlan(
     time_map=None
 ):
     ndim = coords.shape[-1]
-    nsamples = coords.shape[-2]
     
     # Preprocess args
     shape = _default_shape(ndim, shape)
     oversamp = _default_oversamp(ndim, oversamp)
     coords = _rescale_coords(coords, shape[-ndim:])
+    coords_shape = coords.shape
+    if time_map is not None:
+        time_map, _ = np.broadcast_arrays(time_map, coords[..., 0])
     
     # Create grid
     grid = _create_grid(ndim, shape, oversamp)
     
-    # Create KDTree for grid
-    kdtree_grid = KDTree(grid)
-       
-    # Create KDTree for grid
-    kdtree_coords = KDTree(coords.reshape(-1, coords.shape[-1]))
+    # Get weights to average each source point
+    weights = _estimate_weights(grid, coords, radius)
     
-    # Query Non Cartesian points within given radius from each grid point
-    weights = kdtree_coords.query_ball_point(grid, r=radius, workers=-1)
-    weights = [len(w) for w in weights]
-    weights = np.asarray([1.0 / w if w != 0.0 else 0.0 for w in weights])
+    # Get flattened jagget array of target indexes
+    indexes, jagged_converter = _estimate_indexes(grid, coords, radius)
+    kernel_width = jagged_converter.shape[-1]
     
-    # Query Cartesian points within given radius from each sample
-    _samples_map = kdtree_grid.query_ball_point(coords.reshape(-1, ndim), r=radius, workers=-1)
- 
-    # Count number of Cartesian target for each sample
-    num_targets_per_source = np.asarray([len(el) for el in _samples_map])
+    # For each Non Cartesian source, find distance from each Cartesian target
+    distances = _estimate_distances(grid, coords, indexes, jagged_converter)
     
-    # Find max number of targets per source
-    max_num_targets_per_source = np.max(num_targets_per_source)
-        
-    # Mask of true samples
-    cols = np.arange(max_num_targets_per_source)
-    mask = cols >= num_targets_per_source[:, None]
+    # Assign weight to the correct Non Cartesian sample
+    weights = jagged_converter.to_standard_array(weights[indexes])
     
-    # Get Indexes
-    samples_map = np.zeros((_samples_map.shape[0], max_num_targets_per_source), dtype=np.int32)    
-    _samples_map = np.fromiter(chain.from_iterable(_samples_map), dtype=np.int32)  
-    row_idx = np.repeat(np.arange(samples_map.shape[0]), num_targets_per_source)
-    col_idx = np.concatenate([np.arange(l) for l in num_targets_per_source])    
-    samples_map[row_idx, col_idx] = _samples_map
-    
-    # Get weights
-    weights = weights[samples_map]
-    weights[mask] = 0.0
-    
-    # Get Cartesian coordinates
-    cart_output_coords = np.stack([grid[samples_map, ax] for ax in range(ndim)], axis=-1)
-    cart_output_coords[mask, :] = 0.0
-
-    # Get distances
-    distances = cart_output_coords - np.repeat(coords.reshape(-1, 1, coords.shape[-1]), max_num_targets_per_source, axis=-2)
-    distances[mask, :] = 0.0
-    
-    # Reshape indexes map
-    samples_map = samples_map.reshape(*coords.shape[:-2], nsamples * max_num_targets_per_source)
-    
-    # Reshape weighs
-    weights = weights.reshape(*coords.shape[:-2], nsamples * max_num_targets_per_source)
-
-    # Reshape Cartesian coordinates
-    cart_output_coords = cart_output_coords.reshape(*coords.shape[:-2], nsamples * max_num_targets_per_source, -1)
-    
-    # Reshape distances
-    distances = distances.reshape(*coords.shape[:-2], nsamples * max_num_targets_per_source, -1)
-
-    # Time map
+    # Assign to each sample its sampling time
     if time_map is not None:
-        time_map, _ = np.broadcast_arrays(time_map, coords[..., 0])
-        time_map = time_map.ravel()[:, None]
-        time_map = np.repeat(time_map, max_num_targets_per_source, -1)
-        time_map[mask] = 0.0
-        time_map = time_map.reshape(*coords.shape[:-2], nsamples * max_num_targets_per_source)
+        time_map = jagged_converter.to_jagged_array(time_map)
+
+    # Convert jagged indexes array to standard (zero-filled) array
+    indexes = jagged_converter.to_standard_array(indexes)
     
+    # Flatten
+    distances = distances.reshape(-1, ndim)
+    weights = weights.ravel()
+    if time_map is not None:
+        time_map = time_map.ravel()
+    indexes = indexes.ravel()
+    
+    # Reformat for output
+    distances = distances.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width, ndim)
+    weights = weights.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width)
+    if time_map is not None:
+        time_map = time_map.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width)
+    indexes = indexes.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width)
+            
     return SimpleNamespace(
-        shape=shape, 
-        oversamp=oversamp, 
-        radius=radius, 
-        kernel_width=max_num_targets_per_source,
-        distances=distances,
-        indexes=samples_map,
-        weights=weights,
-        time_map=time_map,
+            shape=shape, 
+            oversamp=oversamp, 
+            radius=radius, 
+            kernel_width=kernel_width,
+            distances=distances,
+            indexes=indexes,
+            weights=weights,
+            time_map=time_map,
         )
 
 def _GrogRegridder(data, interpolator, shot_idx):
@@ -521,6 +494,12 @@ def _default_oversamp(ndim, oversamp):
         
     return oversamp
     
+def _rescale_coords(coords, amp):
+    cmax = abs(coords).reshape(-1, coords.shape[-1]).max(axis=0)
+    if np.isscalar(amp):
+        amp = coords.shape[-1] * [amp]
+    return 0.5 * np.asarray(amp, dtype=coords.dtype) * coords / cmax
+
 def _create_grid(ndim, shape, oversamp):
     grid = np.meshgrid(
         *[
@@ -533,12 +512,71 @@ def _create_grid(ndim, shape, oversamp):
     )
     return np.stack([ax.ravel() for ax in grid], axis=-1).astype(np.float32)
 
-def _rescale_coords(coords, amp):
-    cmax = abs(coords).reshape(-1, coords.shape[-1]).max(axis=0)
-    if np.isscalar(amp):
-        amp = coords.shape[-1] * [amp]
-    return 0.5 * np.asarray(amp, dtype=coords.dtype) * coords / cmax
+def _estimate_weights(grid, coords, radius):
+    kdtree_coords = KDTree(coords.reshape(-1, coords.shape[-1]))
+    
+    # Query Non Cartesian points within given radius from each grid point
+    weights = kdtree_coords.query_ball_point(grid, r=radius, workers=-1)
+    weights = [1 / len(w) if len(w) else 0.0 for w in weights]
+    return np.asarray(weights, dtype=np.float32)
 
+class _JaggedConverter:
+    
+    def __init__(self, num_sources, num_targets_per_source):
+        # Build row indexes
+        self.row_idx = np.repeat(np.arange(num_sources, dtype=int), num_targets_per_source)
+
+        # Build col indexes        
+        total = int(num_targets_per_source.sum())       
+        starts = np.concatenate(([0], np.cumsum(num_targets_per_source)[:-1]))
+        self.col_idx = np.arange(total, dtype=np.int32) - np.repeat(starts, num_targets_per_source).astype(np.int32)   
+        
+        self.num_sources = num_sources
+        self.max_num_targets_per_source = np.max(num_targets_per_source)
+        self.num_targets_per_source = num_targets_per_source
+        
+    def to_standard_array(self, input):
+        output = np.zeros((self.num_sources, self.max_num_targets_per_source), dtype=input.dtype)
+        output[self.row_idx, self.col_idx] = input
+        return output
+    
+    def to_jagged_array(self, input):
+        return np.repeat(input, self.num_targets_per_source)
+    
+    @property
+    def shape(self):
+        return (self.num_sources, self.max_num_targets_per_source)
+    
+def _estimate_indexes(grid, coords, radius):
+    ndim = coords.shape[-1]
+    kdtree_grid = KDTree(grid)
+       
+    # Query Cartesian points within given radius from each sample (jagged array)
+    indexes = kdtree_grid.query_ball_point(coords.reshape(-1, ndim), r=radius, workers=-1)
+ 
+    # Count number of Cartesian target for each sample
+    num_targets_per_source = np.asarray([len(idx) for idx in indexes], dtype=np.int32)
+        
+    # Build converter from jagged to standard array
+    jagged_onverter = _JaggedConverter(indexes.shape[0], num_targets_per_source)
+            
+    # Flatten indexes
+    indexes = np.fromiter(chain.from_iterable(indexes.tolist()), dtype=np.int32)
+    
+    return indexes, jagged_onverter
+
+def _estimate_distances(grid, coords, indexes, jagged_converter):
+    ndim = coords.shape[-1]
+    coords = np.ascontiguousarray(coords.reshape(-1, ndim).T)
+    grid = np.ascontiguousarray(grid.T)
+    distances = []
+    for ax in range(ndim):
+        _cart_target_coords = grid[ax][indexes]
+        _noncart_source_coords = jagged_converter.to_jagged_array(coords[ax])
+        _distance = _cart_target_coords - _noncart_source_coords
+        distances.append(jagged_converter.to_standard_array(_distance))
+    return np.stack(distances, axis=-1)
+    
 def _compute_interpolator(samples_map, distances, radius, interp_kernel, precision):
     ndims = distances.shape[-1]
     pfac = 10.0**precision
