@@ -5,6 +5,7 @@ __all__ = ["GrogInterpolator"]
 import gc
 import os
 import pathlib
+import psutil
 
 from types import SimpleNamespace
 from itertools import chain
@@ -373,11 +374,51 @@ def _CreateGrogPlan(
     # Reformat for output
     distances = distances.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width, ndim)
     cart_target_coords = cart_target_coords.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width, ndim)
-    weights = weights.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width)
+    
+    # Weights, time_map and indexes can be flattened to (*others, nsamples_per_volume)
+    weights = weights.reshape(*coords_shape[:-5], -1)
     if time_map is not None:
-        time_map = time_map.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width)
-    indexes = indexes.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width)
-            
+        time_map = time_map.reshape(*coords_shape[:-5], -1)
+    indexes = indexes.reshape(*coords_shape[:-5], -1)
+        
+    # Weights, time_map and indexes can be flattened to (*others, nsamples_per_volume)
+    weights = weights.reshape(*coords_shape[:-5], -1)
+    if time_map is not None:
+        time_map = time_map.reshape(*coords_shape[:-5], -1)
+    indexes = indexes.reshape(*coords_shape[:-5], -1)
+    
+    # Exclude fake points from computation
+    idx = np.argsort(weights);
+    true_begin = np.argmax(weights[idx] > 0)
+    
+    # Radial balancing
+    radial_coords = (cart_target_coords**2).sum(axis=-1)**0.5
+    radial_coords = radial_coords.reshape(*coords_shape[:-5], -1)
+    radialsort = np.argsort(radial_coords[true_begin:])
+    radial_coords = radial_coords[true_begin:][radialsort]
+    
+    # Get num workers
+    num_workers = psutil.cpu_count(logical=False)
+    
+    # Find center threadmask
+    num_center_samples = np.argmax(radial_coords > 0.0)
+    center_bin_starts, center_bin_counts  = _split_indices(num_center_samples, num_workers)
+    
+    # Find outer threadmask
+    _, outer_bin_counts  = _split_into_uniform_bins(radial_coords[center_bin_starts[-1]+center_bin_counts[-1]:], num_workers)
+    outer_bin_starts = np.r_[center_bin_starts[-1] + center_bin_counts[-1], center_bin_starts[-1] + center_bin_counts[-1] + outer_bin_counts]
+    
+    # gridsort = np.concatenate((idx[:true_begin], idx[true_begin:][radialsort]))
+    # datasort = np.zeros_like(gridsort) 
+    # np.put_along_axis(datasort, gridsort, np.arange(gridsort.shape[-1]), axis=-1)
+    
+    # # Sort according to weights
+    # radial_coords = radial_coords[gridsort]
+    # weights = weights[gridsort]
+    # if time_map is not None:
+    #     time_map = time_map[gridsort]
+    # indexes = indexes[gridsort]
+        
     return SimpleNamespace(
             shape=shape, 
             oversamp=oversamp, 
@@ -579,8 +620,42 @@ def _estimate_distances(grid, coords, indexes, jagged_converter):
         _noncart_source_coords = jagged_converter.to_jagged_array(coords[ax])
         _distance = _cart_target_coords - _noncart_source_coords
         distances.append(jagged_converter.to_standard_array(_distance))
-        cart_target_coords.append(jagged_converter.to_standard_array(_distance))
+        cart_target_coords.append(jagged_converter.to_standard_array(_cart_target_coords))
     return np.stack(distances, axis=-1), np.stack(cart_target_coords, axis=-1)
+
+def _split_indices(N, n):
+    q, r = divmod(N, n)
+    starts = []
+    counts = []
+    start = 0
+    for i in range(n):
+        end = start + q + (1 if i < r else 0)
+        starts.append(start)
+        counts.append(end-start)
+        start = end
+    return np.asarray(starts, dtype=np.uint32), np.asarray(counts, dtype=np.uint32)
+
+def _split_into_uniform_bins(samples, n_bins):
+    starts = np.r_[0, np.where(np.diff(samples) != 0)[0] + 1]
+    counts = np.diff(np.r_[starts, len(samples)]).astype(np.uint32)
+    
+    total = counts.sum().item()
+    target = total / n_bins
+
+    bin_starts = [0]
+    bin_counts = []
+    acc = 0.0
+
+    for i, c in enumerate(counts):
+        acc += c
+        if acc >= target and len(bin_counts) < n_bins - 1:
+            bin_counts.append(acc)
+            bin_starts.append(i + 1)
+            acc = 0.0
+
+    # Last bin takes remaining counts
+    bin_counts.append(acc)
+    return np.asarray(bin_starts, dtype=np.uint32), np.asarray(bin_counts, dtype=np.uint32)
     
 def _compute_interpolator(samples_map, distances, radius, interp_kernel, precision):
     ndims = distances.shape[-1]
