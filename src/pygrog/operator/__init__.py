@@ -20,12 +20,6 @@ try:
 except ImportError:
     pass
 
-try:
-    from ._fast_binning import benchmark_binning
-    __all__.append("benchmark_binning")
-except ImportError:
-    pass
-
 from . import _sparse_fft # noqa
 
 __all__.extend(_sparse_fft.__all__)
