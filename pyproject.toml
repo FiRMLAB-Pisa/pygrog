@@ -1,6 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = [
+    "scikit-build-core>=0.4.3",
+    "pybind11>=2.6.0",
+    "numpy",
+]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "pygrog"
@@ -10,7 +14,7 @@ readme = "README.rst"
 requires-python = ">=3.10"
 dynamic = ["version"]
 
-license = {file = "LICENSE"}
+license = "MIT"
 keywords = ["mri", "reconstruction", "non-cartesian", "parallel-imaging"]
 
 authors = [
@@ -18,29 +22,19 @@ authors = [
 ]
 
 # Classifiers help users find your project by categorizing it.
-# For a list of valid classifiers, see https://pypi.org/classifiers/
 classifiers = [  # Optional
-  # How mature is this project? Common values are
-  #   3 - Alpha
-  #   4 - Beta
-  #   5 - Production/Stable
   "Development Status :: 3 - Alpha",
-
-  # Indicate who your project is intended for
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
-
-  # Specify the Python versions you support here. In particular, ensure
-  # that you indicate you support Python 3. These classifiers are *not*
-  # checked by "pip install". See instead "python_requires" below.
   "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.11", 
   "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Medical Science Apps.",
+  "Topic :: Scientific/Engineering :: Physics",
 ]
 
 dependencies = [
     "numpy",
-    "scipy",
+    "scipy", 
     "numba",
     "mri-nufft",
     "sigpy",
@@ -49,6 +43,8 @@ dependencies = [
     "ismrmrd",
     "h5py",
 ]
+
+
 
 [project.optional-dependencies] # Optional
 dev = [
@@ -164,6 +160,15 @@ addopts = [
 [tool.pylsp-mypy]
 enabled = false
 live_mode = false
+
+[tool.scikit-build]
+# Configuration for scikit-build-core
+cmake.source-dir = "."
+cmake.build-type = "Release"
+wheel.packages = ["src/pygrog"]
+install.components = ["python_modules"]
+sdist.include = ["CMakeLists.txt", "cmake/", "csrc/"]
+sdist.exclude = ["tests/", "examples/", "docs/"]
 
 [tool.mypy]
 ignore_missing_imports = true

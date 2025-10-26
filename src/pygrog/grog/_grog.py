@@ -350,7 +350,7 @@ def _CreateGrogPlan(
     kernel_width = jagged_converter.shape[-1]
     
     # For each Non Cartesian source, find distance from each Cartesian target
-    distances = _estimate_distances(grid, coords, indexes, jagged_converter)
+    distances, cart_target_coords = _estimate_distances(grid, coords, indexes, jagged_converter)
     
     # Assign weight to the correct Non Cartesian sample
     weights = jagged_converter.to_standard_array(weights[indexes])
@@ -364,6 +364,7 @@ def _CreateGrogPlan(
     
     # Flatten
     distances = distances.reshape(-1, ndim)
+    cart_target_coords = cart_target_coords.reshape(-1, ndim)
     weights = weights.ravel()
     if time_map is not None:
         time_map = time_map.ravel()
@@ -371,6 +372,7 @@ def _CreateGrogPlan(
     
     # Reformat for output
     distances = distances.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width, ndim)
+    cart_target_coords = cart_target_coords.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width, ndim)
     weights = weights.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width)
     if time_map is not None:
         time_map = time_map.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width)
@@ -379,6 +381,7 @@ def _CreateGrogPlan(
     return SimpleNamespace(
             shape=shape, 
             oversamp=oversamp, 
+            coords=cart_target_coords,
             radius=radius, 
             kernel_width=kernel_width,
             distances=distances,
@@ -570,12 +573,14 @@ def _estimate_distances(grid, coords, indexes, jagged_converter):
     coords = np.ascontiguousarray(coords.reshape(-1, ndim).T)
     grid = np.ascontiguousarray(grid.T)
     distances = []
+    cart_target_coords = []
     for ax in range(ndim):
         _cart_target_coords = grid[ax][indexes]
         _noncart_source_coords = jagged_converter.to_jagged_array(coords[ax])
         _distance = _cart_target_coords - _noncart_source_coords
         distances.append(jagged_converter.to_standard_array(_distance))
-    return np.stack(distances, axis=-1)
+        cart_target_coords.append(jagged_converter.to_standard_array(_distance))
+    return np.stack(distances, axis=-1), np.stack(cart_target_coords, axis=-1)
     
 def _compute_interpolator(samples_map, distances, radius, interp_kernel, precision):
     ndims = distances.shape[-1]
