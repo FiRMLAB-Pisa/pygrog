@@ -5,7 +5,6 @@ __all__ = ["GrogInterpolator"]
 import gc
 import os
 import pathlib
-import psutil
 
 from types import SimpleNamespace
 from itertools import chain
@@ -146,9 +145,16 @@ class GrogInterpolator:
         return SimpleNamespace(
             shape=tuple(self.plan.shape), 
             oshape=tuple(oshape),
-            indexes=self.plan.indexes, 
-            weights=self.plan.weights, 
-            time_map=self.plan.time_map,
+            fwd_indexes=self.plan.fwd_indexes, 
+            fwd_weights=self.plan.fwd_weights, 
+            fwd_time_map=self.plan.fwd_time_map,
+            adj_sort=self.plan.adj_sort,
+            adj_indexes=self.plan.adj_indexes, 
+            adj_weights=self.plan.adj_weights, 
+            adj_time_map=self.plan.adj_time_map,
+            bin_global_start=self.plan.bin_global_start,
+            bin_starts=self.plan.bin_starts,
+            bin_counts=self.plan.bin_counts,
             )
     
     @classmethod
@@ -348,76 +354,90 @@ def _CreateGrogPlan(
     
     # Get flattened jagget array of target indexes
     indexes, jagged_converter = _estimate_indexes(grid, coords, radius)
-    kernel_width = jagged_converter.shape[-1]
-    
+    kernel_width = jagged_converter.max_num_targets_per_source
+        
     # For each Non Cartesian source, find distance from each Cartesian target
     distances, cart_target_coords = _estimate_distances(grid, coords, indexes, jagged_converter)
-    
-    # Assign weight to the correct Non Cartesian sample
-    weights = jagged_converter.to_standard_array(weights[indexes])
-    
+
     # Assign to each sample its sampling time
     if time_map is not None:
         time_map = jagged_converter.to_jagged_array(time_map)
+        
+    # Assign weight to the correct Non Cartesian sample
+    weights = jagged_converter.to_standard_array(weights[indexes])
 
     # Convert jagged indexes array to standard (zero-filled) array
     indexes = jagged_converter.to_standard_array(indexes)
     
-    # Flatten
-    distances = distances.reshape(-1, ndim)
-    cart_target_coords = cart_target_coords.reshape(-1, ndim)
-    weights = weights.ravel()
-    if time_map is not None:
-        time_map = time_map.ravel()
-    indexes = indexes.ravel()
+    # Save indexes, weights and time_map for forward sparse fft (dense -> sparse)
+    fwd_time_map = time_map
+    fwd_weights = weights
+    fwd_indexes = indexes
     
+    # Flatten indexes, weights and time_map to (*other, nsamples_per_volume)
+    if time_map is not None:
+        adj_time_map = time_map.reshape(*coords_shape[:-5], -1)
+    else:
+        adj_time_map = None
+    adj_weights = weights.reshape(*coords_shape[:-5], -1)
+    adj_indexes = indexes.reshape(*coords_shape[:-5], -1)
+    
+    # Flatten batch axes
+    if time_map is not None:
+        adj_time_map = adj_time_map.reshape(-1, adj_time_map.shape[-1])
+    adj_weights = adj_weights.reshape(-1, adj_weights.shape[-1])
+    adj_indexes = adj_indexes.reshape(-1, adj_indexes.shape[-1])
+    
+    # Sort based on weights
+    gridsort = np.argsort(adj_weights, axis=-1)
+    sorted_weights = np.stack([adj_weights[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
+    sorted_indexes = np.stack([adj_indexes[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
+    
+    # Compute bin for each batch axes
+    true_begin = np.argmax(sorted_weights > 0, axis=-1)
+    for n in range(true_begin.shape[0]):
+        _tmp = sorted_indexes[n][true_begin[n]:]
+        _order1 = np.argsort(_tmp)
+        _tmp = _tmp[_order1]
+        
+        # Find number of repetitions for each element
+        _starts = np.r_[0, np.where(np.diff(_tmp) != 0)[0] + 1]
+        _counts = np.diff(np.r_[_starts, len(_tmp)]).astype(np.uint32)
+        _counts = np.repeat(_counts, _counts)
+        
+        # Sort based on counts
+        _order2 = np.argsort(-_counts)
+        
+        # Sort nonzero weight part
+        _nonzero_part = gridsort[n][true_begin[n]:]
+        _nonzero_reordered = _nonzero_part[_order1][_order2]
+        
+        # Retrieve unsorted zero weight part
+        _zero_part = gridsort[n][:true_begin[n]]
+        
+        # Concatenate back to output
+        gridsort[n] = np.r_[_zero_part, _nonzero_reordered]
+            
+    # Reorder adjoints
+    if time_map is not None:
+        adj_time_map = np.stack([adj_time_map[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
+    adj_weights = np.stack([adj_weights[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
+    adj_indexes = np.stack([adj_indexes[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
+    
+    # Perform binning
+    bin_starts = []
+    bin_counts = []
+    for n in range(true_begin.shape[0]):
+        _starts = np.r_[0, np.where(np.diff(adj_indexes[n][true_begin[n]:]) != 0)[0] + 1]
+        _counts = np.diff(np.r_[_starts, len(adj_indexes[n][true_begin[n]:])]).astype(np.uint32)
+        
+        # Retain
+        bin_starts.append(_starts)
+        bin_counts.append(_counts)
+
     # Reformat for output
     distances = distances.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width, ndim)
     cart_target_coords = cart_target_coords.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width, ndim)
-    
-    # Weights, time_map and indexes can be flattened to (*others, nsamples_per_volume)
-    weights = weights.reshape(*coords_shape[:-5], -1)
-    if time_map is not None:
-        time_map = time_map.reshape(*coords_shape[:-5], -1)
-    indexes = indexes.reshape(*coords_shape[:-5], -1)
-        
-    # Weights, time_map and indexes can be flattened to (*others, nsamples_per_volume)
-    weights = weights.reshape(*coords_shape[:-5], -1)
-    if time_map is not None:
-        time_map = time_map.reshape(*coords_shape[:-5], -1)
-    indexes = indexes.reshape(*coords_shape[:-5], -1)
-    
-    # Exclude fake points from computation
-    idx = np.argsort(weights);
-    true_begin = np.argmax(weights[idx] > 0)
-    
-    # Radial balancing
-    radial_coords = (cart_target_coords**2).sum(axis=-1)**0.5
-    radial_coords = radial_coords.reshape(*coords_shape[:-5], -1)
-    radialsort = np.argsort(radial_coords[true_begin:])
-    radial_coords = radial_coords[true_begin:][radialsort]
-    
-    # Get num workers
-    num_workers = psutil.cpu_count(logical=False)
-    
-    # Find center threadmask
-    num_center_samples = np.argmax(radial_coords > 0.0)
-    center_bin_starts, center_bin_counts  = _split_indices(num_center_samples, num_workers)
-    
-    # Find outer threadmask
-    _, outer_bin_counts  = _split_into_uniform_bins(radial_coords[center_bin_starts[-1]+center_bin_counts[-1]:], num_workers)
-    outer_bin_starts = np.r_[center_bin_starts[-1] + center_bin_counts[-1], center_bin_starts[-1] + center_bin_counts[-1] + outer_bin_counts]
-    
-    # gridsort = np.concatenate((idx[:true_begin], idx[true_begin:][radialsort]))
-    # datasort = np.zeros_like(gridsort) 
-    # np.put_along_axis(datasort, gridsort, np.arange(gridsort.shape[-1]), axis=-1)
-    
-    # # Sort according to weights
-    # radial_coords = radial_coords[gridsort]
-    # weights = weights[gridsort]
-    # if time_map is not None:
-    #     time_map = time_map[gridsort]
-    # indexes = indexes[gridsort]
         
     return SimpleNamespace(
             shape=shape, 
@@ -426,9 +446,16 @@ def _CreateGrogPlan(
             radius=radius, 
             kernel_width=kernel_width,
             distances=distances,
-            indexes=indexes,
-            weights=weights,
-            time_map=time_map,
+            fwd_indexes=fwd_indexes,
+            fwd_weights=fwd_weights,
+            fwd_time_map=fwd_time_map,
+            adj_indexes=adj_indexes,
+            adj_weights=adj_weights,
+            adj_time_map=adj_time_map,
+            adj_sort=gridsort,
+            bin_global_start=true_begin,
+            bin_starts=bin_starts,
+            bin_counts=bin_counts,
         )
 
 def _GrogRegridder(data, interpolator, shot_idx):
@@ -476,13 +503,13 @@ def _store_plan_inside_mrd(dset, plan):
     
     for key, value in vars(plan).items():
         if isinstance(value, np.ndarray):
-            # If dataset already exists, overwrite it
+            # Regular NumPy array
             if key in grp:
                 del grp[key]
             grp.create_dataset(key, data=value)
-            
+        
         elif isinstance(value, (np.integer, np.floating)):
-            grp.attrs[key] = value.item()  # convert NumPy scalar to native Python type
+            grp.attrs[key] = value.item()
         
         elif isinstance(value, (int, float)):
             grp.attrs[key] = value
@@ -492,6 +519,15 @@ def _store_plan_inside_mrd(dset, plan):
                 del grp[key]
             grp.create_dataset(key, data=np.array(value))
         
+        elif isinstance(value, list):
+            # list of numpy arrays → VLEN dataset
+            dtype = h5py.vlen_dtype(value[0].dtype)
+            if key in grp:
+                del grp[key]
+            ds = grp.create_dataset(key, (len(value),), dtype=dtype)
+            for n in range(len(value)):
+                ds[n] = value[n].tolist()
+        
         elif value is None:
             grp.attrs[key] = "__NONE__"
         
@@ -500,11 +536,17 @@ def _store_plan_inside_mrd(dset, plan):
             
 def _load_plan_from_mrd(dset):
     grp = dset["dataset/grog_plan"]
-
     loaded = {}
+
     # read datasets
     for key in grp.keys():
-        loaded[key] = grp[key][()]
+        data = grp[key][()]
+        # check for VLEN arrays (object arrays) → convert to list of NumPy arrays
+        if isinstance(data, np.ndarray) and data.dtype.kind == 'O':
+            loaded[key] = [np.array(x) for x in data]
+        else:
+            loaded[key] = data
+
     # read attributes
     for key, val in grp.attrs.items():
         if val == "__NONE__":
@@ -602,12 +644,12 @@ def _estimate_indexes(grid, coords, radius):
     num_targets_per_source = np.asarray([len(idx) for idx in indexes], dtype=np.int32)
         
     # Build converter from jagged to standard array
-    jagged_onverter = _JaggedConverter(indexes.shape[0], num_targets_per_source)
+    jagged_converter = _JaggedConverter(indexes.shape[0], num_targets_per_source)
             
     # Flatten indexes
     indexes = np.fromiter(chain.from_iterable(indexes.tolist()), dtype=np.int32)
     
-    return indexes, jagged_onverter
+    return indexes, jagged_converter
 
 def _estimate_distances(grid, coords, indexes, jagged_converter):
     ndim = coords.shape[-1]
@@ -621,41 +663,9 @@ def _estimate_distances(grid, coords, indexes, jagged_converter):
         _distance = _cart_target_coords - _noncart_source_coords
         distances.append(jagged_converter.to_standard_array(_distance))
         cart_target_coords.append(jagged_converter.to_standard_array(_cart_target_coords))
+        # distances.append(_distance)
+        # cart_target_coords.append(_cart_target_coords)
     return np.stack(distances, axis=-1), np.stack(cart_target_coords, axis=-1)
-
-def _split_indices(N, n):
-    q, r = divmod(N, n)
-    starts = []
-    counts = []
-    start = 0
-    for i in range(n):
-        end = start + q + (1 if i < r else 0)
-        starts.append(start)
-        counts.append(end-start)
-        start = end
-    return np.asarray(starts, dtype=np.uint32), np.asarray(counts, dtype=np.uint32)
-
-def _split_into_uniform_bins(samples, n_bins):
-    starts = np.r_[0, np.where(np.diff(samples) != 0)[0] + 1]
-    counts = np.diff(np.r_[starts, len(samples)]).astype(np.uint32)
-    
-    total = counts.sum().item()
-    target = total / n_bins
-
-    bin_starts = [0]
-    bin_counts = []
-    acc = 0.0
-
-    for i, c in enumerate(counts):
-        acc += c
-        if acc >= target and len(bin_counts) < n_bins - 1:
-            bin_counts.append(acc)
-            bin_starts.append(i + 1)
-            acc = 0.0
-
-    # Last bin takes remaining counts
-    bin_counts.append(acc)
-    return np.asarray(bin_starts, dtype=np.uint32), np.asarray(bin_counts, dtype=np.uint32)
     
 def _compute_interpolator(samples_map, distances, radius, interp_kernel, precision):
     ndims = distances.shape[-1]
