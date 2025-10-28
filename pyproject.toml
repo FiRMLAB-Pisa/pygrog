@@ -161,14 +161,5 @@ addopts = [
 enabled = false
 live_mode = false
 
-[tool.scikit-build]
-# Configuration for scikit-build-core
-cmake.source-dir = "."
-cmake.build-type = "Release"
-wheel.packages = ["src/pygrog"]
-install.components = ["python_modules"]
-sdist.include = ["CMakeLists.txt", "cmake/", "csrc/"]
-sdist.exclude = ["tests/", "examples/", "docs/"]
-
 [tool.mypy]
 ignore_missing_imports = true

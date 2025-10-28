@@ -107,7 +107,9 @@ class GrogInterpolator:
     
     Notes
     -----
-    Implements the GROG algorithm as described in [1]_.
+    Implements the GROG algorithm as described in [1]_. In this implementation,
+    we assume that coords matches the shape of data, except for coil axes - 
+    broadcasting, for the moment, is not automatically handled.
 
     References
     ----------
@@ -121,6 +123,8 @@ class GrogInterpolator:
     
     _interpolator_set = False
     _dataset_shape_set = False
+    _dataset_shape = None
+    _data = []
     
     def __init__(
             self,
@@ -143,18 +147,14 @@ class GrogInterpolator:
         oshape = np.asarray(self.plan.shape) * np.asarray(self.plan.oversamp)
         oshape = np.ceil(oshape).astype(int).tolist()
         return SimpleNamespace(
-            shape=tuple(self.plan.shape), 
-            oshape=tuple(oshape),
-            fwd_indexes=self.plan.fwd_indexes, 
-            fwd_weights=self.plan.fwd_weights, 
-            fwd_time_map=self.plan.fwd_time_map,
-            adj_sort=self.plan.adj_sort,
-            adj_indexes=self.plan.adj_indexes, 
-            adj_weights=self.plan.adj_weights, 
-            adj_time_map=self.plan.adj_time_map,
-            bin_global_start=self.plan.bin_global_start,
-            bin_starts=self.plan.bin_starts,
-            bin_counts=self.plan.bin_counts,
+                shape=tuple(self.plan.shape), 
+                oshape=tuple(oshape),
+                indexes=self.plan.indexes, 
+                weights=self.plan.weights, 
+                time_map=self.plan.time_map,
+                bin_global_start=self.plan.bin_global_start,
+                bin_starts=self.plan.bin_starts,
+                bin_counts=self.plan.bin_counts,
             )
     
     @classmethod
@@ -224,6 +224,8 @@ class GrogInterpolator:
             L2 regularization for GRAPPA kernel estimation.
             
         """
+        if self._dataset_shape_set is False:
+            raise RuntimeError("Please provide full data shape via set_dataset_shape().")
         pfac = 10.0**precision
         stepsize = 10 ** (-precision)
         
@@ -244,6 +246,7 @@ class GrogInterpolator:
         interp_idx[interp_idx < 0] = 0
         interp_idx[interp_idx > interp_kernel.shape[0] - 1] = interp_kernel.shape[0]  - 1
             
+        self.plan.distances = None
         self._interpolator = SimpleNamespace(idx=interp_idx, kernel=interp_kernel, width=self.plan.kernel_width)
         self._interpolator_set = True
         
@@ -259,14 +262,25 @@ class GrogInterpolator:
         """
         if self._dataset_shape_set:
             return
-        dataset_shape = tuple(shape)
-        dataset_shape[-4] = 1 # No need to replicate coil axis
-        dummy_dataset = np.ones(dataset_shape)
         
-        if self._interpolator_set: # Directly broadcast interpolator indexes
-            self._interpolator.idx, _ = np.broadcast_arrays(self._interpolator.idx, dummy_dataset)
-        else: # Broadcast Plan displacements
-            self.plan.distances, _ = np.broadcast_arrays(self.plan.distances, dummy_dataset)
+        # Store full dataset shape
+        self.dataset_shape = list(shape)
+        self.dataset_shape[-1] *= self.plan.kernel_width
+        self.dataset_shape = tuple(self.dataset_shape)
+        
+        # Broadcast dataplan
+        dataset_shape = list(shape)
+        dataset_shape[-4] = 1 # No need to replicate coil axis
+        dataset_shape[-1] = 1 # Let broadcast handle automatically the readout dimension
+        dummy_dataset = np.ones(dataset_shape, dtype=np.uint8)
+        
+        # Broadcast Plan
+        self.plan.distances, _ = np.broadcast_arrays(self.plan.distances, dummy_dataset[..., None])
+        self.plan.coords, _ = np.broadcast_arrays(self.plan.coords, dummy_dataset[..., None])        
+        self.plan.indexes, _ = np.broadcast_arrays(self.plan.indexes, dummy_dataset)
+        self.plan.weights, _ = np.broadcast_arrays(self.plan.weights, dummy_dataset)
+        if self.plan.time_map is not None:
+            self.plan.time_map, _ = np.broadcast_arrays(self.plan.time_map, dummy_dataset)
         
         self._dataset_shape_set = True
         
@@ -275,7 +289,7 @@ class GrogInterpolator:
             data: NDArray[complex],
             shot_index: int | tuple[int] | None = None,
             ret_image: bool = False,
-        ) -> NDArray[complex]:
+        ) -> None | NDArray[complex]:
         """
         Apply interpolator.
         
@@ -289,37 +303,172 @@ class GrogInterpolator:
             The default is ``None``.
         ret_image : bool, optional
             Return reconstructed image. If ``False``, return sparse Cartesian k-space data instead
-            The default is ``False``.
+            The default is ``False``. Ignored if ``shot_index`` is provided.
 
         Returns
         -------
-        NDArray[complex]
-            If ``ret_image`` is ``True``, return ``(other*, coil, z, y, x)`` image.
-            If it is ``False``, return ``(other*, coil, k2, k1, kernel.width * k0)`` sparse
+        None | NDArray[complex]
+            If ``shot_index`` is provided, return ``None``.
+            Otherwise, if ``ret_image`` is ``True``, return ``(other*, coil, z, y, x)`` image.
+            If it is ``False``, return ``(other*, coil, 1, 1, k2 * k1 * k0 * kernel.width)`` sparse
             Cartesian k-space samples.
 
         """
         if self._interpolator_set is False:
             raise RuntimeError("GRAPPA kernels have not been set. Call calc_interp_table() first.")
         if shot_index is not None:
-            if self._dataset_shape_set is False:
-                raise RuntimeError("For shot-by-shot interpolation, provide full data shape via set_dataset_shape().")
             if np.isscalar(shot_index):
                 shot_index = (shot_index,)
             shot_index = tuple(shot_index)
         
-        # Apply regridding
-        output = _GrogRegridder(data, self._interpolator, shot_index)
-        
-        # Force garbage collection
-        gc.collect()
+            # Apply regridding
+            self._data.append(_GrogRegridder(data, self._interpolator, shot_index))
+     
+            # Force garbage collection
+            gc.collect()
+            
+            return
+            
+        # Perform
+        self._data = _GrogRegridder(data, self._interpolator, shot_index)
+        data, coords = self.sort_data()
         
         # If required, reconstruct
         if ret_image:
             ...
                         
-        return output
+        # Force garbage collection
+        gc.collect()
+        
+        return data, coords
+    
+    def sort_data(self):
+        if isinstance(self._data, list):
+            data = np.stack(self._data, axis=0)
+            data = data.reshape(*self._dataset_shape[:-1], self._dataset_shape[-1] * self.plan.kernel_width)
+        else:
+            data = self._data
             
+        # Infer data shape
+        coords_shape = list(data.shape)
+        coords_shape[-4] = 1 # Coil does not matter 
+        ncoils = data.shape[-4]
+            
+        # Unpack
+        time_map = self.plan.time_map
+        weights = self.plan.weights
+        indexes = self.plan.indexes
+        coords = self.plan.coords
+        ndim = coords.shape[-1]
+                        
+        # Flatten indexes, weights and time_map to (*other, nsamples_per_volume)
+        if time_map is not None:
+            time_map = time_map.reshape(*coords_shape[:-5], -1)
+        else:
+            time_map = None
+        weights = weights.reshape(*coords_shape[:-5], -1)
+        indexes = indexes.reshape(*coords_shape[:-5], -1)
+        
+        # Flatten batch axes
+        if time_map is not None:
+            time_map = time_map.reshape(-1, time_map.shape[-1])
+        weights = weights.reshape(-1, weights.shape[-1])
+        indexes = indexes.reshape(-1, indexes.shape[-1])
+        coords = coords.reshape(*coords_shape, -1)
+        
+        # Sort based on weights
+        gridsort = np.argsort(weights, axis=-1)
+        sorted_weights = np.stack([weights[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
+        sorted_indexes = np.stack([indexes[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
+        
+        # Compute bin for each batch axes
+        bin_global_start = np.argmax(sorted_weights > 0, axis=-1)
+        for n in range(bin_global_start.shape[0]):
+            _tmp = sorted_indexes[n][bin_global_start[n]:]
+            _order1 = np.argsort(_tmp)
+            _tmp = _tmp[_order1]
+            
+            # Find number of repetitions for each element
+            # _starts = np.r_[0, np.where(np.diff(_tmp) != 0)[0] + 1]
+            # _counts = np.diff(np.r_[_starts, len(_tmp)]).astype(np.uint32)
+            # _counts = np.repeat(_counts, _counts)
+            
+            # # Sort based on counts
+            # _order2 = np.argsort(-_counts)
+            
+            # Sort nonzero weight part
+            _nonzero_part = gridsort[n][bin_global_start[n]:]
+            _nonzero_reordered = _nonzero_part[_order1]#[_order2]
+            
+            # Retrieve unsorted zero weight part
+            _zero_part = gridsort[n][:bin_global_start[n]]
+            
+            # Concatenate back to output
+            gridsort[n] = np.r_[_zero_part, _nonzero_reordered]
+            
+        # Free some memory
+        del sorted_indexes
+        del sorted_weights
+                
+        # Reorder adjoints
+        if time_map is not None:
+            time_map = np.stack([time_map[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
+        weights = np.stack([weights[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
+        indexes = np.stack([indexes[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
+        
+        # Perform binning
+        bin_starts = []
+        bin_counts = []
+        for n in range(bin_global_start.shape[0]):
+            _starts = np.r_[0, np.where(np.diff(indexes[n][bin_global_start[n]:]) != 0)[0] + 1]
+            _counts = np.diff(np.r_[_starts, len(indexes[n][bin_global_start[n]:])]).astype(np.uint32)
+            
+            # Retain
+            bin_starts.append(_starts)
+            bin_counts.append(_counts)
+                    
+        # Reshape data to (nbatches, ncoils, nsamples)
+        batch_axes = data.shape[:-4]
+        
+        # Sort data
+        data = data.reshape(*batch_axes, ncoils, -1)
+        data = data.reshape(-1, *data.shape[-2:])
+        for b in range(len(gridsort)):
+            for n in range(ncoils):
+                data[b, n, :] = data[b, n, gridsort[b]]
+        data = data.reshape(*batch_axes, ncoils, 1, 1, -1)
+        
+        # Sort coordinates (e.g., for compatibility with other frameworks)
+        coords = coords.reshape(-1, *coords.shape[-4:])
+        coords = coords.reshape(coords.shape[0], -1, ndim)
+        for b in range(len(gridsort)):
+            for ax in range(ndim):
+                coords[b, :, ax] = coords[b, gridsort[b], ax]
+        coords = coords.reshape(*batch_axes, 1, 1, 1, -1, ndim)
+        
+        # Remove batch axis if singleton
+        if len(gridsort) == 1:
+            if time_map is not None:
+                time_map = time_map[0]
+            weights = weights[0]
+            indexes = indexes[0]
+            bin_starts = bin_starts[0]
+            bin_counts = bin_counts[0]
+            bin_global_start = bin_global_start[0]
+            
+        # Remove unused stuff
+        self._data = None
+            
+        # Update plan
+        self.plan.time_map = time_map
+        self.plan.weights = weights
+        self.plan.indexes = indexes
+        self.plan.bin_starts = bin_starts
+        self.plan.bin_counts = bin_counts
+        self.plan.bin_global_start = bin_global_start
+        
+        return data, coords
+        
     def __call__(
             self, 
             data: NDArray[complex], 
@@ -369,73 +518,11 @@ def _CreateGrogPlan(
     # Convert jagged indexes array to standard (zero-filled) array
     indexes = jagged_converter.to_standard_array(indexes)
     
-    # Save indexes, weights and time_map for forward sparse fft (dense -> sparse)
-    fwd_time_map = time_map
-    fwd_weights = weights
-    fwd_indexes = indexes
-    
-    # Flatten indexes, weights and time_map to (*other, nsamples_per_volume)
+    # Reshape for output
     if time_map is not None:
-        adj_time_map = time_map.reshape(*coords_shape[:-5], -1)
-    else:
-        adj_time_map = None
-    adj_weights = weights.reshape(*coords_shape[:-5], -1)
-    adj_indexes = indexes.reshape(*coords_shape[:-5], -1)
-    
-    # Flatten batch axes
-    if time_map is not None:
-        adj_time_map = adj_time_map.reshape(-1, adj_time_map.shape[-1])
-    adj_weights = adj_weights.reshape(-1, adj_weights.shape[-1])
-    adj_indexes = adj_indexes.reshape(-1, adj_indexes.shape[-1])
-    
-    # Sort based on weights
-    gridsort = np.argsort(adj_weights, axis=-1)
-    sorted_weights = np.stack([adj_weights[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
-    sorted_indexes = np.stack([adj_indexes[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
-    
-    # Compute bin for each batch axes
-    true_begin = np.argmax(sorted_weights > 0, axis=-1)
-    for n in range(true_begin.shape[0]):
-        _tmp = sorted_indexes[n][true_begin[n]:]
-        _order1 = np.argsort(_tmp)
-        _tmp = _tmp[_order1]
-        
-        # Find number of repetitions for each element
-        _starts = np.r_[0, np.where(np.diff(_tmp) != 0)[0] + 1]
-        _counts = np.diff(np.r_[_starts, len(_tmp)]).astype(np.uint32)
-        _counts = np.repeat(_counts, _counts)
-        
-        # Sort based on counts
-        _order2 = np.argsort(-_counts)
-        
-        # Sort nonzero weight part
-        _nonzero_part = gridsort[n][true_begin[n]:]
-        _nonzero_reordered = _nonzero_part[_order1][_order2]
-        
-        # Retrieve unsorted zero weight part
-        _zero_part = gridsort[n][:true_begin[n]]
-        
-        # Concatenate back to output
-        gridsort[n] = np.r_[_zero_part, _nonzero_reordered]
-            
-    # Reorder adjoints
-    if time_map is not None:
-        adj_time_map = np.stack([adj_time_map[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
-    adj_weights = np.stack([adj_weights[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
-    adj_indexes = np.stack([adj_indexes[n, gridsort[n]] for n in range(gridsort.shape[0])], axis=0)
-    
-    # Perform binning
-    bin_starts = []
-    bin_counts = []
-    for n in range(true_begin.shape[0]):
-        _starts = np.r_[0, np.where(np.diff(adj_indexes[n][true_begin[n]:]) != 0)[0] + 1]
-        _counts = np.diff(np.r_[_starts, len(adj_indexes[n][true_begin[n]:])]).astype(np.uint32)
-        
-        # Retain
-        bin_starts.append(_starts)
-        bin_counts.append(_counts)
-
-    # Reformat for output
+        time_map = time_map.reshape(*coords_shape[:-2], -1)
+    weights = weights.reshape(*coords_shape[:-2], -1)
+    indexes = indexes.reshape(*coords_shape[:-2], -1)    
     distances = distances.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width, ndim)
     cart_target_coords = cart_target_coords.reshape(*coords_shape[:-2], coords_shape[-2] * kernel_width, ndim)
         
@@ -446,21 +533,15 @@ def _CreateGrogPlan(
             radius=radius, 
             kernel_width=kernel_width,
             distances=distances,
-            fwd_indexes=fwd_indexes,
-            fwd_weights=fwd_weights,
-            fwd_time_map=fwd_time_map,
-            adj_indexes=adj_indexes,
-            adj_weights=adj_weights,
-            adj_time_map=adj_time_map,
-            adj_sort=gridsort,
-            bin_global_start=true_begin,
-            bin_starts=bin_starts,
-            bin_counts=bin_counts,
+            indexes=indexes,
+            weights=weights,
+            time_map=time_map,
+            bin_global_start=None,
+            bin_starts=None,
+            bin_counts=None,
         )
 
-def _GrogRegridder(data, interpolator, shot_idx):
-    
-    # Prepare data and kernel indexes for interpolation
+def _GrogRegridder(data, interpolator, shot_idx):    
     if shot_idx is None:
         data = data[..., None].swapaxes(-5, -1) # (*other, coil, k2, k1, k0) -> (*other, 1, k2, k1, k0, coil)
         indexes = interpolator.idx # (1, k2, k1, k0'=interpolator.width * k0)
@@ -663,8 +744,6 @@ def _estimate_distances(grid, coords, indexes, jagged_converter):
         _distance = _cart_target_coords - _noncart_source_coords
         distances.append(jagged_converter.to_standard_array(_distance))
         cart_target_coords.append(jagged_converter.to_standard_array(_cart_target_coords))
-        # distances.append(_distance)
-        # cart_target_coords.append(_cart_target_coords)
     return np.stack(distances, axis=-1), np.stack(cart_target_coords, axis=-1)
     
 def _compute_interpolator(samples_map, distances, radius, interp_kernel, precision):
