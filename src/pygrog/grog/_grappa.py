@@ -38,7 +38,7 @@ def KernelTable(
     Returns
     -------
     NDArray
-        GRAPPA kernel table for fractional shifts ``(dx, dy, dz)`` of shape
+        GRAPPA kernel table for fractional shifts ``(dz, dy, dx)`` of shape
         ``(nsteps**ndim, coils, coils)``.
     int
         Number of fractional steps.
@@ -91,7 +91,7 @@ def prepare_grappa_table(
     Returns
     -------
     NDArray
-        GRAPPA kernel table for fractional shifts ``(dx, dy, dz)`` of shape
+        GRAPPA kernel table for fractional shifts ``(dz, dy, dx)`` of shape
         ``(nsteps**ndim, ncoils, ncoils)``.
         
     """
@@ -128,9 +128,9 @@ def prepare_grappa_table(
         Gz = np.repeat(Gz, nsteps, axis=2)  # (nsteps, nsteps, nsteps, nc, nc)
         
         # Reshape to flat combinations
-        Gx = Gx.reshape(-1, *Gx.shape[-2:])  # (nsteps**3, nc, nc)
-        Gy = Gy.reshape(-1, *Gy.shape[-2:])  # (nsteps**3, nc, nc)
         Gz = Gz.reshape(-1, *Gz.shape[-2:])  # (nsteps**3, nc, nc)
+        Gy = Gy.reshape(-1, *Gy.shape[-2:])  # (nsteps**3, nc, nc)
+        Gx = Gx.reshape(-1, *Gx.shape[-2:])  # (nsteps**3, nc, nc)
         
         # Combine all operators
         grappa_table = Gx @ Gy @ Gz  # (nsteps**3, nc, nc)
@@ -197,8 +197,8 @@ def train_grappa(
     Returns
     -------
     dict
-        Output grog interpolator with keys ``(x, y)`` (single slice 2D)
-        or ``(x, y, z)`` (multi-slice or 3D).
+        Output grog interpolator with keys ``(y, x)`` (single slice 2D)
+        or ``(z, y, x)`` (multi-slice or 3D).
 
     Notes
     -----
@@ -297,20 +297,20 @@ def _radial_grappa_op(calib, lamda, coords):
 def _grappa_op_2d(calib, lamda):
     """Return a 2D GROG operators."""
     calib = np.moveaxis(calib, 0, -1)
-    _cx, _cy, nc = calib.shape[:]
+    _, _, nc = calib.shape[:]
 
     # we need sources (last source has no target!)
-    Sy = np.reshape(calib[:, :-1, :], (-1, nc))
-    Sx = np.reshape(calib[:-1, ...], (-1, nc))
+    Sx = np.reshape(calib[:, :-1, :], (-1, nc))
+    Sy = np.reshape(calib[:-1, ...], (-1, nc))
 
     # and we need targets for an operator along each axis (first
     # target has no associated source!)
-    Ty = np.reshape(calib[:, 1:, :], (-1, nc))
-    Tx = np.reshape(calib[1:, ...], (-1, nc))
+    Tx = np.reshape(calib[:, 1:, :], (-1, nc))
+    Ty = np.reshape(calib[1:, ...], (-1, nc))
 
     # train the operators:
-    Gy = lstsq(Sy, Ty.T, lamda).T
     Gx = lstsq(Sx, Tx.T, lamda).T
+    Gy = lstsq(Sy, Ty.T, lamda).T
 
     return Gy, Gx
 
@@ -321,20 +321,20 @@ def _grappa_op_3d(calib, lamda):
     _, _, _, nc = calib.shape[:]
 
     # we need sources (last source has no target!)
-    Sz = np.reshape(calib[:-1, :, :, :], (-1, nc))
+    Sx = np.reshape(calib[:-1, :, :, :], (-1, nc))
     Sy = np.reshape(calib[:, :-1, :, :], (-1, nc))
-    Sx = np.reshape(calib[:, :, :-1, :], (-1, nc))
+    Sz = np.reshape(calib[:, :, :-1, :], (-1, nc))
 
     # and we need targets for an operator along each axis (first
     # target has no associated source!)
-    Tz = np.reshape(calib[1:, :, :, :], (-1, nc))
+    Tx = np.reshape(calib[1:, :, :, :], (-1, nc))
     Ty = np.reshape(calib[:, 1:, :, :], (-1, nc))
-    Tx = np.reshape(calib[:, :, 1:, :], (-1, nc))
+    Tz = np.reshape(calib[:, :, 1:, :], (-1, nc))
 
     # train the operators:
-    Gz = lstsq(Sz, Tz.T, lamda).T
-    Gy = lstsq(Sy, Ty.T, lamda).T
     Gx = lstsq(Sx, Tx.T, lamda).T
+    Gy = lstsq(Sy, Ty.T, lamda).T
+    Gz = lstsq(Sz, Tz.T, lamda).T
 
     return Gz.T, Gy.T, Gx.T
 

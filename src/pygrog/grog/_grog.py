@@ -494,6 +494,11 @@ def _CreateGrogPlan(
     coords_shape = coords.shape
     if time_map is not None:
         time_map, _ = np.broadcast_arrays(time_map, coords[..., 0])
+        
+    # 'xyz'->'zyx'
+    shape = shape[::-1]
+    oversamp = oversamp[::-1]
+    coords = coords[..., ::-1]
     
     # Create grid
     grid = _create_grid(ndim, shape, oversamp)
