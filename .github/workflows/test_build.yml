@@ -41,7 +41,7 @@ jobs:
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install numpy pybind11 scikit-build-core[pyproject] pytest
+        pip install torch numpy pytest
 
     - name: Test source installation (pip install .)
       shell: bash
@@ -90,9 +90,9 @@ jobs:
         python -m pytest tests/test_fast_binning.py -v
         python examples/fast_binning_example.py
 
-  # Test fallback behavior when C++ compilation fails
-  test_fallback:
-    name: Test Python fallback
+  # Verify that installation fails properly without a C++ compiler
+  test_no_compiler_fails:
+    name: Test build requires compiler
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -105,29 +105,14 @@ jobs:
     - name: Install minimal dependencies (no C++ compiler)
       run: |
         python -m pip install --upgrade pip
-        pip install numpy
+        pip install torch numpy
 
-    - name: Test fallback installation
+    - name: Verify build fails without compiler
       run: |
-        # This should install without the C++ extension
-        pip install -e . || echo "Expected to fail, testing fallback..."
-        
-        # Test that Python fallback works
-        python -c "
-        try:
-            from pygrog.operator import fast_binning_add_at
-            print('Module imported successfully')
-            
-            import numpy as np
-            bins = np.zeros(10, dtype=np.complex64)
-            points = np.array([1+2j], dtype=np.complex64)
-            weights = np.array([0.5], dtype=np.float32)
-            indices = np.array([5], dtype=np.uint64)
-            
-            fast_binning_add_at(bins, points, weights, indices)
-            assert abs(bins[5] - (0.5 + 1j)) < 1e-6
-            print('✓ Python fallback working correctly')
-        except Exception as e:
-            print(f'✗ Fallback test failed: {e}')
-            exit(1)
-        "
+        # The build should fail — the C++ extension is required
+        if pip install --no-build-isolation -e . 2>&1; then
+          echo "ERROR: build should have failed without a C++ compiler"
+          exit 1
+        else
+          echo "✓ Build correctly failed without compiler"
+        fi

@@ -7,13 +7,68 @@ import warnings
 from numpy.typing import NDArray
 
 import numpy as np
+import torch
 
-from scipy.linalg import expm, logm
-from scipy.linalg import fractional_matrix_power as fmp
+from mrinufft._array_compat import with_torch
 
-from mrinufft._array_compat import with_numpy
 
-from .._linalg import lstsq
+def lstsq(A, b, lamda=0.0):
+    """Tikhonov-regularized least squares via augmented system + torch.linalg.lstsq.
+
+    Solves ``min_X ||A @ X - B||_F^2 + lamda * ||X||_F^2`` by forming the
+    augmented system ``[A; sqrt(lamda)*I] @ X = [B; 0]`` and delegating to
+    ``torch.linalg.lstsq``, which operates on the rectangular matrix directly
+    (no normal-equation squaring of the condition number).
+
+    Parameters
+    ----------
+    A : NDArray
+        Source matrix of shape ``(*, M, N)``.
+    b : NDArray
+        Target matrix of shape ``(*, M, K)``.
+    lamda : float
+        Tikhonov regularization parameter.
+
+    Returns
+    -------
+    NDArray
+        Solution of shape ``(*, N, K)``.
+    """
+    A_t = torch.as_tensor(A)
+    b_t = torch.as_tensor(b)
+    N = A_t.shape[-1]
+
+    if lamda > 0:
+        sqrt_lamda = lamda ** 0.5
+        I_reg = sqrt_lamda * torch.eye(N, dtype=A_t.dtype, device=A_t.device)
+        if A_t.dim() > 2:
+            I_reg = I_reg.expand(*A_t.shape[:-2], N, N)
+        zeros = torch.zeros(
+            *A_t.shape[:-2], N, b_t.shape[-1], dtype=b_t.dtype, device=b_t.device
+        )
+        A_aug = torch.cat([A_t, I_reg], dim=-2)
+        b_aug = torch.cat([b_t, zeros], dim=-2)
+    else:
+        A_aug, b_aug = A_t, b_t
+
+    sol = torch.linalg.lstsq(A_aug, b_aug, driver="gelsd").solution
+
+    if isinstance(A, np.ndarray):
+        return sol.numpy()
+    return sol
+
+
+def _matrix_logm(A: torch.Tensor) -> torch.Tensor:
+    """Batched matrix logarithm via eigendecomposition: logm(A) = V diag(log(λ)) V⁻¹.
+
+    Promotes to complex128 for numerical accuracy, then casts back.
+    Works for 2-D ``(N, N)`` and batched ``(*, N, N)`` inputs.
+    """
+    dtype_out = A.dtype if A.is_complex() else torch.complex64
+    A128 = A.to(torch.complex128)
+    vals, vecs = torch.linalg.eig(A128)
+    result = vecs @ torch.diag_embed(torch.log(vals)) @ torch.linalg.inv(vecs)
+    return result.to(dtype_out)
 
 def KernelTable(
         train_data: NDArray[complex], 
@@ -51,7 +106,8 @@ def KernelTable(
     # Calculate displacements steps
     nsteps = 2 * radius / 10 ** (-precision) + 1
     nsteps = int(nsteps)
-    deltas = (np.arange(nsteps) - (nsteps - 1) // 2) / (nsteps - 1)
+    deltas = torch.arange(nsteps).float()
+    deltas = (deltas - (nsteps - 1) // 2) / (nsteps - 1)
     
     # Pre-compute partial operators
     Gx = grappa_power(grappa_kernels["x"], deltas)  # (nsteps, nc, nc)
@@ -63,7 +119,7 @@ def KernelTable(
         Gz = None
         ndim = 2
         
-    return prepare_grappa_table(Gx, Gy, Gz, nsteps, ndim), nsteps, ndim
+    return prepare_grappa_table(Gx, Gy, Gz, nsteps, ndim).numpy(), nsteps, ndim
 
 def prepare_grappa_table(
         Gx: NDArray[complex], 
@@ -95,81 +151,53 @@ def prepare_grappa_table(
         ``(nsteps**ndim, ncoils, ncoils)``.
         
     """
-    # Convert to numpy arrays
-    Gx = np.asarray(Gx)
-    Gy = np.asarray(Gy)
-    
+    Gx = torch.as_tensor(Gx)
+    Gy = torch.as_tensor(Gy)
+
     if ndim == 2:
-        # 2D case
-        Gx = Gx[None, :, ...]  # (1, nsteps, nc, nc)
-        Gy = Gy[:, None, ...]  # (nsteps, 1, nc, nc)
-        Gx = np.repeat(Gx, nsteps, axis=0)  # (nsteps, nsteps, nc, nc)
-        Gy = np.repeat(Gy, nsteps, axis=1)  # (nsteps, nsteps, nc, nc)
-        Gx = Gx.reshape(-1, *Gx.shape[-2:])  # (nsteps**2, nc, nc)
-        Gy = Gy.reshape(-1, *Gy.shape[-2:])  # (nsteps**2, nc, nc)
-        grappa_table = Gx @ Gy  # (nsteps**2, nc, nc)
-        
+        # table[i*nsteps+j] = Gx[j] @ Gy[i]  via broadcasting matmul
+        grappa_table = (Gx[None] @ Gy[:, None]).reshape(-1, *Gx.shape[-2:])
+
     elif ndim == 3:
-        # 3D case
         if Gz is None:
             raise ValueError("3D interpolation requires Z operator")
-        
-        Gz = np.asarray(Gz)
-        Gx = Gx[None, None, :, ...]  # (1, 1, nsteps, nc, nc)
-        Gy = Gy[None, :, None, ...]  # (1, nsteps, 1, nc, nc)
-        Gz = Gz[:, None, None, ...]  # (nsteps, 1, 1, nc, nc)
-        
-        # Repeat to create a grid of all combinations
-        Gx = np.repeat(Gx, nsteps, axis=0)  # (nsteps, 1, nsteps, nc, nc)
-        Gx = np.repeat(Gx, nsteps, axis=1)  # (nsteps, nsteps, nsteps, nc, nc)
-        Gy = np.repeat(Gy, nsteps, axis=0)  # (nsteps, nsteps, 1, nc, nc)
-        Gy = np.repeat(Gy, nsteps, axis=2)  # (nsteps, nsteps, nsteps, nc, nc)
-        Gz = np.repeat(Gz, nsteps, axis=1)  # (nsteps, nsteps, 1, nc, nc)
-        Gz = np.repeat(Gz, nsteps, axis=2)  # (nsteps, nsteps, nsteps, nc, nc)
-        
-        # Reshape to flat combinations
-        Gx = Gx.reshape(-1, *Gx.shape[-2:])  # (nsteps**3, nc, nc)
-        Gy = Gy.reshape(-1, *Gy.shape[-2:])  # (nsteps**3, nc, nc)
-        Gz = Gz.reshape(-1, *Gz.shape[-2:])  # (nsteps**3, nc, nc)
-        
-        # Combine all operators
-        grappa_table = Gx @ Gy @ Gz  # (nsteps**3, nc, nc)
-    
+        Gz = torch.as_tensor(Gz)
+        # table[i*nsteps^2 + j*nsteps + k] = Gx[k] @ Gy[j] @ Gz[i]
+        grappa_table = (
+            Gx[None, None] @ Gy[None, :, None] @ Gz[:, None, None]
+        ).reshape(-1, *Gx.shape[-2:])
+
     else:
         raise ValueError(f"GROG interpolation only supports 2D or 3D data, got {ndim}D")
-        
+
     return grappa_table
 
 
-def grappa_power(G_unit: NDArray[complex], exponents: NDArray[float]) -> NDArray[complex]:
-    """
-    Compute matrix powers of GRAPPA operators.
-    
+def grappa_power(G_unit: torch.Tensor, exponents: torch.Tensor) -> torch.Tensor:
+    """Compute batched fractional matrix powers of a GRAPPA operator.
+
+    Uses the identity ``G^p = exp(p * logm(G))`` to handle fractional and
+    negative exponents without ever forming the normal equations.  All powers
+    are computed in a single batched ``matrix_exp`` call.
+
     Parameters
     ----------
-    G_unit : NDArray
-        GRAPPA kernel for unit shifts.
-    exponents : NDArray
-        List of exponents to obtain fractional shifts.
-        
+    G_unit : torch.Tensor
+        GRAPPA kernel for unit shifts, shape ``(nc, nc)``.
+    exponents : torch.Tensor
+        1-D tensor of exponents (e.g. fractional shifts).
+
     Returns
     -------
-    NDArray
-        GRAPPA operators for fractional shifts.
-    
+    torch.Tensor
+        Stacked operators of shape ``(len(exponents), nc, nc)``.
     """
-    G_frac, idx = [], 0
-    for exp in exponents:
-        if np.isclose(exp, 0.0):
-            _G = np.eye(G_unit.shape[0], dtype=G_unit.dtype)
-        else:
-            _G = fmp(G_unit, np.abs(exp)).astype(G_unit.dtype)
-            if np.sign(exp) < 0:
-                _G = np.linalg.pinv(_G).astype(G_unit.dtype)
-        G_frac.append(_G)
-        idx += 1
-
-    return np.stack(G_frac, axis=0)
+    G_unit = torch.as_tensor(G_unit)
+    exponents = torch.as_tensor(exponents, dtype=torch.float32)
+    lG = _matrix_logm(G_unit)  # (nc, nc)
+    # Broadcast: (nsteps, 1, 1) * (nc, nc) -> (nsteps, nc, nc)
+    lG_batch = exponents.to(lG.dtype).view(-1, 1, 1) * lG.unsqueeze(0)
+    return torch.linalg.matrix_exp(lG_batch).to(G_unit.dtype)
 
 
 def train_grappa(
@@ -223,7 +251,7 @@ def train_grappa(
 
 
 # %% subroutines
-@with_numpy
+@with_torch
 def _train(train_data, lamda, coords):
     if coords is None:
         ndim = len(train_data.shape) - 1
@@ -243,7 +271,7 @@ def _train(train_data, lamda, coords):
 
 
 def _calc_grappaop(ndim, train_data, lamda, coords):
-    train_data = train_data / np.linalg.norm(train_data)
+    train_data = train_data / torch.linalg.norm(train_data)
     if coords is not None:
         gz = None
         gy, gx = _radial_grappa_op(train_data, lamda, coords)
@@ -259,7 +287,7 @@ def _calc_grappaop(ndim, train_data, lamda, coords):
 
 def _radial_grappa_op(calib, lamda, coords):
     """Return a 2D GROG operators from radial data."""
-    calib = np.moveaxis(calib, 0, -1)
+    calib = calib.movedim(0, -1)
     nr, ns, nc = calib.shape
 
     # extract x and y components of trajectory
@@ -272,69 +300,68 @@ def _radial_grappa_op(calib, lamda, coords):
     # and targets (first target has no associated source!)
     T = calib[:, 1:, ...]
 
-    # train the operator
+    # train one operator per readout: (nr, nc, nc)
     Gtheta = lstsq(S, T, lamda)
-    lGtheta = np.stack([logm(G) for G in Gtheta])
-    lGtheta = np.reshape(lGtheta, (nr, nc**2), "F")
+    # batched logm: (nr, nc, nc); F-order flatten -> (nr, nc^2)
+    lGtheta = _matrix_logm(Gtheta).permute(0, 2, 1).reshape(nr, nc * nc).contiguous()
 
     # we now need Gx, Gy.
-    dx = np.mean(np.diff(xcoord, axis=0), axis=0)
-    dy = np.mean(np.diff(ycoord, axis=0), axis=0)
-    dxy = np.concatenate((dx[:, None], dy[:, None]), axis=1)
-    dxy = dxy.astype(lGtheta.dtype)
+    dx = torch.diff(xcoord, dim=0).mean(dim=0)  # (nr,)
+    dy = torch.diff(ycoord, dim=0).mean(dim=0)  # (nr,)
+    dxy = torch.stack([dx, dy], dim=-1).to(lGtheta.dtype)  # (nr, 2)
 
-    # solve
-    lG = lstsq(dxy, lGtheta.T, lamda).T
+    # solve: dxy (nr, 2) @ lG (2, nc^2) ≈ lGtheta (nr, nc^2)
+    lG = lstsq(dxy, lGtheta, lamda)
 
-    # extract components
-    lGx = np.reshape(lG[0, :], (nc, nc))
-    lGy = np.reshape(lG[1, :], (nc, nc))
+    # extract components (C-order unflatten, consistent with original)
+    lGx = lG[0].reshape(nc, nc)
+    lGy = lG[1].reshape(nc, nc)
 
     # take matrix exponential to get from (lGx, lGy) -> (Gx, Gy)
-    return expm(lGy), expm(lGx)
+    return torch.linalg.matrix_exp(lGy), torch.linalg.matrix_exp(lGx)
 
 
 def _grappa_op_2d(calib, lamda):
     """Return a 2D GROG operators."""
-    calib = np.moveaxis(calib, 0, -1)
+    calib = calib.movedim(0, -1)
     _cx, _cy, nc = calib.shape[:]
 
     # we need sources (last source has no target!)
-    Sy = np.reshape(calib[:, :-1, :], (-1, nc))
-    Sx = np.reshape(calib[:-1, ...], (-1, nc))
+    Sy = calib[:, :-1, :].reshape(-1, nc)
+    Sx = calib[:-1, ...].reshape(-1, nc)
 
     # and we need targets for an operator along each axis (first
     # target has no associated source!)
-    Ty = np.reshape(calib[:, 1:, :], (-1, nc))
-    Tx = np.reshape(calib[1:, ...], (-1, nc))
+    Ty = calib[:, 1:, :].reshape(-1, nc)
+    Tx = calib[1:, ...].reshape(-1, nc)
 
-    # train the operators:
-    Gy = lstsq(Sy, Ty.T, lamda).T
-    Gx = lstsq(Sx, Tx.T, lamda).T
+    # train the operators: S @ G.T ≈ T → lstsq gives G.T → .T gives G
+    Gy = lstsq(Sy, Ty, lamda).mT
+    Gx = lstsq(Sx, Tx, lamda).mT
 
     return Gy, Gx
 
 
 def _grappa_op_3d(calib, lamda):
     """Return 3D GROG operator."""
-    calib = np.moveaxis(calib, 0, -1)
+    calib = calib.movedim(0, -1)
     _, _, _, nc = calib.shape[:]
 
     # we need sources (last source has no target!)
-    Sz = np.reshape(calib[:-1, :, :, :], (-1, nc))
-    Sy = np.reshape(calib[:, :-1, :, :], (-1, nc))
-    Sx = np.reshape(calib[:, :, :-1, :], (-1, nc))
+    Sz = calib[:-1, :, :, :].reshape(-1, nc)
+    Sy = calib[:, :-1, :, :].reshape(-1, nc)
+    Sx = calib[:, :, :-1, :].reshape(-1, nc)
 
     # and we need targets for an operator along each axis (first
     # target has no associated source!)
-    Tz = np.reshape(calib[1:, :, :, :], (-1, nc))
-    Ty = np.reshape(calib[:, 1:, :, :], (-1, nc))
-    Tx = np.reshape(calib[:, :, 1:, :], (-1, nc))
+    Tz = calib[1:, :, :, :].reshape(-1, nc)
+    Ty = calib[:, 1:, :, :].reshape(-1, nc)
+    Tx = calib[:, :, 1:, :].reshape(-1, nc)
 
-    # train the operators:
-    Gz = lstsq(Sz, Tz.T, lamda).T
-    Gy = lstsq(Sy, Ty.T, lamda).T
-    Gx = lstsq(Sx, Tx.T, lamda).T
+    # train the operators: S @ G.T ≈ T → lstsq gives G.T → .T gives G
+    Gz = lstsq(Sz, Tz, lamda).mT
+    Gy = lstsq(Sy, Ty, lamda).mT
+    Gx = lstsq(Sx, Tx, lamda).mT
 
-    return Gz.T, Gy.T, Gx.T
+    return Gz, Gy, Gx
 

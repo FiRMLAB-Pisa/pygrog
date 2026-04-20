@@ -11,7 +11,7 @@ import torch
 
 from mrinufft._array_compat import with_torch
 
-from .._sigpy import util
+from .._utils import resize, normalize_axes
 
 
 @with_torch
@@ -113,12 +113,12 @@ def ifft(
 # %% local subroutines
 def _fftc(input, oshape=None, axes=None, norm="ortho"):
     ndim = input.ndim
-    axes = util._normalize_axes(axes, ndim)
+    axes = normalize_axes(axes, ndim)
 
     if oshape is None:
         oshape = input.shape
 
-    tmp = util.resize(input, oshape)
+    tmp = resize(input, oshape)
     tmp = torch.fft.ifftshift(tmp, dim=axes)
     tmp = torch.fft.fftn(tmp, dim=axes, norm=norm)
     output = torch.fft.fftshift(tmp, dim=axes)
@@ -127,12 +127,12 @@ def _fftc(input, oshape=None, axes=None, norm="ortho"):
 
 def _ifftc(input, oshape=None, axes=None, norm="ortho"):
     ndim = input.ndim
-    axes = util._normalize_axes(axes, ndim)
+    axes = normalize_axes(axes, ndim)
 
     if oshape is None:
         oshape = input.shape
 
-    tmp = util.resize(input, oshape)
+    tmp = resize(input, oshape)
     tmp = torch.fft.ifftshift(tmp, dim=axes)
     tmp = torch.fft.ifftn(tmp, dim=axes, norm=norm)
     output = torch.fft.fftshift(tmp, dim=axes)

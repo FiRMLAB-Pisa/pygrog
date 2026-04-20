@@ -1,128 +1,139 @@
-"""
-Fast SIMD-accelerated binning operations for pygrog.
+"""Fast scatter-add and gather operations for sparse FFT.
 
-This module provides high-performance binning operations using platform-specific
-SIMD instructions (AVX-512, AVX, SSE) with automatic fallback to scalar operations.
+Thin wrappers around the ``_pygrog_torch`` C++ extension (CPU + CUDA).
 """
 
-__all__ = ["fast_binning_add_at", "detect_simd_level"]
+__all__ = ["scatter_add", "gather"]
 
-import warnings
+import pathlib
 
-import numpy as np
-from numpy.typing import NDArray
+import torch
 
-try:
-    from . import _fast_binning
-    _has_fast_binning = True
-except ImportError:
-    _has_fast_binning = False
-    warnings.warn(
-        "Fast binning C++ extension not available. "
-        "Using pure Python implementation with reduced performance. "
-        "To build the C++ extension, ensure you have: "
-        "cmake, pybind11, and a C++ compiler installed.",
-        RuntimeWarning,
-        stacklevel=2
+
+# ---------------------------------------------------------------------------
+# Torch C++ extension (lazy, cached)
+# ---------------------------------------------------------------------------
+_torch_ext = None
+_torch_ext_checked = False
+
+
+def _get_torch_ext():
+    """Return the ``_pygrog_torch`` extension module.
+
+    Raises
+    ------
+    RuntimeError
+        If neither the pre-built extension nor JIT compilation succeeds.
+    """
+    global _torch_ext, _torch_ext_checked
+    if _torch_ext_checked:
+        return _torch_ext
+
+    # 1. try pre-built wheel extension
+    try:
+        import pygrog._pygrog_torch as _ext
+        _torch_ext = _ext
+        _torch_ext_checked = True
+        return _torch_ext
+    except ImportError:
+        pass
+
+    # 2. JIT compilation
+    jit_error = None
+    try:
+        import torch.utils.cpp_extension as _cpp_ext
+
+        _HERE = pathlib.Path(__file__).parent.parent.parent.parent.parent
+        _CSRC = _HERE / "csrc" / "torch"
+
+        sources = [
+            str(_CSRC / "module.cpp"),
+            str(_CSRC / "grog_interp.cpp"),
+            str(_CSRC / "sparse_ops.cpp"),
+            str(_CSRC / "sparse_ops_avx2.cpp"),
+            str(_CSRC / "sparse_ops_avx512.cpp"),
+        ]
+        define_macros = []
+        if torch.cuda.is_available() and (_CSRC / "sparse_ops_cuda.cu").exists():
+            sources.append(str(_CSRC / "grog_interp_cuda.cu"))
+            sources.append(str(_CSRC / "sparse_ops_cuda.cu"))
+            define_macros.append(("COMPILE_WITH_CUDA", "1"))
+
+        _torch_ext = _cpp_ext.load(
+            name="_pygrog_torch_jit",
+            sources=sources,
+            extra_cflags=["-O3", "-std=c++17", "-fopenmp", "-march=native",
+                          "-DPYGROG_MARCH_NATIVE"],
+            extra_cuda_cflags=["-O3", "--expt-relaxed-constexpr"],
+            extra_ldflags=["-fopenmp"],
+            define_macros=define_macros,
+            verbose=False,
+        )
+        _torch_ext_checked = True
+        return _torch_ext
+    except Exception as exc:
+        jit_error = exc
+
+    raise RuntimeError(
+        "pygrog requires the _pygrog_torch C++ extension but it could not "
+        "be loaded.  Install from a precompiled wheel (`pip install pygrog`) "
+        "or build from source with a C++17 compiler "
+        "(`pip install --no-build-isolation -e .`).\n"
+        f"JIT compilation error: {jit_error}"
     )
 
 
-def fast_binning_add_at(
-    bins: NDArray[np.complex64],
-    points: NDArray[np.complex64],
-    indices: NDArray[np.uint32],
-    thread_mask: NDArray[np.uint32],
+def scatter_add(
+    grid: torch.Tensor,
+    data: torch.Tensor,
+    indices: torch.Tensor,
+    weights: torch.Tensor,
 ) -> None:
-    """
-    Perform fast binning operation: bins[indices] += points
-    
-    This function implements a high-performance version of numpy's add.at
-    operation for complex arrays, using SIMD instructions and multithreading.
-    
+    """Scatter-add: ``grid[indices[i]] += weights[i] * data[i]`` (in-place).
+
     Parameters
     ----------
-    bins : NDArray[np.complex64]
-        Output array of complex numbers (modified in-place)
-        Shape: (n_bins,), dtype: complex64
-    points : NDArray[np.complex64]
-        Input complex values to be binned
-        Shape: (n_points,), dtype: complex64
-    indices : NDArray[np.uint32]
-        Bin indices for each point
-        Shape: (n_points,), dtype: uint32
-    thread_mask : NDArray[np.uint32]
-        Thread mask for chunking of shape (n_threads, 2)
-        
+    grid : torch.Tensor
+        Flat output grid (complex), modified in-place.
+    data : torch.Tensor
+        Input data values (complex), 1-D.
+    indices : torch.Tensor
+        Target grid indices (int64), 1-D.
+    weights : torch.Tensor
+        Per-sample real weights (float), 1-D.
+
     Notes
     -----
-    - All arrays must be C-contiguous
-    - This function modifies `bins` in-place
-    - Uses platform-specific SIMD instructions (AVX-512, AVX, SSE) when available
-    - Uses thread-safe chunking to avoid race conditions
-    
+    For optimal CPU performance, pass *sorted* indices (ascending) so
+    the C++ clean-partition kernel can avoid synchronisation.
+    GPU binned scatter is available internally via
+    :class:`~pygrog.operator.SparseFFT` which auto-computes bins from
+    the GROG plan.
     """
-    if not _has_fast_binning:
-        # Pure Python fallback
-        _fallback_binning_add_at(bins, points, indices)
-        return
-    
-    # Validate and convert input arrays
-    bins = _prepare_array(bins, np.complex64, "bins")
-    points = _prepare_array(points, np.complex64, "points")
-    indices = _prepare_array(indices, np.uint32, "indices")
-    
-    # Validate shapes
-    if points.shape != indices.shape:
-        raise ValueError("points and indices must have the same shape")
-
-    if indices.max() >= len(bins):
-        raise ValueError("indices contain values outside bins array bounds")
-        
-    # Call C++ implementation
-    _fast_binning.fast_binning_add_at(bins, points, indices, thread_mask)
+    ext = _get_torch_ext()
+    ext.scatter_add(grid, data, indices, weights)
 
 
-def detect_simd_level() -> str:
-    """
-    Detect the highest SIMD instruction set available on this machine.
-    
+def gather(
+    grid: torch.Tensor,
+    indices: torch.Tensor,
+    weights: torch.Tensor,
+) -> torch.Tensor:
+    """Gather: ``out[i] = weights[i] * grid[indices[i]]``.
+
+    Parameters
+    ----------
+    grid : torch.Tensor
+        Flat input grid (complex), 1-D.
+    indices : torch.Tensor
+        Source indices (int64), 1-D.
+    weights : torch.Tensor
+        Per-sample real weights (float), 1-D.
+
     Returns
     -------
-    str
-        One of: "AVX512", "AVX", "SSE", "Scalar", "Unavailable"
-        
-    Examples
-    --------
-    >>> from pygrog.operator import detect_simd_level
-    >>> print(f"SIMD level: {detect_simd_level()}")
-    SIMD level: AVX512
+    torch.Tensor
+        Gathered values (complex), 1-D.
     """
-    if not _has_fast_binning:
-        return "Unavailable (C++ extension not built)"
-    return _fast_binning.detect_simd_level()
-
-
-def _prepare_array(arr: np.ndarray, dtype: np.dtype, name: str) -> np.ndarray:
-    """Prepare array for C++ function call."""
-    if not isinstance(arr, np.ndarray):
-        raise TypeError(f"{name} must be a numpy array")
-    
-    # Convert to required dtype if needed
-    if arr.dtype != dtype:
-        arr = arr.astype(dtype)
-    
-    # Ensure C-contiguous
-    if not arr.flags.c_contiguous:
-        arr = np.ascontiguousarray(arr)
-    
-    return arr
-
-
-def _fallback_binning_add_at(
-    bins: NDArray[np.complex64],
-    points: NDArray[np.complex64], 
-    indices: NDArray[np.uint32],
-) -> None:
-    """Pure Python fallback implementation."""
-    # Simple numpy implementation (not optimized)
-    np.add.at(bins, indices, points)
+    ext = _get_torch_ext()
+    return ext.gather(grid, indices, weights)

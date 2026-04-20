@@ -12,7 +12,9 @@ pip install pygrog
 This will:
 - **First try**: Download a precompiled wheel for your platform (OS + architecture)
 - **Fallback**: Build from source if no compatible wheel is available
-- **Final fallback**: Install pure Python version if compilation fails
+
+A C++17 compiler is required for source builds. Precompiled wheels are
+provided for all major platforms.
 
 ### 2. From Source (Development)
 ```bash
@@ -20,16 +22,17 @@ This will:
 git clone https://github.com/FiRMLAB-Pisa/pygrog.git
 cd pygrog
 
+# Install build dependencies (Linux/macOS)
+./scripts/install_build_deps.sh          # C++ toolchain only
+./scripts/install_build_deps.sh --cuda   # C++ + CUDA
+
 # Development install
 pip install -e .
-
-# Or using CMake build script
-./build_cmake.sh
 ```
 
-### 3. Force Pure Python (No C++ Extension)
+### 3. Skip CUDA (CPU-only Build)
 ```bash
-PYGROG_PURE_PYTHON=1 pip install pygrog
+PYGROG_NO_CUDA=1 pip install pygrog
 ```
 
 ## Precompiled Wheel Support
@@ -138,8 +141,11 @@ The build system automatically detects and enables:
 
 ### Setup Development Environment
 ```bash
-# Install build dependencies
-pip install cmake ninja pybind11 scikit-build-core[pyproject]
+# Install build dependencies (cross-platform scripts provided)
+# Linux/macOS:
+./scripts/install_build_deps.sh
+# Windows (PowerShell as Admin):
+.\scripts\install_build_deps.ps1
 
 # Clone and build
 git clone https://github.com/FiRMLAB-Pisa/pygrog.git
@@ -147,19 +153,18 @@ cd pygrog
 pip install -e .
 
 # Test installation
-python -c "from pygrog.operator import detect_simd_level; print(detect_simd_level())"
+python -c "import pygrog; print('OK')"
 ```
 
 ### Build Scripts
 ```bash
-# Automated CMake build
-./build_cmake.sh [--debug|--release] [--clean] [--verbose]
+# Install build dependencies (Linux/macOS)
+./scripts/install_build_deps.sh
+./scripts/install_build_deps.sh --cuda   # with CUDA support
 
-# Test PyPI workflow
-./test_pypi_workflow.sh
-
-# Legacy setuptools build
-./build_extension.sh
+# Install build dependencies (Windows, PowerShell as Admin)
+.\scripts\install_build_deps.ps1
+.\scripts\install_build_deps.ps1 -Cuda   # with CUDA support
 ```
 
 ### Testing Different Scenarios
@@ -169,9 +174,6 @@ pip install --find-links wheelhouse pygrog
 
 # Test source installation
 pip install --no-binary pygrog pygrog
-
-# Test pure Python fallback
-PYGROG_PURE_PYTHON=1 pip install .
 ```
 
 ## Distribution Workflow
@@ -212,8 +214,7 @@ pip install pygrog
 # pip will:
 # 1. Check for compatible wheel on PyPI
 # 2. Download and install wheel if available
-# 3. Build from source if no wheel found
-# 4. Use pure Python if build fails
+# 3. Build from source if no wheel found (requires C++17 compiler)
 ```
 
 ## Troubleshooting
@@ -231,9 +232,9 @@ This means no compatible wheel was found and pip is building from source.
 error: Failed building wheel for pygrog
 ```
 Solutions:
-1. Install build dependencies: `pip install cmake pybind11`
-2. Force pure Python: `PYGROG_PURE_PYTHON=1 pip install pygrog`
-3. Use older version: `pip install pygrog==1.0.0`
+1. Install build dependencies: `./scripts/install_build_deps.sh`
+2. Skip CUDA: `PYGROG_NO_CUDA=1 pip install pygrog`
+3. Use a precompiled wheel: `pip install pygrog` (recommended)
 
 #### Missing SIMD Performance
 ```python
@@ -247,14 +248,8 @@ If showing "Scalar" or "Unavailable":
 
 ### Verification Commands
 ```bash
-# Check installation type
-python -c "
-try:
-    import pygrog.operator._fast_binning
-    print('✓ C++ extension available')
-except ImportError:
-    print('✗ Pure Python fallback')
-"
+# Check extension is loaded
+python -c "import pygrog._pygrog_torch; print('\u2713 C++ extension loaded')"
 
 # Performance test
 python -c "
@@ -296,7 +291,6 @@ print(f'SIMD level: {detect_simd_level()}')
 | Older x86_64 | SSE4.2 | 1.5-2x |
 | Apple M1/M2 | NEON | 2-4x |
 | ARM64 Linux | NEON | 2-4x |
-| Pure Python | None | 1x (baseline) |
 
 Actual performance depends on:
 - Data size (larger = better speedup)

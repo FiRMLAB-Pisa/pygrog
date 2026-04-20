@@ -59,11 +59,7 @@ jobs:
       with:
         platforms: arm64
 
-    - name: Install CMake and Ninja
-      uses: lukka/get-cmake@latest
-      with:
-        cmakeVersion: "~3.25.0"
-        ninjaVersion: "^1.11.1"
+    # No CMake/Ninja needed — extension is built via torch.utils.cpp_extension
 
     - name: Setup Python
       uses: actions/setup-python@v4
@@ -81,9 +77,9 @@ jobs:
         # Skip PyPy and musl for now (can add later if needed)
         CIBW_SKIP: "pp* *-musllinux*"
         
-        # Install build dependencies
+        # Install build dependencies (torch is needed for cpp_extension)
         CIBW_BEFORE_BUILD: >
-          pip install cmake ninja pybind11 scikit-build-core[pyproject]
+          pip install torch numpy setuptools wheel
         
         # Test the built wheels
         CIBW_TEST_REQUIRES: pytest numpy
@@ -106,15 +102,8 @@ jobs:
           "
         
         # Platform-specific settings
-        CIBW_ENVIRONMENT_LINUX: >
-          CMAKE_BUILD_TYPE=Release
-          CMAKE_ARGS="-DENABLE_NATIVE_ARCH=OFF -DENABLE_LTO=ON"
         CIBW_ENVIRONMENT_MACOS: >
-          CMAKE_BUILD_TYPE=Release
-          CMAKE_ARGS="-DENABLE_NATIVE_ARCH=OFF -DENABLE_LTO=ON"
           MACOSX_DEPLOYMENT_TARGET=10.15
-        CIBW_ENVIRONMENT_WINDOWS: >
-          CMAKE_BUILD_TYPE=Release
         
         # Repair wheels for better compatibility
         CIBW_REPAIR_WHEEL_COMMAND_LINUX: "auditwheel repair -w {dest_dir} {wheel}"

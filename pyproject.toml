@@ -1,10 +1,11 @@
 [build-system]
 requires = [
-    "scikit-build-core>=0.4.3",
-    "pybind11>=2.6.0",
+    "setuptools>=64",
+    "setuptools-scm>=8",
+    "wheel",
     "numpy",
 ]
-build-backend = "scikit_build_core.build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "pygrog"
@@ -34,19 +35,17 @@ classifiers = [  # Optional
 
 dependencies = [
     "numpy",
-    "scipy", 
-    "numba",
-    "mri-nufft",
-    "sigpy",
-    "torch",
-    "ipywidgets",
-    "ismrmrd",
-    "h5py",
+    "scipy",
+    "torch>=2.0",
 ]
 
-
-
 [project.optional-dependencies] # Optional
+gpu = [
+    "cupy-cuda12x",
+]
+io = [
+    "h5py",
+]
 dev = [
     "black", 
     "isort", 

@@ -2,71 +2,68 @@
 
 __all__ = ["ToeplitzOp"]
 
+import torch
 from numpy.typing import ArrayLike
 
-from .._sigpy import linop
-from .._sigpy.linop import Multiply
-
-from .._base import FFT
-
+from .._utils import resize
+from .._base._fftc import fft, ifft
 from ._toep import calc_toeplitz_kernel
 
 
-class ToeplitzOp(linop.Linop):
+class ToeplitzOp:
     """
-    Single coil Fourier Normal operator.
+    Single coil Toeplitz Normal operator (A^H A).
+
+    Implements resize -> FFT -> multiply PSF -> IFFT -> resize, all torch-native.
 
     Parameters
     ----------
-    shape : ArrayLike[int] | None, optional
-        Input shape. Use ``-1`` to enable broadcasting
-        across a particular axis (e.g., ``(-1, Ny, Nx)``).
+    shape : list[int] | tuple[int]
+        Input spatial shape.
     coords : ArrayLike
         Fourier domain coordinate array of shape ``(..., ndim)``.
-        ``ndim`` determines the number of dimensions to apply the NUFFT.
     weights : ArrayLike | None, optional
-        Fourier domain density compensation array for NUFFT (``None`` for Cartesian).
-        If not provided, does not perform density compensation.
+        Density compensation weights.
     oversamp : float, optional
         Oversampling factor. The default is ``1.25``.
     eps : float, optional
-        Desired numerical precision. The default is ``1e-6``.
+        Desired numerical precision. The default is ``1e-3``.
     normalize_coords : bool, optional
-        Normalize coordinates between -pi and pi. If ``False``,
-        assume they are correctly normalized already. The default
-        is ``True``.
+        Normalize coordinates between -pi and pi. The default is ``True``.
 
     """
 
     def __init__(
         self,
-        shape: ArrayLike,
+        shape: list[int] | tuple[int],
         coords: ArrayLike,
         weights: ArrayLike | None = None,
         oversamp: float = 1.25,
         eps: float = 1e-3,
         normalize_coords: bool = True,
     ):
+        self.shape = tuple(shape)
         ndim = coords.shape[-1]
-        fft_axes = tuple(range(-1, -(ndim + 1), -1))
+        self.fft_axes = tuple(range(-1, -(ndim + 1), -1))
 
         # Generate PSF kernel
         psf = calc_toeplitz_kernel(
             coords, shape, weights, oversamp, eps, normalize_coords
         )
+        self.psf = torch.as_tensor(psf)
+        self.os_shape = tuple(self.psf.shape)
 
-        # Compose operator
-        R = linop.Resize(psf.shape, shape)
-        F = FFT(psf.shape, axes=fft_axes)
-        P = Multiply(psf.shape, psf)
-        self._linops = R.H * F.H * P * F * R
-        super().__init__(self._linops.oshape, self._linops.ishape)
-
-    def _apply(self, input):
-        return self._linops._apply(input)
-
-    def _normal_linop(self):
-        return self
-
-    def _adjoint_linop(self):
-        return self
+    def __call__(self, input: torch.Tensor) -> torch.Tensor:
+        """Apply Toeplitz normal operator: resize -> FFT -> PSF multiply -> IFFT -> resize."""
+        os_shape = list(input.shape)
+        for ax in self.fft_axes:
+            os_shape[ax] = self.os_shape[ax]
+        x = resize(input, os_shape)
+        x = fft(x, axes=self.fft_axes, norm=None)
+        psf = self.psf.to(x.device, x.dtype)
+        x = x * psf
+        x = ifft(x, axes=self.fft_axes, norm=None)
+        out_shape = list(x.shape)
+        for ax in self.fft_axes:
+            out_shape[ax] = self.shape[ax]
+        return resize(x, out_shape)

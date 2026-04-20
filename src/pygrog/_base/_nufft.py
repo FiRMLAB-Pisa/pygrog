@@ -2,24 +2,161 @@
 
 __all__ = ["nufft", "nufft_adjoint"]
 
-import gc
 import math
-
-from types import SimpleNamespace
 
 import numpy as np
 from numpy.typing import NDArray
 
+import torch
+
 import mrinufft
+from mrinufft._array_compat import with_torch
+from mrinufft._utils import proper_trajectory
+from mrinufft.operators.base import FourierOperatorBase
 
-from mrinufft._array_compat import with_numpy_cupy
-from mrinufft.operators.interfaces.utils import is_cuda_array
+from .._utils import rescale_coords, estimate_shape
 
-from .._sigpy.fourier import estimate_shape
-from .._utils import rescale_coords
 
-if mrinufft.check_backend("cufinufft"):
-    import cupy as cp
+# ---------------------------------------------------------------------------
+# pytorch-finufft backend for mri-nufft (auto-registers via __init_subclass__)
+# ---------------------------------------------------------------------------
+_PYTORCH_FINUFFT_AVAILABLE = True
+try:
+    from pytorch_finufft.functional import finufft_type1, finufft_type2
+except ImportError:
+    _PYTORCH_FINUFFT_AVAILABLE = False
+
+
+class _MRIPytorchFinufft(FourierOperatorBase):
+    """MRI NUFFT operator backed by pytorch-finufft.
+
+    Device-agnostic: runs on CPU or CUDA depending on where the input lives.
+    Inputs/outputs are transparently converted to/from any array library by
+    the ``@with_torch`` decorator.
+
+    Parameters
+    ----------
+    samples : array-like
+        Sample locations of shape ``(n_samples, ndim)`` in ``[-pi, pi]``.
+    shape : tuple[int, ...]
+        Image-space shape.
+    density : bool or array, optional
+        Density compensation weights. Default is ``False``.
+    n_coils : int, optional
+        Number of coils. Default is ``1``.
+    n_batchs : int, optional
+        Number of batches. Default is ``1``.
+    smaps : array, optional
+        Sensitivity maps of shape ``(n_coils, *shape)``. Default is ``None``.
+    squeeze_dims : bool, optional
+        Squeeze singleton batch/coil dimensions on output. Default is ``True``.
+    upsampfac : float, optional
+        NUFFT oversampling factor. Default is ``2.0``.
+    eps : float, optional
+        Desired numerical precision. Default is ``1e-6``.
+    """
+
+    backend = "pytorch-finufft"
+    available = _PYTORCH_FINUFFT_AVAILABLE
+    autograd_available = True
+
+    def __init__(
+        self,
+        samples,
+        shape,
+        density=False,
+        n_coils=1,
+        n_batchs=1,
+        smaps=None,
+        squeeze_dims=True,
+        upsampfac=2.0,
+        eps=1e-6,
+        **kwargs,
+    ):
+        super().__init__()
+        self.shape = shape
+
+        # Convert samples to contiguous numpy float32 in [-pi, pi]
+        if isinstance(samples, torch.Tensor):
+            samples = samples.detach().cpu().numpy()
+        samples = proper_trajectory(
+            np.asarray(samples).astype(np.float32, copy=False), normalize="pi"
+        )
+        self._samples = np.ascontiguousarray(samples)
+        self.dtype = np.float32
+
+        self.n_coils = n_coils
+        self.n_batchs = n_batchs
+        self.squeeze_dims = squeeze_dims
+        self.upsampfac = float(upsampfac)
+        self.eps = float(eps)
+
+        self.compute_density(density)
+        self.compute_smaps(smaps)
+
+    def _get_points(self, device):
+        """Return trajectory as (ndim, n_samples) float32 tensor on *device*."""
+        return torch.as_tensor(self._samples.T, device=device)
+
+    def _safe_squeeze(self, arr):
+        if self.squeeze_dims:
+            try:
+                arr = arr.squeeze(axis=1)
+            except (ValueError, IndexError):
+                pass
+            try:
+                arr = arr.squeeze(axis=0)
+            except (ValueError, IndexError):
+                pass
+        return arr
+
+    @with_torch
+    def op(self, data, out=None):
+        """Forward NUFFT: image → non-uniform k-space (type 2)."""
+        points = self._get_points(data.device)
+        B, C = self.n_batchs, self.n_coils
+        n_bc = B * (1 if self.uses_sense else C)
+
+        data = data.reshape(n_bc, *self.shape).to(torch.complex64)
+        ksp = torch.stack(
+            [
+                finufft_type2(
+                    points,
+                    data[i],
+                    modeord=0,
+                    isign=-1,
+                    upsampfac=self.upsampfac,
+                    eps=self.eps,
+                )
+                for i in range(n_bc)
+            ]
+        )
+        ksp = ksp.reshape(B, C, self.n_samples) / float(self.norm_factor)
+        return self._safe_squeeze(ksp)
+
+    @with_torch
+    def adj_op(self, coeffs, out=None):
+        """Adjoint NUFFT: non-uniform k-space → image (type 1)."""
+        points = self._get_points(coeffs.device)
+        B, C, K = self.n_batchs, self.n_coils, self.n_samples
+
+        coeffs = coeffs.reshape(B * C, K).to(torch.complex64)
+        img = torch.stack(
+            [
+                finufft_type1(
+                    points,
+                    coeffs[i],
+                    output_shape=self.shape,
+                    modeord=0,
+                    isign=1,
+                    upsampfac=self.upsampfac,
+                    eps=self.eps,
+                )
+                for i in range(B * C)
+            ]
+        )
+        img = img.reshape(B, C, *self.shape) / float(self.norm_factor)
+        return self._safe_squeeze(img)
 
 
 def nufft(
@@ -114,7 +251,6 @@ def nufft_adjoint(
 
 
 # %% local subroutines
-@with_numpy_cupy
 def __nufft_init__(
     coords: NDArray[float],
     shape: list[int] | tuple[int] | None = None,
@@ -122,24 +258,25 @@ def __nufft_init__(
     eps: float = 1e-6,
     normalize_coords: bool = True,
 ):
+    # Convert coords to numpy float32 for operator initialization
+    try:
+        coords = coords.numpy(force=True)  # torch tensor
+    except AttributeError:
+        pass
+    try:
+        coords = coords.get()  # cupy array
+    except AttributeError:
+        pass
+    coords = np.asarray(coords, dtype=np.float32)
+
     if shape is None:
         shape = estimate_shape(coords)
 
-    # enforce single precision
-    coords = coords.astype(np.float32)
-
-    # normalize
+    # normalize to [-pi, pi]
     if normalize_coords:
         coords = rescale_coords(coords, 2 * math.pi)
 
-    # enforce numpy array for coords
-    try:
-        coords = coords.get()
-    except Exception:
-        pass
-
-    # prepare CPU nufft
-    cpu_nufft = mrinufft.get_operator("finufft")(
+    return mrinufft.get_operator("pytorch-finufft")(
         samples=coords.reshape(-1, coords.shape[-1]),
         shape=shape,
         squeeze_dims=True,
@@ -147,77 +284,42 @@ def __nufft_init__(
         eps=eps,
     )
 
-    if mrinufft.check_backend("cufinufft"):
-        gpu_nufft = mrinufft.get_operator("cufinufft")(
-            samples=coords.reshape(-1, coords.shape[-1]),
-            shape=shape,
-            squeeze_dims=True,
-            upsampfac=oversamp,
-            eps=eps,
-        )
-    else:
-        gpu_nufft = None
 
-    return SimpleNamespace(cpu=cpu_nufft, gpu=gpu_nufft)
-
-
-@with_numpy_cupy
+@with_torch
 def _apply(plan, input):
     # reshape from (..., *grid_shape) to (B, *grid_shape)
-    ndim = plan.cpu.ndim
+    ndim = plan.ndim
     broadcast_shape = input.shape[:-ndim]
     input = input.reshape(-1, *input.shape[-ndim:])
 
-    # select operator based on computational device
-    if is_cuda_array(input):
-        _nufft = plan.gpu
-    else:
-        _nufft = plan.cpu
-
     # actual computation
     if input.ndim == ndim:
-        output = _nufft.op(input)
+        output = plan.op(input)
     else:
-        output = np.stack([_nufft.op(batch) for batch in input])
+        output = torch.stack([plan.op(batch) for batch in input])
 
     # reshape from (B, samples) to (..., samples)
     if output.ndim != 1:
         output = output.reshape(*broadcast_shape, *output.shape[1:])
 
-    # clean-up
-    if is_cuda_array(input):
-        gc.collect()
-        cp._default_memory_pool.free_all_blocks()
-
     return output
 
 
-@with_numpy_cupy
+@with_torch
 def _apply_adj(plan, input):
     # reshape from (..., samples) to (B, samples)
-    nsamples = plan.cpu.n_samples
+    nsamples = plan.n_samples
     broadcast_shape = input.shape[:-1]
     input = input.reshape(-1, nsamples)
 
-    # select operator based on computational device
-    if is_cuda_array(input):
-        _nufft = plan.gpu
-    else:
-        _nufft = plan.cpu
-
     # actual computation
     if input.ndim == 1:
-        output = _nufft.adj_op(input)
+        output = plan.adj_op(input)
     else:
-        output = np.stack([_nufft.adj_op(batch) for batch in input])
+        output = torch.stack([plan.adj_op(batch) for batch in input])
 
     # reshape from (B, *grid_shape) to (..., *grid_shape)
     if input.ndim != 1:
         output = output.reshape(*broadcast_shape, *output.shape[1:])
-
-    # clean-up
-    if is_cuda_array(input):
-        gc.collect()
-        cp._default_memory_pool.free_all_blocks()
 
     return output
