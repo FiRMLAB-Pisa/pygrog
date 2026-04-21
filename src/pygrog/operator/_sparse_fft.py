@@ -31,7 +31,6 @@ import torch
 from .._utils import resize
 from .._base._fftc import fft, ifft
 
-
 # ---------------------------------------------------------------------------
 # Torch C++ extension (lazy, cached)
 # ---------------------------------------------------------------------------
@@ -58,6 +57,7 @@ def _get_torch_ext():
     # 1. try pre-built wheel extension
     try:
         import pygrog._pygrog_torch as _ext
+
         _torch_ext = _ext
         _torch_ext_checked = True
         return _torch_ext
@@ -88,8 +88,13 @@ def _get_torch_ext():
         _torch_ext = _cpp_ext.load(
             name="_pygrog_torch_jit",
             sources=sources,
-            extra_cflags=["-O3", "-std=c++17", "-fopenmp", "-march=native",
-                          "-DPYGROG_MARCH_NATIVE"],
+            extra_cflags=[
+                "-O3",
+                "-std=c++17",
+                "-fopenmp",
+                "-march=native",
+                "-DPYGROG_MARCH_NATIVE",
+            ],
             extra_cuda_cflags=["-O3", "--expt-relaxed-constexpr"],
             extra_ldflags=["-fopenmp"],
             define_macros=define_macros,
@@ -116,8 +121,7 @@ def _scatter_add(grid, data, indices, weights, bin_starts=None, bin_size=0):
     """grid[indices[i]] += weights[i] * data[i], in-place."""
     ext = _get_torch_ext()
     if bin_starts is not None:
-        ext.scatter_add_binned(grid, data, indices, weights,
-                               bin_starts, bin_size)
+        ext.scatter_add_binned(grid, data, indices, weights, bin_starts, bin_size)
     else:
         ext.scatter_add(grid, data, indices, weights)
 
@@ -163,13 +167,14 @@ class SparseFFT:
 
     def __init__(
         self,
-        plan=None,
         grid_shape=None,
         image_shape=None,
         indices=None,
         weights=None,
         smaps=None,
         device=None,
+        *,
+        plan=None,
     ):
         # --- Accept plan or raw arguments ----------------------------------
         if plan is not None:
@@ -241,8 +246,14 @@ class SparseFFT:
 
     def _scatter(self, grid, data, indices, sqrt_w):
         """Weighted scatter-add using binned kernel when available."""
-        _scatter_add(grid, data, indices, sqrt_w,
-                     bin_starts=self._bin_starts, bin_size=self._bin_size)
+        _scatter_add(
+            grid,
+            data,
+            indices,
+            sqrt_w,
+            bin_starts=self._bin_starts,
+            bin_size=self._bin_size,
+        )
 
     # ------------------------------------------------------------------
     # Forward: sparse k-space -> image  (adjoint NUFFT direction)
@@ -263,7 +274,7 @@ class SparseFFT:
         n_coils = sparse_kspace.shape[0]
         src_device = sparse_kspace.device
         comp_device = self.device if self.device is not None else src_device
-        use_pipeline = (comp_device.type == "cuda" and src_device.type == "cpu")
+        use_pipeline = comp_device.type == "cuda" and src_device.type == "cpu"
 
         dtype = sparse_kspace.dtype
         indices = self.indices.to(comp_device)
@@ -278,12 +289,20 @@ class SparseFFT:
             conj_smaps = self._conj_smaps.to(comp_device, dtype=dtype)
             accum = torch.zeros(self.image_shape, dtype=dtype, device=comp_device)
         else:
-            accum = torch.zeros(self.image_shape, dtype=torch.float32, device=comp_device)
+            accum = torch.zeros(
+                (n_coils, *self.image_shape), dtype=dtype, device=comp_device
+            )
 
         if use_pipeline:
             self._forward_pipeline(
-                sparse_kspace, indices, sqrt_w, sort_perm, grid,
-                conj_smaps if self.smaps is not None else None, accum, dtype,
+                sparse_kspace,
+                indices,
+                sqrt_w,
+                sort_perm,
+                grid,
+                conj_smaps if self.smaps is not None else None,
+                accum,
+                dtype,
             )
         else:
             for c in range(n_coils):
@@ -293,10 +312,7 @@ class SparseFFT:
                     # Fused multiply-accumulate: accum += img_c * conj_smaps[c]
                     accum.addcmul_(img_c, conj_smaps[c])
                 else:
-                    accum += img_c.abs().square()
-
-        if self.smaps is None:
-            accum = accum.sqrt().to(dtype)
+                    accum[c] = img_c
 
         return accum.to(src_device)
 
@@ -318,7 +334,7 @@ class SparseFFT:
         """
         src_device = image.device
         comp_device = self.device if self.device is not None else src_device
-        use_pipeline = (comp_device.type == "cuda" and src_device.type == "cpu")
+        use_pipeline = comp_device.type == "cuda" and src_device.type == "cpu"
 
         dtype = image.dtype
         indices = self.indices.to(comp_device)
@@ -330,7 +346,7 @@ class SparseFFT:
             smaps = self.smaps.to(comp_device, dtype=dtype)
             n_coils = smaps.shape[0]
         else:
-            n_coils = 1
+            n_coils = image_d.shape[0]
 
         n_samples = indices.shape[0]
         output = torch.zeros(n_coils, n_samples, dtype=dtype, device=comp_device)
@@ -340,13 +356,25 @@ class SparseFFT:
 
         if use_pipeline and self.smaps is not None:
             self._adjoint_pipeline(
-                image_d, indices, sqrt_w, inv_perm, smaps, padded, output, dtype,
+                image_d,
+                indices,
+                sqrt_w,
+                inv_perm,
+                smaps,
+                padded,
+                output,
+                dtype,
             )
         else:
             for c in range(n_coils):
-                coil_img = image_d * smaps[c] if self.smaps is not None else image_d
+                coil_img = image_d * smaps[c] if self.smaps is not None else image_d[c]
                 output[c] = self._fft_pad_gather(
-                    coil_img, indices, sqrt_w, inv_perm, padded, dtype,
+                    coil_img,
+                    indices,
+                    sqrt_w,
+                    inv_perm,
+                    padded,
+                    dtype,
                 )
 
         return output.to(src_device)
@@ -363,8 +391,9 @@ class SparseFFT:
         """Scatter -> IFFT -> crop for one coil.  Reuses *grid* buffer."""
         grid.zero_()
         self._scatter(grid, coil_data, indices, sqrt_w)
-        return ifft(grid.reshape(self.grid_shape),
-                    oshape=self.image_shape, axes=self.fft_axes)
+        return ifft(
+            grid.reshape(self.grid_shape), oshape=self.image_shape, axes=self.fft_axes
+        )
 
     def _fft_pad_gather(self, coil_img, indices, sqrt_w, inv_perm, padded, dtype):
         """FFT -> zero-pad -> gather -> unpermute for one coil.
@@ -380,8 +409,9 @@ class SparseFFT:
     # ------------------------------------------------------------------
     # Dual-stream GPU pipelining  (CPU input -> GPU compute)
     # ------------------------------------------------------------------
-    def _forward_pipeline(self, sparse_kspace, indices, sqrt_w, sort_perm,
-                          grid, conj_smaps, accum, dtype):
+    def _forward_pipeline(
+        self, sparse_kspace, indices, sqrt_w, sort_perm, grid, conj_smaps, accum, dtype
+    ):
         """Dual-stream forward: overlap H2D transfer with FFT."""
         n_coils = sparse_kspace.shape[0]
         device = accum.device
@@ -402,8 +432,9 @@ class SparseFFT:
             if c + 1 < n_coils:
                 other = s1 if nxt == 0 else s2
                 with torch.cuda.stream(other):
-                    buf[nxt] = sparse_kspace[c + 1].pin_memory().to(
-                        device, non_blocking=True)
+                    buf[nxt] = (
+                        sparse_kspace[c + 1].pin_memory().to(device, non_blocking=True)
+                    )
 
             with torch.cuda.stream(stream):
                 coil_data = buf[cur][sort_perm]
@@ -415,8 +446,9 @@ class SparseFFT:
 
         torch.cuda.synchronize(device)
 
-    def _adjoint_pipeline(self, image_d, indices, sqrt_w, inv_perm,
-                          smaps, padded, output, dtype):
+    def _adjoint_pipeline(
+        self, image_d, indices, sqrt_w, inv_perm, smaps, padded, output, dtype
+    ):
         """Dual-stream adjoint: overlap FFT with D2H transfer."""
         n_coils = smaps.shape[0]
         device = image_d.device
@@ -429,7 +461,12 @@ class SparseFFT:
             with torch.cuda.stream(stream):
                 coil_img = image_d * smaps[c]
                 output[c] = self._fft_pad_gather(
-                    coil_img, indices, sqrt_w, inv_perm, padded, dtype,
+                    coil_img,
+                    indices,
+                    sqrt_w,
+                    inv_perm,
+                    padded,
+                    dtype,
                 )
 
         torch.cuda.synchronize(device)

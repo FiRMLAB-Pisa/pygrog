@@ -9,7 +9,6 @@ import pathlib
 
 import torch
 
-
 # ---------------------------------------------------------------------------
 # Torch C++ extension (lazy, cached)
 # ---------------------------------------------------------------------------
@@ -32,6 +31,7 @@ def _get_torch_ext():
     # 1. try pre-built wheel extension
     try:
         import pygrog._pygrog_torch as _ext
+
         _torch_ext = _ext
         _torch_ext_checked = True
         return _torch_ext
@@ -62,8 +62,13 @@ def _get_torch_ext():
         _torch_ext = _cpp_ext.load(
             name="_pygrog_torch_jit",
             sources=sources,
-            extra_cflags=["-O3", "-std=c++17", "-fopenmp", "-march=native",
-                          "-DPYGROG_MARCH_NATIVE"],
+            extra_cflags=[
+                "-O3",
+                "-std=c++17",
+                "-fopenmp",
+                "-march=native",
+                "-DPYGROG_MARCH_NATIVE",
+            ],
             extra_cuda_cflags=["-O3", "--expt-relaxed-constexpr"],
             extra_ldflags=["-fopenmp"],
             define_macros=define_macros,

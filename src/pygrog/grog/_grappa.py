@@ -39,7 +39,7 @@ def lstsq(A, b, lamda=0.0):
     N = A_t.shape[-1]
 
     if lamda > 0:
-        sqrt_lamda = lamda ** 0.5
+        sqrt_lamda = lamda**0.5
         I_reg = sqrt_lamda * torch.eye(N, dtype=A_t.dtype, device=A_t.device)
         if A_t.dim() > 2:
             I_reg = I_reg.expand(*A_t.shape[:-2], N, N)
@@ -70,15 +70,13 @@ def _matrix_logm(A: torch.Tensor) -> torch.Tensor:
     result = vecs @ torch.diag_embed(torch.log(vals)) @ torch.linalg.inv(vecs)
     return result.to(dtype_out)
 
+
 def KernelTable(
-        train_data: NDArray[complex], 
-        radius: float, 
-        precision: int = 1, 
-        lamda: float = 0.01
+    train_data: NDArray[complex], radius: float, precision: int = 1, lamda: float = 0.01
 ) -> tuple[NDArray[complex], int, int]:
     """
     Set the GRAPPA kernels and compute the GROG table for interpolation.
-    
+
     Parameters
     ----------
     train_data : NDArray[complex]
@@ -89,7 +87,7 @@ def KernelTable(
         Number of decimal digits to round shifts.
     lamda : float
         L2 regularization for GRAPPA kernel estimation.
-        
+
     Returns
     -------
     NDArray
@@ -99,16 +97,16 @@ def KernelTable(
         Number of fractional steps.
     int
         Number of spatial dimensions.
-        
+
     """
     grappa_kernels = train_grappa(train_data, lamda)
-    
+
     # Calculate displacements steps
     nsteps = 2 * radius / 10 ** (-precision) + 1
     nsteps = int(nsteps)
     deltas = torch.arange(nsteps).float()
     deltas = (deltas - (nsteps - 1) // 2) / (nsteps - 1)
-    
+
     # Pre-compute partial operators
     Gx = grappa_power(grappa_kernels["x"], deltas)  # (nsteps, nc, nc)
     Gy = grappa_power(grappa_kernels["y"], deltas)  # (nsteps, nc, nc)
@@ -118,18 +116,20 @@ def KernelTable(
     else:
         Gz = None
         ndim = 2
-        
+
     return prepare_grappa_table(Gx, Gy, Gz, nsteps, ndim).numpy(), nsteps, ndim
 
+
 def prepare_grappa_table(
-        Gx: NDArray[complex], 
-        Gy: NDArray[complex], 
-        Gz: NDArray[complex] | None, 
-        nsteps: int, ndim: int
+    Gx: NDArray[complex],
+    Gy: NDArray[complex],
+    Gz: NDArray[complex] | None,
+    nsteps: int,
+    ndim: int,
 ) -> NDArray[complex]:
     """
     Prepare the GRAPPA operator table.
-    
+
     Parameters
     ----------
     Gx : NDArray
@@ -143,13 +143,13 @@ def prepare_grappa_table(
         Number of fractional steps between ``-0.5`` and ``0.5``.
     ndim : int
         Acquisition dimensionality (``2`` or ``3``).
-        
+
     Returns
     -------
     NDArray
         GRAPPA kernel table for fractional shifts ``(dx, dy, dz)`` of shape
         ``(nsteps**ndim, ncoils, ncoils)``.
-        
+
     """
     Gx = torch.as_tensor(Gx)
     Gy = torch.as_tensor(Gy)
@@ -163,9 +163,9 @@ def prepare_grappa_table(
             raise ValueError("3D interpolation requires Z operator")
         Gz = torch.as_tensor(Gz)
         # table[i*nsteps^2 + j*nsteps + k] = Gx[k] @ Gy[j] @ Gz[i]
-        grappa_table = (
-            Gx[None, None] @ Gy[None, :, None] @ Gz[:, None, None]
-        ).reshape(-1, *Gx.shape[-2:])
+        grappa_table = (Gx[None, None] @ Gy[None, :, None] @ Gz[:, None, None]).reshape(
+            -1, *Gx.shape[-2:]
+        )
 
     else:
         raise ValueError(f"GROG interpolation only supports 2D or 3D data, got {ndim}D")
@@ -364,4 +364,3 @@ def _grappa_op_3d(calib, lamda):
     Gx = lstsq(Sx, Tx, lamda).mT
 
     return Gz, Gy, Gx
-

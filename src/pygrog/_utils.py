@@ -29,9 +29,7 @@ def resize(input: torch.Tensor, oshape: list[int] | tuple[int]) -> torch.Tensor:
     """
     ishape = input.shape
     if len(ishape) != len(oshape):
-        raise ValueError(
-            f"Input ndim ({len(ishape)}) != output ndim ({len(oshape)})"
-        )
+        raise ValueError(f"Input ndim ({len(ishape)}) != output ndim ({len(oshape)})")
     result = input
     for axis in range(len(oshape)):
         i_len = result.shape[axis]
@@ -52,29 +50,29 @@ def resize(input: torch.Tensor, oshape: list[int] | tuple[int]) -> torch.Tensor:
 
 
 def normalize_axes(
-    axes: int | list[int] | tuple[int] | None, ndim: int
-) -> tuple[int, ...]:
+    ndim: int, axes: int | list[int] | tuple[int] | None
+) -> list[int]:
     """
     Normalize FFT axes specification.
 
     Parameters
     ----------
-    axes : int | list[int] | tuple[int] | None
-        Axes specification. ``None`` means all axes.
     ndim : int
         Number of dimensions.
+    axes : int | list[int] | tuple[int] | None
+        Axes specification. ``None`` means all axes.
 
     Returns
     -------
-    tuple[int, ...]
+    list[int]
         Normalized axes as positive indices.
 
     """
     if axes is None:
-        return tuple(range(ndim))
+        return list(range(ndim))
     if np.isscalar(axes):
         axes = (axes,)
-    return tuple(a % ndim for a in axes)
+    return [a % ndim for a in axes]
 
 
 def rescale_coords(coords: NDArray, amp: float | NDArray) -> NDArray:
@@ -96,21 +94,21 @@ def rescale_coords(coords: NDArray, amp: float | NDArray) -> NDArray:
 
     """
     if isinstance(coords, torch.Tensor):
-        cmax = coords.abs().reshape(-1, coords.shape[-1]).max(dim=0).values
+        cmax = coords.abs().reshape(coords.shape[0], -1).max(dim=1).values
         if np.isscalar(amp):
             amp_t = torch.full(
-                (coords.shape[-1],), amp, dtype=coords.dtype, device=coords.device
+                (coords.shape[0],), amp, dtype=coords.dtype, device=coords.device
             )
         else:
             amp_t = torch.as_tensor(amp, dtype=coords.dtype, device=coords.device)
-        return 0.5 * amp_t * coords / cmax
+        return 0.5 * amp_t[:, None] * coords / cmax[:, None]
     else:
-        cmax = np.abs(coords).reshape(-1, coords.shape[-1]).max(axis=0)
+        cmax = np.abs(coords).reshape(coords.shape[0], -1).max(axis=1)
         if np.isscalar(amp):
-            amp = np.asarray([amp] * coords.shape[-1], dtype=coords.dtype)
+            amp = np.asarray([amp] * coords.shape[0], dtype=coords.dtype)
         else:
             amp = np.asarray(amp, dtype=coords.dtype)
-        return 0.5 * amp * coords / cmax
+        return 0.5 * amp[:, None] * coords / cmax[:, None]
 
 
 def estimate_shape(coords: NDArray) -> tuple[int, ...]:
@@ -128,10 +126,10 @@ def estimate_shape(coords: NDArray) -> tuple[int, ...]:
         Estimated grid shape.
 
     """
-    ndim = coords.shape[-1]
+    ndim = coords.shape[0]
     shape = []
     for i in range(ndim):
-        c = coords[..., i].ravel()
+        c = coords[i].ravel()
         max_val = float(np.max(np.abs(c)))
         n = max(int(2 * math.ceil(max_val)), 1)
         shape.append(n)

@@ -8,6 +8,7 @@ from mrinufft._array_compat import with_torch
 
 from .._utils import rescale_coords
 
+
 @with_torch
 def extract_acr(
     data: NDArray[complex],
@@ -17,7 +18,10 @@ def extract_acr(
     shape: int | None = None,
     ndim: int | None = None,
     mask: NDArray[bool] | None = None,
-) -> tuple[NDArray[complex], NDArray[bool] | None] | tuple[NDArray[complex], NDArray[float], NDArray[float] | None]:
+) -> (
+    tuple[NDArray[complex], NDArray[bool] | None]
+    | tuple[NDArray[complex], NDArray[float], NDArray[float] | None]
+):
     """
     Extract calibration region from input dataset.
 
@@ -29,10 +33,10 @@ def extract_acr(
         Calibration region size. The default is ``24``.
     coords : NDArray[float], optional
         Fourier domain coordinate array of shape ``(*others, 1, k2, k1, k0, ndim)``.
-        Required for Non Cartesian datasets. 
+        Required for Non Cartesian datasets.
         The default is ``None``.
     weights : NDArray[float], optional
-        K-space density compensation of shape ``(*others, 1, k2, k1, k0)``. 
+        K-space density compensation of shape ``(*others, 1, k2, k1, k0)``.
         The default is ``None``.
     shape : int, optional
         Matrix size of shape ``(ndim,)``.

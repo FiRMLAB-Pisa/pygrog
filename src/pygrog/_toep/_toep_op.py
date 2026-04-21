@@ -35,13 +35,25 @@ class ToeplitzOp:
 
     def __init__(
         self,
-        shape: list[int] | tuple[int],
-        coords: ArrayLike,
+        shape: list[int] | tuple[int] | torch.Tensor,
+        coords: ArrayLike | None = None,
         weights: ArrayLike | None = None,
         oversamp: float = 1.25,
         eps: float = 1e-3,
         normalize_coords: bool = True,
+        ishape: list[int] | tuple[int] | None = None,
+        axes: tuple[int, ...] | None = None,
     ):
+        # Accept a pre-computed PSF tensor directly:
+        #   ToeplitzOp(psf_tensor, ishape=shape, axes=(-2, -1))
+        if isinstance(shape, torch.Tensor):
+            psf = shape
+            self.shape = tuple(ishape)
+            self.fft_axes = tuple(axes) if axes is not None else tuple(range(-1, -(psf.ndim + 1), -1))
+            self.psf = psf
+            self.os_shape = tuple(self.psf.shape)
+            return
+
         self.shape = tuple(shape)
         ndim = coords.shape[-1]
         self.fft_axes = tuple(range(-1, -(ndim + 1), -1))

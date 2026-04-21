@@ -5,22 +5,38 @@
     the NVIDIA CUDA Toolkit.  Skips components already present.
 
     Requires Administrator privileges.
+    Right-click PowerShell -> Run as Administrator, then:
+
+        .\scripts\install_build_deps.ps1
+        .\scripts\install_build_deps.ps1 -Cuda
+        .\scripts\install_build_deps.ps1 -Cuda -CudaVersion 12.8
 .PARAMETER Cuda
     Install CUDA toolkit alongside the C++ toolchain.
 .PARAMETER CudaVersion
-    CUDA toolkit version to install (default: 12.6.0).
+    CUDA toolkit version to install. Supported (matching PyTorch): 12.6, 12.8, 13.0
+    (default: 12.6)
 .EXAMPLE
     .\scripts\install_build_deps.ps1
     .\scripts\install_build_deps.ps1 -Cuda
+    .\scripts\install_build_deps.ps1 -Cuda -CudaVersion 12.8
 #>
 [CmdletBinding()]
 param(
     [switch]$Cuda,
-    [string]$CudaVersion = "12.6.0"
+    [ValidateSet("12.6", "12.8", "13.0")]
+    [string]$CudaVersion = "12.6"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+# Map short version to full installer version (major.minor.patch)
+$CudaFullVersionMap = @{
+    "12.6" = "12.6.3"
+    "12.8" = "12.8.1"
+    "13.0" = "13.0.0"
+}
+$CudaFullVersion = $CudaFullVersionMap[$CudaVersion]
 
 # ---- helpers ---------------------------------------------------------------
 function Write-Info  { Write-Host "[INFO]  $args" -ForegroundColor Cyan }
@@ -106,9 +122,8 @@ if (-not $haveCL) {
 
 # ---- install CUDA Toolkit --------------------------------------------------
 if ($Cuda -and -not $haveNvcc) {
-    Write-Info "Installing CUDA Toolkit $CudaVersion ..."
-    $cudaMajorMinor = ($CudaVersion -split '\.')[0..1] -join '.'
-    $cudaUrl = "https://developer.download.nvidia.com/compute/cuda/$CudaVersion/local_installers/cuda_${CudaVersion}_windows.exe"
+    Write-Info "Installing CUDA Toolkit $CudaVersion ($CudaFullVersion) ..."
+    $cudaUrl = "https://developer.download.nvidia.com/compute/cuda/${CudaFullVersion}/local_installers/cuda_${CudaFullVersion}_windows.exe"
     $cudaInstaller = "$env:TEMP\cuda_installer.exe"
 
     Write-Info "Downloading CUDA installer (this is a large download)..."
@@ -116,7 +131,7 @@ if ($Cuda -and -not $haveNvcc) {
 
     Write-Info "Running CUDA installer (silent, toolkit only)..."
     $proc = Start-Process -FilePath $cudaInstaller -ArgumentList @(
-        "-s", "cuda_toolkit_${CudaVersion}"
+        "-s", "cuda_toolkit_${CudaFullVersion}"
     ) -Wait -PassThru
 
     if ($proc.ExitCode -eq 0) {

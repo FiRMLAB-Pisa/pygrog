@@ -105,22 +105,40 @@ def nlinv_calib(
     # --- Setup ----------------------------------------------------------
     if noncart:
         oshape, cshape, y, coords, weights, W = _setup_noncartesian(
-            y, shape, coords, weights, cal_width, oversamp, eps,
-            sobolev_width, sobolev_deg,
+            y,
+            shape,
+            coords,
+            weights,
+            cal_width,
+            oversamp,
+            eps,
+            sobolev_width,
+            sobolev_deg,
         )
     else:
         oshape, cshape, y, mask, W = _setup_cartesian(
-            y, ndim, mask, cal_width, sobolev_width, sobolev_deg,
+            y,
+            ndim,
+            mask,
+            cal_width,
+            sobolev_width,
+            sobolev_deg,
         )
 
     # --- Build operator closures ----------------------------------------
     if noncart:
         fwd = lambda x: _op_noncart(x, coords, weights, cshape, oversamp, eps)
-        deriv = lambda x0, dx: _der_noncart(x0, dx, W, coords, weights, cshape, oversamp, eps)
-        derivH = lambda x0, dk: _derH_noncart(x0, dk, W, coords, weights, cshape, oversamp, eps)
+        deriv = lambda x0, dx: _der_noncart(
+            x0, dx, W, coords, weights, cshape, oversamp, eps
+        )
+        derivH = lambda x0, dk: _derH_noncart(
+            x0, dk, W, coords, weights, cshape, oversamp, eps
+        )
         if toeplitz:
             toep_op = ToeplitzOp(cshape, coords, weights, oversamp, eps)
-            normal_eq = lambda x0, dx: _derH_der_noncart_toeplitz(x0, dx, W, toep_op, cshape)
+            normal_eq = lambda x0, dx: _derH_der_noncart_toeplitz(
+                x0, dx, W, toep_op, cshape
+            )
         else:
             normal_eq = lambda x0, dx: derivH(x0, deriv(x0, dx))
     else:
@@ -178,13 +196,21 @@ def nlinv_calib(
 
     # --- Post-process ---------------------------------------------------
     return _postprocess(
-        XN, W, yscale, cshape, oshape, noncart, ret_cal, ret_image,
+        XN,
+        W,
+        yscale,
+        cshape,
+        oshape,
+        noncart,
+        ret_cal,
+        ret_image,
     )
 
 
 # -----------------------------------------------------------------------
 # Setup helpers
 # -----------------------------------------------------------------------
+
 
 def _setup_cartesian(y, ndim, mask, cal_width, sobolev_width, sobolev_deg):
     """Setup for Cartesian acquisition."""
@@ -205,13 +231,21 @@ def _setup_cartesian(y, ndim, mask, cal_width, sobolev_width, sobolev_deg):
     cshape = tuple(y.shape[1:])
 
     n = max(oshape)
-    W = _sobolev_weights(cshape, sobolev_width / n ** 2, sobolev_deg, device=y.device)
+    W = _sobolev_weights(cshape, sobolev_width / n**2, sobolev_deg, device=y.device)
 
     return oshape, cshape, y, mask, W
 
 
 def _setup_noncartesian(
-    y, shape, coords, weights, cal_width, oversamp, eps, sobolev_width, sobolev_deg,
+    y,
+    shape,
+    coords,
+    weights,
+    cal_width,
+    oversamp,
+    eps,
+    sobolev_width,
+    sobolev_deg,
 ):
     """Setup for non-Cartesian acquisition."""
     ndim = coords.shape[-1]
@@ -219,19 +253,20 @@ def _setup_noncartesian(
 
     # Extract calibration samples (samples within cal_width radius)
     from .._utils import rescale_coords
+
     scaled = rescale_coords(coords, list(oshape[-ndim:]))
     radius = 0.5 * cal_width
-    dist = (scaled ** 2).sum(dim=-1).sqrt()
+    dist = (scaled**2).sum(dim=-1).sqrt()
     flat_dist = dist.reshape(-1)
     cal_idx = flat_dist <= radius
 
     # Apply DCF
     if weights is not None:
-        y = y * weights ** 0.5
+        y = y * weights**0.5
 
     cshape = tuple([cal_width] * ndim)
     n = max(oshape)
-    W = _sobolev_weights(cshape, sobolev_width / n ** 2, sobolev_deg, device=y.device)
+    W = _sobolev_weights(cshape, sobolev_width / n**2, sobolev_deg, device=y.device)
 
     return oshape, cshape, y, coords, weights, W
 
@@ -239,6 +274,7 @@ def _setup_noncartesian(
 # -----------------------------------------------------------------------
 # Forward model operators (Cartesian)
 # -----------------------------------------------------------------------
+
 
 def _apply_W(XN, W):
     """Apply Sobolev weights to coil components."""
@@ -265,9 +301,7 @@ def _der_cart(P, W, X0, DX):
     """Derivative: dF(x)[dx]."""
     K = torch.zeros_like(DX[1:])
     for i in range(DX.shape[0] - 1):
-        K[i] = P * fft(
-            X0[0] * ifft(W * DX[i + 1]) + DX[0] * X0[i + 1]
-        )
+        K[i] = P * fft(X0[0] * ifft(W * DX[i + 1]) + DX[0] * X0[i + 1])
     return K
 
 
@@ -285,9 +319,12 @@ def _derH_cart(P, W, X0, DK):
 # Forward model operators (Non-Cartesian)
 # -----------------------------------------------------------------------
 
+
 def _op_noncart(X, coords, weights, shape, oversamp, eps):
     """Forward: F(x) = NUFFT(rho * c_i)."""
-    K = torch.zeros((X.shape[0] - 1, *coords.shape[:-1]), dtype=X.dtype, device=X.device)
+    K = torch.zeros(
+        (X.shape[0] - 1, *coords.shape[:-1]), dtype=X.dtype, device=X.device
+    )
     for i in range(X.shape[0] - 1):
         K[i] = nufft(X[0] * X[i + 1], coords, oversamp, eps)
     return K
@@ -295,11 +332,15 @@ def _op_noncart(X, coords, weights, shape, oversamp, eps):
 
 def _der_noncart(X0, DX, W, coords, weights, shape, oversamp, eps):
     """Derivative for non-Cartesian."""
-    K = torch.zeros((DX.shape[0] - 1, *coords.shape[:-1]), dtype=DX.dtype, device=DX.device)
+    K = torch.zeros(
+        (DX.shape[0] - 1, *coords.shape[:-1]), dtype=DX.dtype, device=DX.device
+    )
     for i in range(DX.shape[0] - 1):
         K[i] = nufft(
             X0[0] * ifft(W * DX[i + 1]) + DX[0] * X0[i + 1],
-            coords, oversamp, eps,
+            coords,
+            oversamp,
+            eps,
         )
     return K
 
@@ -336,6 +377,7 @@ def _derH_der_noncart_toeplitz(X0, DX, W, toep_op, shape):
 # -----------------------------------------------------------------------
 # Postprocessing
 # -----------------------------------------------------------------------
+
 
 def _postprocess(XN, W, yscale, cshape, oshape, noncart, ret_cal, ret_image):
     """Post-process NLINV result to extract smaps and optional outputs."""
@@ -380,14 +422,12 @@ def _postprocess(XN, W, yscale, cshape, oshape, noncart, ret_cal, ret_image):
 # Utility functions
 # -----------------------------------------------------------------------
 
+
 def _sobolev_weights(shape, width, degree, device=None):
     """Compute Sobolev regularization weights in k-space."""
     grids = torch.meshgrid(
         *[torch.linspace(-0.5, 0.5, s, device=device) for s in shape],
         indexing="ij",
     )
-    d = sum(g ** 2 for g in grids)
+    d = sum(g**2 for g in grids)
     return (1.0 / (1.0 + width * d) ** degree).float()
-
-
-

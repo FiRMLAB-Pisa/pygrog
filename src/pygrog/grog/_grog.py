@@ -22,7 +22,6 @@ import torch
 
 from ._grappa import KernelTable
 
-
 # ---------------------------------------------------------------------------
 # Torch C++ extension (lazy, cached)
 # ---------------------------------------------------------------------------
@@ -49,6 +48,7 @@ def _get_torch_ext():
     # 1. try pre-built wheel extension
     try:
         import pygrog._pygrog_torch as _ext
+
         _torch_ext = _ext
         _torch_ext_checked = True
         return _torch_ext
@@ -79,8 +79,13 @@ def _get_torch_ext():
         _torch_ext = _cpp_ext.load(
             name="_pygrog_torch_jit",
             sources=sources,
-            extra_cflags=["-O3", "-std=c++17", "-fopenmp", "-march=native",
-                          "-DPYGROG_MARCH_NATIVE"],
+            extra_cflags=[
+                "-O3",
+                "-std=c++17",
+                "-fopenmp",
+                "-march=native",
+                "-DPYGROG_MARCH_NATIVE",
+            ],
             extra_cuda_cflags=["-O3", "--expt-relaxed-constexpr"],
             extra_ldflags=["-fopenmp"],
             define_macros=define_macros,
@@ -183,9 +188,12 @@ class GrogInterpolator:
             ``grid_size``, ``n_samples``, plus all original GROG plan
             fields.
         """
-        if image_shape is not None and tuple(image_shape) != tuple(self.plan.image_shape):
+        if image_shape is not None and tuple(image_shape) != tuple(
+            self.plan.image_shape
+        ):
             # Build a fresh plan with a different crop size
             import copy
+
             plan = copy.copy(self.plan)
             _attach_fft_plan(plan, image_shape)
             return plan
@@ -246,25 +254,28 @@ class GrogInterpolator:
             Decimal digits for distance rounding.
         """
         interp_kernel, nsteps, ndim = KernelTable(
-            train_data, self.plan.radius, precision, lamda,
+            train_data,
+            self.plan.radius,
+            precision,
+            lamda,
         )
 
         distances = self.plan.distances  # (..., npts, kw, ndim)
-        pfac = 10.0 ** precision
+        pfac = 10.0**precision
         stepsize = 10 ** (-precision)
 
         # Quantise distances → kernel table index
         interp_idx = (self.plan.radius + np.round(distances * pfac) / pfac) / stepsize
         interp_idx = np.round(interp_idx).astype(np.float32)
-        strides = np.array(
-            [nsteps ** k for k in range(ndim)], dtype=np.float32
-        )
+        strides = np.array([nsteps**k for k in range(ndim)], dtype=np.float32)
         interp_idx = np.round(interp_idx * strides).astype(np.int32).sum(axis=-1)
         interp_idx = np.clip(interp_idx, 0, interp_kernel.shape[0] - 1)
 
         self.plan.distances = None  # free memory
         self._interp_kernel = torch.as_tensor(interp_kernel)  # (K, C, C)
-        self._interp_idx = torch.as_tensor(interp_idx.astype(np.int64))  # (..., npts, kw)
+        self._interp_idx = torch.as_tensor(
+            interp_idx.astype(np.int64)
+        )  # (..., npts, kw)
         self._interpolator_set = True
 
     # ------------------------------------------------------------------
@@ -347,34 +358,34 @@ class GrogInterpolator:
         _interp_kernel  : (K, C, C) complex
         """
         plan = self.plan
-        target_idx = torch.as_tensor(plan.target_idx)       # (..., npts, kw)
-        weights = torch.as_tensor(plan.weights)              # (..., npts, kw)
-        interp_idx = self._interp_idx                        # (..., npts, kw)
-        kernel = self._interp_kernel                         # (K, C, C)
+        target_idx = torch.as_tensor(plan.target_idx)  # (..., npts, kw)
+        weights = torch.as_tensor(plan.weights)  # (..., npts, kw)
+        interp_idx = self._interp_idx  # (..., npts, kw)
+        kernel = self._interp_kernel  # (K, C, C)
         grid_size = int(np.prod(plan.grid_shape))
 
         kw = target_idx.shape[-1]
         ncoils = data.shape[0]
 
         # Flatten all source points: data → (C, N), plan → (N, kw)
-        data_flat = data.reshape(ncoils, -1)                 # (C, N)
+        data_flat = data.reshape(ncoils, -1)  # (C, N)
         N = data_flat.shape[1]
-        target_flat = target_idx.reshape(-1, kw)             # (N, kw)
-        weights_flat = weights.reshape(-1, kw)               # (N, kw)
-        idx_flat = interp_idx.reshape(-1, kw)                # (N, kw)
+        target_flat = target_idx.reshape(-1, kw)  # (N, kw)
+        weights_flat = weights.reshape(-1, kw)  # (N, kw)
+        idx_flat = interp_idx.reshape(-1, kw)  # (N, kw)
 
         # Replicate each source → kw copies: (C, N*kw)
         data_rep = data_flat.unsqueeze(-1).expand(-1, -1, kw).reshape(ncoils, N * kw)
 
         # Flatten indexes
-        idx_1d = idx_flat.reshape(-1)                        # (N*kw,)
-        target_1d = target_flat.reshape(-1)                  # (N*kw,)
-        weights_1d = weights_flat.reshape(-1)                # (N*kw,)
+        idx_1d = idx_flat.reshape(-1)  # (N*kw,)
+        target_1d = target_flat.reshape(-1)  # (N*kw,)
+        weights_1d = weights_flat.reshape(-1)  # (N*kw,)
 
         # Apply GRAPPA kernels: (N*kw, 1, C)
-        data_interp = data_rep.T.unsqueeze(1).contiguous()   # (N*kw, 1, C)
+        data_interp = data_rep.T.unsqueeze(1).contiguous()  # (N*kw, 1, C)
         _interpolate(data_interp, idx_1d, kernel)
-        data_interp = data_interp[:, 0, :]                   # (N*kw, C)
+        data_interp = data_interp[:, 0, :]  # (N*kw, C)
 
         # Weight
         data_interp = data_interp * weights_1d[:, None].to(data_interp.dtype)
@@ -393,8 +404,8 @@ class GrogInterpolator:
         # data: (C, npts)
         plan = self.plan
         target_idx = torch.as_tensor(plan.target_idx[shot_index])  # (npts, kw)
-        weights = torch.as_tensor(plan.weights[shot_index])        # (npts, kw)
-        interp_idx = self._interp_idx[shot_index]                  # (npts, kw)
+        weights = torch.as_tensor(plan.weights[shot_index])  # (npts, kw)
+        interp_idx = self._interp_idx[shot_index]  # (npts, kw)
         kernel = self._interp_kernel
         grid_size = int(np.prod(plan.grid_shape))
         ncoils = data.shape[0]
@@ -533,11 +544,15 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map):
     nearest = np.round(frac_idx).astype(np.int32)  # (..., npts, ndim)
 
     # Target grid indices = nearest + offsets  → (..., npts, kw_eff, ndim)
-    target_nd = nearest[..., np.newaxis, :] + offsets[np.newaxis, :]  # (..., npts, kw_eff, ndim)
+    target_nd = (
+        nearest[..., np.newaxis, :] + offsets[np.newaxis, :]
+    )  # (..., npts, kw_eff, ndim)
 
     # Compute distances in coordinate space: target_coord - source_coord
     target_coords_space = origins + target_nd.astype(np.float32) * grid_steps
-    distances = target_coords_space - coords_scaled[..., np.newaxis, :]  # (..., npts, kw_eff, ndim)
+    distances = (
+        target_coords_space - coords_scaled[..., np.newaxis, :]
+    )  # (..., npts, kw_eff, ndim)
 
     # Clip out-of-bounds → mark as -1
     in_bounds = np.ones(target_nd.shape[:-1], dtype=bool)  # (..., npts, kw_eff)
@@ -546,9 +561,11 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map):
 
     # Compute flat index: sum_d( idx_d * stride_d )
     strides = np.array(
-        [int(np.prod(grid_shape[d + 1:])) for d in range(ndim)], dtype=np.int64
+        [int(np.prod(grid_shape[d + 1 :])) for d in range(ndim)], dtype=np.int64
     )
-    target_flat = (target_nd.astype(np.int64) * strides).sum(axis=-1)  # (..., npts, kw_eff)
+    target_flat = (target_nd.astype(np.int64) * strides).sum(
+        axis=-1
+    )  # (..., npts, kw_eff)
     target_flat[~in_bounds] = -1  # sentinel for out-of-bounds
 
     # --- density compensation (1/count) ------------------------------------
@@ -560,14 +577,14 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map):
     # Weight per (source, neighbour) pair = 1 / count[target]
     weights = np.zeros_like(target_flat, dtype=np.float32)
     valid_mask = target_flat >= 0
-    weights[valid_mask] = 1.0 / np.maximum(counts[target_flat[valid_mask]], 1).astype(np.float32)
+    weights[valid_mask] = 1.0 / np.maximum(counts[target_flat[valid_mask]], 1).astype(
+        np.float32
+    )
 
     # --- time map replication ----------------------------------------------
     if time_map is not None:
         time_map = np.asarray(time_map, dtype=np.float32)
-        time_map = np.broadcast_to(
-            time_map[..., np.newaxis], target_flat.shape
-        ).copy()
+        time_map = np.broadcast_to(time_map[..., np.newaxis], target_flat.shape).copy()
 
     return SimpleNamespace(
         shape=shape,
@@ -660,9 +677,7 @@ def _default_oversamp(ndim, oversamp):
         oversamp = ndim * [oversamp]
     oversamp = tuple(oversamp)
     if len(oversamp) != ndim:
-        raise ValueError(
-            f"Oversampling {oversamp} does not match ndim={ndim}"
-        )
+        raise ValueError(f"Oversampling {oversamp} does not match ndim={ndim}")
     return oversamp
 
 

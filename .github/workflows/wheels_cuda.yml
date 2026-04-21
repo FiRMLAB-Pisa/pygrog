@@ -1,0 +1,152 @@
+name: Build and publish CUDA wheels
+
+# CUDA wheels are Linux-only (x86_64).  They are tagged with the local
+# version label +cuXYZ (e.g. pygrog-1.0.0+cu126-cp311-cp311-linux_x86_64.whl)
+# and uploaded to the GitHub Release as assets, NOT to PyPI.
+#
+# Install the CPU wheel (from PyPI) by default:
+#   pip install pygrog
+#
+# Install a CUDA wheel (from the GitHub Release) instead:
+#   pip install "pygrog==1.0.0+cu126" \
+#     --find-links https://github.com/FiRMLAB-Pisa/pygrog/releases/expanded_assets/v1.0.0
+#
+# Supported CUDA versions match the PyTorch wheel index:  12.6, 12.8, 13.0.
+
+on:
+  push:
+    tags: ['v*']
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach wheels to (e.g. v1.0.0)'
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Build one wheel per (CUDA version × Python version) ───────────────────
+  build_cuda_wheels:
+    name: CUDA ${{ matrix.cuda.label }} Python ${{ matrix.python }}
+    runs-on: ubuntu-22.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda:
+          - version: '12.6.3'    # full version for toolkit installer
+            pkg: '12-6'          # apt package suffix: cuda-toolkit-12-6
+            label: 'cu126'       # wheel local version label
+            torch_index: 'https://download.pytorch.org/whl/cu126'
+          - version: '12.8.1'
+            pkg: '12-8'
+            label: 'cu128'
+            torch_index: 'https://download.pytorch.org/whl/cu128'
+          - version: '13.0.0'
+            pkg: '13-0'
+            label: 'cu130'
+            torch_index: 'https://download.pytorch.org/whl/cu130'
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # required for setuptools_scm version detection
+
+    # ── Install CUDA toolkit from NVIDIA's apt repository ───────────────────
+    # Provides nvcc, CUDA headers, and import libraries for linking.
+    # The GPU driver is NOT required for compilation.
+    - name: Install CUDA Toolkit ${{ matrix.cuda.version }}
+      run: |
+        wget -q \
+          https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb \
+          -O /tmp/cuda-keyring.deb
+        sudo dpkg -i /tmp/cuda-keyring.deb
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          cuda-toolkit-${{ matrix.cuda.pkg }}
+        echo "/usr/local/cuda/bin" >> $GITHUB_PATH
+
+    - name: Verify nvcc
+      run: nvcc --version
+
+    # ── Set up Python and install build dependencies ─────────────────────────
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python }}
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # Install torch with CUDA support (needed during CMake configure step).
+        pip install torch --index-url ${{ matrix.cuda.torch_index }}
+        pip install scikit-build-core setuptools-scm cmake ninja build
+
+    # ── Build the wheel ──────────────────────────────────────────────────────
+    # --no-build-isolation: reuse the current venv so torch is visible to CMake.
+    # PYGROG_FORCE_CUDA: fail the build if nvcc is not found (sanity check).
+    - name: Build wheel
+      env:
+        PYGROG_FORCE_CUDA: '1'
+      run: |
+        pip wheel . --no-deps --no-build-isolation -w dist/
+
+    # ── Rename wheel to embed the CUDA label in the version ──────────────────
+    # Before: pygrog-1.0.0-cp311-cp311-linux_x86_64.whl
+    # After:  pygrog-1.0.0+cu126-cp311-cp311-linux_x86_64.whl
+    - name: Add CUDA label to wheel filename
+      run: |
+        cd dist
+        for whl in *.whl; do
+          new=$(echo "$whl" | sed \
+            's/\([^-]*-[^-]*\)\(-.*\)/\1+${{ matrix.cuda.label }}\2/')
+          mv "$whl" "$new"
+          echo "Renamed: $whl → $new"
+        done
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: wheels-${{ matrix.cuda.label }}-py${{ matrix.python }}
+        path: dist/*.whl
+
+  # ── Upload all CUDA wheels to the GitHub Release ──────────────────────────
+  upload_to_release:
+    name: Upload CUDA wheels to GitHub Release
+    needs: build_cuda_wheels
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'release' ||
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+
+    steps:
+    - name: Resolve release tag
+      id: tag
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+        else
+          echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+        fi
+
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: 'wheels-cu*'
+        path: dist
+        merge-multiple: true
+
+    - name: List wheels to upload
+      run: ls -lh dist/
+
+    - name: Attach wheels to GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.tag.outputs.tag }}
+        files: dist/*.whl

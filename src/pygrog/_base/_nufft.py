@@ -16,7 +16,6 @@ from mrinufft.operators.base import FourierOperatorBase
 
 from .._utils import rescale_coords, estimate_shape
 
-
 # ---------------------------------------------------------------------------
 # pytorch-finufft backend for mri-nufft (auto-registers via __init_subclass__)
 # ---------------------------------------------------------------------------

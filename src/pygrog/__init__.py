@@ -7,6 +7,7 @@ except ImportError:
     # Fallback for development installs
     try:
         from setuptools_scm import get_version
+
         __version__ = get_version(root="../..")
     except (ImportError, LookupError):
         __version__ = "0.1.0+dev"

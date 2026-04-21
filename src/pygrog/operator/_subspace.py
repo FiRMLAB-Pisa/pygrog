@@ -109,7 +109,11 @@ class SubspaceSparseFFT:
         basis = self.basis.to(device, dtype=dtype)  # (K, T)
 
         n_coils = self.smaps.shape[0] if self.smaps is not None else 1
-        n_samples = self._base.indices.shape[0] if hasattr(self._base, "indices") else self._base._base.indices.shape[0]
+        n_samples = (
+            self._base.indices.shape[0]
+            if hasattr(self._base, "indices")
+            else self._base._base.indices.shape[0]
+        )
 
         output = torch.zeros(self.T, n_coils, n_samples, dtype=dtype, device=device)
         for k in range(self.K):

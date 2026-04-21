@@ -19,4 +19,3 @@ __all__.extend(_sparse_fft.__all__)
 __all__.extend(_off_resonance.__all__)
 __all__.extend(_subspace.__all__)
 __all__.extend(_toeplitz.__all__)
-

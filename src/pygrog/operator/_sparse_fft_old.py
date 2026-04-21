@@ -168,10 +168,13 @@ class SparseFFT:
 
         torch.cuda.synchronize()
         return output
+
     if sens_maps is not None:
         sens_maps = np.asarray(sens_maps)
         if sens_maps.shape[0] != ncoils:
-            raise ValueError("sens_maps must have first dim == number of coils (samples.shape[0])")
+            raise ValueError(
+                "sens_maps must have first dim == number of coils (samples.shape[0])"
+            )
         if sens_maps.shape[1:] != tuple(out_shape):
             raise ValueError("sens_maps spatial shape must match out_shape")
 
@@ -180,7 +183,7 @@ class SparseFFT:
         combined = np.zeros(out_shape, dtype=complex_dtype)
     else:
         sos = np.zeros(out_shape, dtype=real_dtype)
-        
+
     # Apply weighting
     samples = weights * samples
 
@@ -192,8 +195,12 @@ class SparseFFT:
         # accumulate into grid_flat for this coil
         if use_bincount_for_speed:
             if np.iscomplexobj(vals):
-                real_part = np.bincount(indexes_flat, weights=vals.real, minlength=prod_grid)
-                imag_part = np.bincount(indexes_flat, weights=vals.imag, minlength=prod_grid)
+                real_part = np.bincount(
+                    indexes_flat, weights=vals.real, minlength=prod_grid
+                )
+                imag_part = np.bincount(
+                    indexes_flat, weights=vals.imag, minlength=prod_grid
+                )
                 grid_flat = real_part + 1j * imag_part
             else:
                 grid_flat = np.bincount(indexes_flat, weights=vals, minlength=prod_grid)

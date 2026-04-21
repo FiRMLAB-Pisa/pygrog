@@ -113,7 +113,7 @@ def ifft(
 # %% local subroutines
 def _fftc(input, oshape=None, axes=None, norm="ortho"):
     ndim = input.ndim
-    axes = normalize_axes(axes, ndim)
+    axes = normalize_axes(ndim, axes)
 
     if oshape is None:
         oshape = input.shape
@@ -127,7 +127,7 @@ def _fftc(input, oshape=None, axes=None, norm="ortho"):
 
 def _ifftc(input, oshape=None, axes=None, norm="ortho"):
     ndim = input.ndim
-    axes = normalize_axes(axes, ndim)
+    axes = normalize_axes(ndim, axes)
 
     if oshape is None:
         oshape = input.shape

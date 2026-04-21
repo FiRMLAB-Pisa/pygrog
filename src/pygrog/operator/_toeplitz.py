@@ -70,6 +70,7 @@ def toeplitz_normal(op):
 
 # -- helpers ---------------------------------------------------------------
 
+
 def _gridded_density(indices, sqrt_weights, grid_size, grid_shape, pad_slices):
     """Compute D[k] = sum_{i: idx_i=k} w_i on grid, cropped to center."""
     w = (sqrt_weights * sqrt_weights).to(torch.float32)
@@ -98,8 +99,11 @@ class _ToeplitzBase:
             )
         self._op = op
         self._D = _gridded_density(
-            op.indices, op.sqrt_weights,
-            op.grid_size, op.grid_shape, op._pad_slices,
+            op.indices,
+            op.sqrt_weights,
+            op.grid_size,
+            op.grid_shape,
+            op._pad_slices,
         )
         self._fft_axes = op.fft_axes
         self._smaps = op.smaps
@@ -154,9 +158,7 @@ class _ToeplitzORC:
                 coeff = w * B_s[:, l1].conj() * B_s[:, l2]
                 D_flat = torch.zeros(base.grid_size, dtype=torch.complex64)
                 D_flat.index_add_(0, base.indices, coeff)
-                D_ll[l1, l2] = D_flat.reshape(base.grid_shape)[
-                    base._pad_slices
-                ]
+                D_ll[l1, l2] = D_flat.reshape(base.grid_shape)[base._pad_slices]
         self._D_ll = D_ll
 
         self._fft_axes = base.fft_axes
@@ -215,9 +217,7 @@ class _ToeplitzSubspace:
 
     def __call__(self, coeffs):
         gram = self._gram.to(coeffs.device, dtype=coeffs.dtype)
-        normals = torch.stack(
-            [self._base_toep(coeffs[k]) for k in range(self.K)]
-        )
+        normals = torch.stack([self._base_toep(coeffs[k]) for k in range(self.K)])
         return torch.einsum("ij,j...->i...", gram, normals)
 
 
@@ -234,7 +234,5 @@ class _ToeplitzSubspaceORC:
 
     def __call__(self, coeffs):
         gram = self._gram.to(coeffs.device, dtype=coeffs.dtype)
-        normals = torch.stack(
-            [self._orc_toep(coeffs[k]) for k in range(self.K)]
-        )
+        normals = torch.stack([self._orc_toep(coeffs[k]) for k in range(self.K)])
         return torch.einsum("ij,j...->i...", gram, normals)

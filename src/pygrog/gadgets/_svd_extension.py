@@ -41,7 +41,8 @@ class SubspaceProjection:
         # calib_data: (n_frames, n_spatial)
         U, S, Vh = torch.linalg.svd(calib_data, full_matrices=False)
         # basis: (n_components, n_frames) — rows are temporal basis vectors
-        self._basis = Vh[: self.n_components].conj()
+        # U has shape (n_frames, min(n_frames, n_spatial)); take leading columns
+        self._basis = U[:, : self.n_components].T.conj()
         return self
 
     @property

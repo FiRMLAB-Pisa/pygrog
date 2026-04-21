@@ -119,8 +119,8 @@ class OffResonanceSparseFFT:
 
     def __init__(self, base_op, B, C):
         self._base = base_op
-        self.B = torch.as_tensor(B)   # (n_samples, L)
-        self.C = torch.as_tensor(C)   # (L, *image_shape)
+        self.B = torch.as_tensor(B)  # (n_samples, L)
+        self.C = torch.as_tensor(C)  # (L, *image_shape)
         self.L = self.B.shape[1]
 
         # Expose base attributes
@@ -269,8 +269,16 @@ def _full_C(field_map, C_small, hist_shape):
     dr = (max_r - min_r) / hist_shape[0] if hist_shape[0] > 1 else 1.0
     di = (max_i - min_i) / hist_shape[1] if hist_shape[1] > 1 else 1.0
 
-    idx_r = np.clip(np.around((fr - min_r) / dr).astype(int), 0, hist_shape[0] - 1) if dr != 0 else np.zeros_like(fr, dtype=int)
-    idx_i = np.clip(np.around((fi - min_i) / di).astype(int), 0, hist_shape[1] - 1) if di != 0 else np.zeros_like(fi, dtype=int)
+    idx_r = (
+        np.clip(np.around((fr - min_r) / dr).astype(int), 0, hist_shape[0] - 1)
+        if dr != 0
+        else np.zeros_like(fr, dtype=int)
+    )
+    idx_i = (
+        np.clip(np.around((fi - min_i) / di).astype(int), 0, hist_shape[1] - 1)
+        if di != 0
+        else np.zeros_like(fi, dtype=int)
+    )
 
     C_sr = C_small.reshape(-1, *hist_shape)
     C_big = C_sr[:, idx_r, idx_i]
@@ -297,11 +305,17 @@ def _compute_svd(field_map, readout_time, mask, L=-1, n_bins=1024):
     Ew = np.sqrt(h_flat) * E
 
     if L == -1:
-        L = max(1, int(np.ceil(
-            abs(w_flat[-1] - w_flat[0]) * np.max(readout_time) / (2 * np.pi)
-        )))
+        L = max(
+            1,
+            int(
+                np.ceil(
+                    abs(w_flat[-1] - w_flat[0]) * np.max(readout_time) / (2 * np.pi)
+                )
+            ),
+        )
 
     from scipy.sparse.linalg import svds
+
     B, S, D = svds(Ew, L)
 
     C_small, _, _, _ = np.linalg.lstsq(B, E, rcond=None)
@@ -326,9 +340,12 @@ def _compute_mti(field_map, readout_time, mask, L=-1, n_bins=1024):
     w_flat = w_k.ravel()
 
     if L == -1:
-        L = max(1, int(np.ceil(
-            2 * abs(w_flat[-1] - w_flat[0]) * np.max(readout_time) / np.pi
-        )))
+        L = max(
+            1,
+            int(
+                np.ceil(2 * abs(w_flat[-1] - w_flat[0]) * np.max(readout_time) / np.pi)
+            ),
+        )
 
     t_l = np.linspace(readout_time.min(), readout_time.max(), L, dtype=np.float32)
 
@@ -360,11 +377,15 @@ def _compute_mfi(field_map, readout_time, mask, L=9, n_bins=1024):
     w_flat = w_k.ravel()
 
     if L == -1:
-        L = max(1, int(np.ceil(
-            4 * abs(w_flat[-1] - w_flat[0]) * np.max(readout_time) / np.pi
-        )))
+        L = max(
+            1,
+            int(
+                np.ceil(4 * abs(w_flat[-1] - w_flat[0]) * np.max(readout_time) / np.pi)
+            ),
+        )
 
     from sklearn.cluster import KMeans
+
     z = w_flat.view(np.float32).reshape(-1, 2)
     w_l = (
         KMeans(n_clusters=L)

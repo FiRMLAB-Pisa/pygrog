@@ -2,32 +2,52 @@
 # ============================================================================
 # install_build_deps.sh — Install C++ (and optionally CUDA) build toolchain.
 #
-# Supports: Ubuntu/Debian, Fedora/RHEL/Rocky, Arch, macOS (Homebrew).
+# Supports: Ubuntu/Debian, Fedora/RHEL/Rocky, openSUSE/SLES, Arch,
+#           macOS (Homebrew).
 # CUDA toolkit is optional — pass --cuda to install it.
+# Supported CUDA versions (matching PyTorch): 12.6, 12.8, 13.0
 #
 # Usage:
-#   ./scripts/install_build_deps.sh          # C++ toolchain only
-#   ./scripts/install_build_deps.sh --cuda   # C++ + CUDA toolkit
+#   Linux   (requires sudo):
+#     sudo ./scripts/install_build_deps.sh
+#     sudo ./scripts/install_build_deps.sh --cuda
+#     sudo ./scripts/install_build_deps.sh --cuda --cuda-version=12.8
 #
-# On Linux this script needs root privileges (sudo).
-# On macOS it uses Homebrew (no sudo required for brew itself).
+#   macOS   (Homebrew, no sudo):
+#     ./scripts/install_build_deps.sh
+#
+#   Windows:
+#     Run scripts\install_build_deps.ps1 from an Administrator PowerShell.
 # ============================================================================
 set -euo pipefail
 
 INSTALL_CUDA=0
-CUDA_VERSION="12-6"  # default CUDA toolkit version
+CUDA_VERSION="12.6"   # default; must be one of: 12.6, 12.8, 13.0
 
 for arg in "$@"; do
     case "$arg" in
-        --cuda)         INSTALL_CUDA=1 ;;
-        --cuda-version=*) CUDA_VERSION="${arg#*=}" ;;
+        --cuda)             INSTALL_CUDA=1 ;;
+        --cuda-version=*)   CUDA_VERSION="${arg#*=}" ;;
         -h|--help)
-            echo "Usage: $0 [--cuda] [--cuda-version=12-6]"
+            echo "Usage: $0 [--cuda] [--cuda-version=12.6|12.8|13.0]"
             exit 0
             ;;
         *) echo "Unknown option: $arg"; exit 1 ;;
     esac
 done
+
+# Validate and normalise CUDA version.
+# Accepted dot-separated form (e.g. 12.6) → dash-separated for pkg names.
+case "$CUDA_VERSION" in
+    12.6|12-6) CUDA_VERSION="12.6"; CUDA_PKG_VER="12-6" ;;
+    12.8|12-8) CUDA_VERSION="12.8"; CUDA_PKG_VER="12-8" ;;
+    13.0|13-0) CUDA_VERSION="13.0"; CUDA_PKG_VER="13-0" ;;
+    *)
+        echo "Unsupported CUDA version: $CUDA_VERSION"
+        echo "Valid choices: 12.6, 12.8, 13.0"
+        exit 1
+        ;;
+esac
 
 # ---- helpers ---------------------------------------------------------------
 info()  { printf '\033[1;34m[INFO]\033[0m  %s\n' "$*"; }
@@ -59,6 +79,7 @@ detect_os() {
         case "$ID" in
             ubuntu|debian|pop|linuxmint) OS=debian ;;
             fedora|rhel|rocky|centos|almalinux) OS=fedora ;;
+            opensuse-leap|opensuse-tumbleweed|sles|suse) OS=opensuse ;;
             arch|manjaro|endeavouros) OS=arch ;;
             *) OS=unknown ;;
         esac
@@ -72,9 +93,15 @@ check_existing() {
     info "Checking existing tools..."
 
     if has_cmd g++; then
-        GXX_VER=$(g++ -dumpversion 2>/dev/null || echo "?")
-        ok "g++ found (version $GXX_VER)"
-        HAVE_GXX=1
+        GXX_VER=$(g++ -dumpversion 2>/dev/null || echo "0")
+        GXX_MAJOR="${GXX_VER%%.*}"
+        if [[ "$GXX_MAJOR" -ge 9 ]] 2>/dev/null; then
+            ok "g++ found (version $GXX_VER)"
+            HAVE_GXX=1
+        else
+            warn "g++ found but version $GXX_VER is too old (PyTorch 2.x requires GCC ≥ 9)"
+            HAVE_GXX=0
+        fi
     elif has_cmd c++ && c++ --version 2>&1 | grep -qi clang; then
         CLANG_VER=$(c++ -dumpversion 2>/dev/null || echo "?")
         ok "clang++ found (version $CLANG_VER)"
@@ -82,6 +109,14 @@ check_existing() {
     else
         warn "No C++ compiler found"
         HAVE_GXX=0
+    fi
+
+    if has_cmd cmake; then
+        CMAKE_VER=$(cmake --version 2>/dev/null | head -1 | grep -oP '[\d.]+' || echo "?")
+        ok "cmake found (version $CMAKE_VER)"
+        HAVE_CMAKE=1
+    else
+        HAVE_CMAKE=0
     fi
 
     if has_cmd ninja; then
@@ -108,7 +143,8 @@ install_debian() {
     if [[ $HAVE_GXX -eq 0 ]]; then
         pkgs+=(build-essential g++)
     fi
-    pkgs+=(ninja-build)
+    [[ $HAVE_CMAKE -eq 0 ]] && pkgs+=(cmake)
+    [[ $HAVE_NINJA -eq 0 ]] && pkgs+=(ninja-build)
 
     if [[ ${#pkgs[@]} -gt 0 ]]; then
         info "Installing: ${pkgs[*]}"
@@ -121,7 +157,7 @@ install_debian() {
     if [[ $INSTALL_CUDA -eq 1 && $HAVE_NVCC -eq 0 ]]; then
         info "Installing CUDA toolkit ${CUDA_VERSION} ..."
         # NVIDIA apt repo (works for Ubuntu 20.04+)
-        if ! has_cmd nvidia-smi && ! dpkg -l | grep -q cuda-keyring; then
+        if ! dpkg -l 2>/dev/null | grep -q cuda-keyring; then
             local DISTRO
             DISTRO=$(. /etc/os-release && echo "${ID}${VERSION_ID}" | tr -d '.')
             local ARCH
@@ -134,7 +170,7 @@ install_debian() {
             $SUDO dpkg -i "/tmp/$KEYRING"
             $SUDO apt-get update -qq
         fi
-        $SUDO apt-get install -y -qq "cuda-toolkit-${CUDA_VERSION}"
+        $SUDO apt-get install -y -qq "cuda-toolkit-${CUDA_PKG_VER}"
         ok "CUDA toolkit installed. You may need to add /usr/local/cuda/bin to PATH."
     elif [[ $INSTALL_CUDA -eq 1 ]]; then
         ok "CUDA (nvcc) already present"
@@ -149,7 +185,8 @@ install_fedora() {
     if [[ $HAVE_GXX -eq 0 ]]; then
         pkgs+=(gcc-c++ make)
     fi
-    pkgs+=(ninja-build)
+    [[ $HAVE_CMAKE -eq 0 ]] && pkgs+=(cmake)
+    [[ $HAVE_NINJA -eq 0 ]] && pkgs+=(ninja-build)
 
     if [[ ${#pkgs[@]} -gt 0 ]]; then
         info "Installing: ${pkgs[*]}"
@@ -162,8 +199,62 @@ install_fedora() {
         info "Installing CUDA toolkit (via dnf) ..."
         $SUDO dnf config-manager --add-repo \
             "https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo" 2>/dev/null || true
-        $SUDO dnf install -y -q "cuda-toolkit-${CUDA_VERSION}"
+        $SUDO dnf install -y -q "cuda-toolkit-${CUDA_PKG_VER}"
         ok "CUDA toolkit installed."
+    elif [[ $INSTALL_CUDA -eq 1 ]]; then
+        ok "CUDA (nvcc) already present"
+    fi
+}
+
+# ---- openSUSE / SLES -------------------------------------------------------
+install_opensuse() {
+    need_sudo
+    local pkgs=()
+
+    if [[ $HAVE_GXX -eq 0 ]]; then
+        # openSUSE Leap 15.x ships gcc-c++ = GCC 7, which is too old for PyTorch 2.x.
+        # Install the versioned gcc13 packages explicitly.
+        pkgs+=(gcc13 gcc13-c++ make)
+    fi
+    [[ $HAVE_CMAKE -eq 0 ]] && pkgs+=(cmake)
+    [[ $HAVE_NINJA -eq 0 ]] && pkgs+=(ninja)
+
+    if [[ ${#pkgs[@]} -gt 0 ]]; then
+        info "Installing: ${pkgs[*]}"
+        $SUDO zypper --non-interactive install "${pkgs[@]}"
+    else
+        ok "C++ toolchain already present"
+    fi
+
+    # Register gcc-13/g++-13 as the system default via update-alternatives
+    # so that subsequent cmake/pip invocations pick it up automatically.
+    if [[ $HAVE_GXX -eq 0 ]] && has_cmd gcc-13 && has_cmd g++-13; then
+        $SUDO update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 13 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-13 \
+            --slave /usr/bin/cc  cc  /usr/bin/gcc-13 \
+            --slave /usr/bin/c++ c++ /usr/bin/g++-13 2>/dev/null || true
+        ok "gcc-13/g++-13 registered as default compiler (g++ -dumpversion: $(g++ -dumpversion 2>/dev/null || echo '?'))"
+    fi
+
+    if [[ $INSTALL_CUDA -eq 1 && $HAVE_NVCC -eq 0 ]]; then
+        info "Installing CUDA toolkit ${CUDA_VERSION} (via zypper) ..."
+        # NVIDIA publishes a single 'opensuse15' repo for all Leap 15.x/SLES 15.x.
+        # zypper addrepo needs the bare repository directory URL (not a .repo file).
+        local ARCH="x86_64"
+        local REPO_URL="https://developer.download.nvidia.com/compute/cuda/repos/opensuse15/${ARCH}"
+        local ALIAS="cuda-nvidia"
+        # Remove any stale aliases from previous runs (both old and current name).
+        # Use both zypper removerepo and direct file deletion: removerepo can
+        # silently fail when the repo metadata is already broken/inconsistent.
+        $SUDO zypper --non-interactive removerepo cuda        2>/dev/null || true
+        $SUDO zypper --non-interactive removerepo cuda-nvidia 2>/dev/null || true
+        $SUDO rm -f /etc/zypp/repos.d/cuda.repo \
+                    /etc/zypp/repos.d/cuda-nvidia.repo 2>/dev/null || true
+        $SUDO zypper --non-interactive addrepo --refresh "$REPO_URL" "$ALIAS"
+        $SUDO zypper --non-interactive --gpg-auto-import-keys refresh "$ALIAS"
+        $SUDO zypper --non-interactive install "cuda-toolkit-${CUDA_PKG_VER}"
+        ok "CUDA toolkit installed. Add /usr/local/cuda/bin to PATH before building:"
+        info "  export PATH=/usr/local/cuda/bin:\$PATH"
     elif [[ $INSTALL_CUDA -eq 1 ]]; then
         ok "CUDA (nvcc) already present"
     fi
@@ -179,7 +270,10 @@ install_arch() {
     else
         ok "C++ toolchain already present"
     fi
-    $SUDO pacman -S --noconfirm --needed ninja
+    local arch_pkgs=()
+    [[ $HAVE_CMAKE -eq 0 ]] && arch_pkgs+=(cmake)
+    [[ $HAVE_NINJA -eq 0 ]] && arch_pkgs+=(ninja)
+    [[ ${#arch_pkgs[@]} -gt 0 ]] && $SUDO pacman -S --noconfirm --needed "${arch_pkgs[@]}"
 
     if [[ $INSTALL_CUDA -eq 1 && $HAVE_NVCC -eq 0 ]]; then
         info "Installing cuda..."
@@ -203,10 +297,8 @@ install_macos() {
         ok "C++ compiler already present"
     fi
 
-    if [[ $HAVE_NINJA -eq 0 ]]; then
-        info "Installing ninja..."
-        brew install ninja
-    fi
+    [[ $HAVE_CMAKE -eq 0 ]] && brew install cmake
+    [[ $HAVE_NINJA -eq 0 ]] && brew install ninja
 
     if [[ $INSTALL_CUDA -eq 1 ]]; then
         warn "CUDA is not supported on macOS (Apple Silicon). Skipping."
@@ -218,11 +310,12 @@ detect_os
 check_existing
 
 case "$OS" in
-    debian) install_debian ;;
-    fedora) install_fedora ;;
-    arch)   install_arch ;;
-    macos)  install_macos ;;
-    *)      fail "Unsupported OS. Please install a C++17 compiler manually." ;;
+    debian)   install_debian ;;
+    fedora)   install_fedora ;;
+    opensuse) install_opensuse ;;
+    arch)     install_arch ;;
+    macos)    install_macos ;;
+    *)        fail "Unsupported OS. Please install a C++17 compiler manually." ;;
 esac
 
 echo ""

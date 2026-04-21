@@ -1,11 +1,10 @@
 [build-system]
 requires = [
-    "setuptools>=64",
+    "scikit-build-core>=0.9",
     "setuptools-scm>=8",
-    "wheel",
     "numpy",
 ]
-build-backend = "setuptools.build_meta"
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "pygrog"
@@ -29,6 +28,8 @@ classifiers = [  # Optional
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11", 
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering :: Medical Science Apps.",
   "Topic :: Scientific/Engineering :: Physics",
 ]
@@ -75,14 +76,19 @@ test = [
 "Bug Reports" = "https://github.com/FiRMLAB-Pisa/pygrog/issues"
 "Source" = "https://github.com/FiRMLAB-Pisa/pygrog"
 
-[tool.setuptools.packages.find]
-where=["src"]
+[tool.scikit-build]
+metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
+wheel.packages = ["src/pygrog"]
+
+# Build options (pass via pip install -C cmake.define.<NAME>=ON):
+#   cmake.define.PYGROG_NO_CUDA    — force CPU-only build (no nvcc required)
+#   cmake.define.PYGROG_FORCE_CUDA — fail if no CUDA compiler is found
 
 [tool.setuptools_scm]
 write_to = "src/pygrog/_version.py"
 version_scheme = "python-simplified-semver"
-local_scheme="no-local-version"
-fallback_version="v99-dev"
+local_scheme = "no-local-version"
+fallback_version = "v99-dev"
 
 # Formatting using black.
 [tool.black]
@@ -149,6 +155,7 @@ convention = "numpy"
 minversion = "6.0"
 pythonpath  = ["tests"]
 testpaths=["tests"]
+norecursedirs = ["tests/train"]
 addopts = [
     "--import-mode=importlib",
     "--cov=pygrog",

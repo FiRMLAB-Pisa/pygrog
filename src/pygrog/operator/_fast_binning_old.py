@@ -13,6 +13,7 @@ from numpy.typing import NDArray
 
 try:
     from .. import _pygrog_cpp
+
     _has_cpp = True
 except ImportError:
     _has_cpp = False
