@@ -3,7 +3,7 @@
 __all__ = ["ToeplitzOp"]
 
 import torch
-from numpy.typing import ArrayLike
+from numpy.typing import NDArray
 
 from .._utils import resize
 from .._base._fftc import fft, ifft
@@ -20,9 +20,9 @@ class ToeplitzOp:
     ----------
     shape : list[int] | tuple[int]
         Input spatial shape.
-    coords : ArrayLike
+    coords : NDArray
         Fourier domain coordinate array of shape ``(..., ndim)``.
-    weights : ArrayLike | None, optional
+    weights : NDArray | None, optional
         Density compensation weights.
     oversamp : float, optional
         Oversampling factor. The default is ``1.25``.
@@ -36,8 +36,8 @@ class ToeplitzOp:
     def __init__(
         self,
         shape: list[int] | tuple[int] | torch.Tensor,
-        coords: ArrayLike | None = None,
-        weights: ArrayLike | None = None,
+        coords: NDArray | None = None,
+        weights: NDArray | None = None,
         oversamp: float = 1.25,
         eps: float = 1e-3,
         normalize_coords: bool = True,
@@ -49,7 +49,11 @@ class ToeplitzOp:
         if isinstance(shape, torch.Tensor):
             psf = shape
             self.shape = tuple(ishape)
-            self.fft_axes = tuple(axes) if axes is not None else tuple(range(-1, -(psf.ndim + 1), -1))
+            self.fft_axes = (
+                tuple(axes)
+                if axes is not None
+                else tuple(range(-1, -(psf.ndim + 1), -1))
+            )
             self.psf = psf
             self.os_shape = tuple(self.psf.shape)
             return
@@ -65,7 +69,7 @@ class ToeplitzOp:
         self.psf = torch.as_tensor(psf)
         self.os_shape = tuple(self.psf.shape)
 
-    def __call__(self, input: torch.Tensor) -> torch.Tensor:
+    def __call__(self, input: torch.Tensor) -> torch.Tensor:  # noqa: A002
         """Apply Toeplitz normal operator: resize -> FFT -> PSF multiply -> IFFT -> resize."""
         os_shape = list(input.shape)
         for ax in self.fft_axes:

@@ -13,7 +13,6 @@ from mrinufft._array_compat import with_torch
 
 from .._base._fftc import fft, ifft
 from .._base._nufft import nufft, nufft_adjoint
-from .._toep._toep import calc_toeplitz_kernel
 from .._toep._toep_op import ToeplitzOp
 from .._utils import resize, estimate_shape
 
@@ -219,10 +218,7 @@ def _setup_cartesian(y, ndim, mask, cal_width, sobolev_width, sobolev_deg):
 
     oshape = tuple(y.shape[1:])
 
-    if mask is None:
-        mask = (y.abs().pow(2).sum(dim=0) > 0).float()
-    else:
-        mask = mask.float()
+    mask = (y.abs().pow(2).sum(dim=0) > 0).float() if mask is None else mask.float()
 
     # Extract calibration region
     cal_shape = list(y.shape[:1]) + [min(cal_width, s) for s in oshape]
@@ -242,8 +238,8 @@ def _setup_noncartesian(
     coords,
     weights,
     cal_width,
-    oversamp,
-    eps,
+    oversamp,  # noqa: ARG001
+    eps,  # noqa: ARG001
     sobolev_width,
     sobolev_deg,
 ):
@@ -258,7 +254,9 @@ def _setup_noncartesian(
     radius = 0.5 * cal_width
     dist = (scaled**2).sum(dim=-1).sqrt()
     flat_dist = dist.reshape(-1)
-    cal_idx = flat_dist <= radius
+    _ = (
+        flat_dist <= radius
+    )  # density threshold (unused: all samples kept for non-Cartesian)
 
     # Apply DCF
     if weights is not None:
@@ -320,7 +318,7 @@ def _derH_cart(P, W, X0, DK):
 # -----------------------------------------------------------------------
 
 
-def _op_noncart(X, coords, weights, shape, oversamp, eps):
+def _op_noncart(X, coords, _weights, _shape, oversamp, eps):
     """Forward: F(x) = NUFFT(rho * c_i)."""
     K = torch.zeros(
         (X.shape[0] - 1, *coords.shape[:-1]), dtype=X.dtype, device=X.device
@@ -330,7 +328,7 @@ def _op_noncart(X, coords, weights, shape, oversamp, eps):
     return K
 
 
-def _der_noncart(X0, DX, W, coords, weights, shape, oversamp, eps):
+def _der_noncart(X0, DX, W, coords, _weights, _shape, oversamp, eps):
     """Derivative for non-Cartesian."""
     K = torch.zeros(
         (DX.shape[0] - 1, *coords.shape[:-1]), dtype=DX.dtype, device=DX.device
@@ -345,7 +343,7 @@ def _der_noncart(X0, DX, W, coords, weights, shape, oversamp, eps):
     return K
 
 
-def _derH_noncart(X0, DK, W, coords, weights, shape, oversamp, eps):
+def _derH_noncart(X0, DK, W, coords, _weights, shape, oversamp, eps):
     """Adjoint derivative for non-Cartesian."""
     DX = torch.zeros_like(X0)
     for i in range(DK.shape[0]):
@@ -355,11 +353,11 @@ def _derH_noncart(X0, DK, W, coords, weights, shape, oversamp, eps):
     return DX
 
 
-def _derH_der_noncart_toeplitz(X0, DX, W, toep_op, shape):
+def _derH_der_noncart_toeplitz(X0, DX, W, toep_op, _shape):
     """Fused derivH @ deriv for non-Cartesian using Toeplitz normal operator.
 
     Replaces ``nufft_adjoint(nufft(f_i))`` for each coil with
-    ``toep_op(f_i)`` (FFT-based PSF multiplication), avoiding 2×n_coils
+    ``toep_op(f_i)`` (FFT-based PSF multiplication), avoiding 2x n_coils
     NUFFT calls per CG iteration.
     """
     out = torch.zeros_like(X0)
@@ -379,7 +377,7 @@ def _derH_der_noncart_toeplitz(X0, DX, W, toep_op, shape):
 # -----------------------------------------------------------------------
 
 
-def _postprocess(XN, W, yscale, cshape, oshape, noncart, ret_cal, ret_image):
+def _postprocess(XN, W, yscale, cshape, oshape, _noncart, ret_cal, ret_image):
     """Post-process NLINV result to extract smaps and optional outputs."""
     # Apply weights and undo normalization
     X = _apply_W(XN, W) / yscale
@@ -407,7 +405,8 @@ def _postprocess(XN, W, yscale, cshape, oshape, noncart, ret_cal, ret_image):
     if ret_cal:
         grappa_train = fft(X[1:] * X[0], axes=spatial_axes)
         cal_shape = list(grappa_train.shape[:-spatial_ndim]) + [
-            min(s, c) for s, c in zip(cshape, grappa_train.shape[-spatial_ndim:])
+            min(s, c)
+            for s, c in zip(cshape, grappa_train.shape[-spatial_ndim:], strict=False)
         ]
         grappa_train = resize(grappa_train, cal_shape)
         results.append(grappa_train)

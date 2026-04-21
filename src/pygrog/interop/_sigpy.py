@@ -95,7 +95,7 @@ class GrogLinop:
                     img_shape = list(op.image_shape)
                 else:
                     ksp_shape = [n_coils, n_samples]
-                    img_shape = [n_coils] + list(op.image_shape)
+                    img_shape = [n_coils, *list(op.image_shape)]
 
                 if not _adjoint:
                     super().__init__(img_shape, ksp_shape)
@@ -103,7 +103,7 @@ class GrogLinop:
                     super().__init__(ksp_shape, img_shape)
 
             @with_torch
-            def _apply(self, input):
+            def _apply(self, input):  # noqa: A002
                 # with_torch already converted input to a torch tensor;
                 # call the pygrog op (which also works in torch) and return
                 # a torch tensor — the decorator converts it back to the

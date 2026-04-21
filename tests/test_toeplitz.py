@@ -21,10 +21,10 @@ from pygrog._toep._toep_op import ToeplitzOp
 from pygrog.operator._sparse_fft import SparseFFT
 from pygrog.operator._toeplitz import toeplitz_normal
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_op(grid_shape, image_shape, n_samples, *, smaps=None, seed=0):
     rng = np.random.default_rng(seed)
@@ -49,110 +49,118 @@ def _real_uniform_psf(ishape, os_factor=2):
     return torch.ones(*os_shape, dtype=torch.complex64)
 
 
+# Constants used by toeplitz_normal tests
+_TOEP_NORMAL_SHAPE = (16, 16)
+_TOEP_NORMAL_N_SAMPLES = 80
+_TOEP_NORMAL_N_COILS = 3
+
+
+def _build_toeplitz_normal_op(seed=0):
+    torch.manual_seed(seed)
+    smaps = torch.randn(
+        _TOEP_NORMAL_N_COILS, *_TOEP_NORMAL_SHAPE, dtype=torch.complex64
+    )
+    return _make_op(
+        _TOEP_NORMAL_SHAPE,
+        _TOEP_NORMAL_SHAPE,
+        _TOEP_NORMAL_N_SAMPLES,
+        smaps=smaps,
+        seed=seed,
+    )
+
+
 # ===========================================================================
 # ToeplitzOp
 # ===========================================================================
 
-class TestToeplitzOp:
-    """ToeplitzOp with a pre-computed PSF tensor."""
 
-    def test_output_shape(self, device):
-        shape = (12, 16)
-        psf = _real_uniform_psf(shape)
-        op = ToeplitzOp(psf, ishape=shape, axes=(-2, -1))
-        x = torch.randn(*shape, dtype=torch.complex64, device=device)
-        assert op(x).shape == shape
+def test_toeplitz_op_output_shape(device):
+    shape = (12, 16)
+    psf = _real_uniform_psf(shape)
+    op = ToeplitzOp(psf, ishape=shape, axes=(-2, -1))
+    x = torch.randn(*shape, dtype=torch.complex64, device=device)
+    assert op(x).shape == shape
 
-    def test_output_device(self, device):
-        shape = (12, 12)
-        psf = _real_uniform_psf(shape)
-        op = ToeplitzOp(psf, ishape=shape, axes=(-2, -1))
-        x = torch.randn(*shape, dtype=torch.complex64, device=device)
-        assert op(x).device.type == device.type
 
-    def test_self_adjoint(self, device):
-        """<Tx, y> == <x, Ty> for a real-valued PSF."""
-        shape = (16, 16)
-        psf = _real_uniform_psf(shape)
-        op = ToeplitzOp(psf, ishape=shape, axes=(-2, -1))
-        torch.manual_seed(0)
-        x = torch.randn(*shape, dtype=torch.complex64, device=device)
-        y = torch.randn(*shape, dtype=torch.complex64, device=device)
-        lhs = _cdot(op(x), y)
-        rhs = _cdot(x, op(y))
-        torch.testing.assert_close(lhs, rhs, rtol=1e-4, atol=1e-5)
+def test_toeplitz_op_output_device(device):
+    shape = (12, 12)
+    psf = _real_uniform_psf(shape)
+    op = ToeplitzOp(psf, ishape=shape, axes=(-2, -1))
+    x = torch.randn(*shape, dtype=torch.complex64, device=device)
+    assert op(x).device.type == device.type
 
-    def test_positive_semi_definite(self, device):
-        """<Tx, x>.real >= 0 for a non-negative PSF."""
-        shape = (16, 16)
-        psf = _real_uniform_psf(shape)
-        op = ToeplitzOp(psf, ishape=shape, axes=(-2, -1))
-        torch.manual_seed(1)
-        x = torch.randn(*shape, dtype=torch.complex64, device=device)
-        inner = _cdot(op(x), x)
-        assert inner.real.item() >= -1e-4, f"PSD violated: <Tx,x> = {inner}"
 
-    def test_3d_shape(self, device):
-        shape = (8, 8, 8)
-        psf = _real_uniform_psf(shape)
-        op = ToeplitzOp(psf, ishape=shape, axes=(-3, -2, -1))
-        x = torch.randn(*shape, dtype=torch.complex64, device=device)
-        assert op(x).shape == shape
+def test_toeplitz_op_self_adjoint(device):
+    """<Tx, y> == <x, Ty> for a real-valued PSF."""
+    shape = (16, 16)
+    psf = _real_uniform_psf(shape)
+    op = ToeplitzOp(psf, ishape=shape, axes=(-2, -1))
+    torch.manual_seed(0)
+    x = torch.randn(*shape, dtype=torch.complex64, device=device)
+    y = torch.randn(*shape, dtype=torch.complex64, device=device)
+    lhs = _cdot(op(x), y)
+    rhs = _cdot(x, op(y))
+    torch.testing.assert_close(lhs, rhs, rtol=1e-4, atol=1e-5)
+
+
+def test_toeplitz_op_positive_semi_definite(device):
+    """<Tx, x>.real >= 0 for a non-negative PSF."""
+    shape = (16, 16)
+    psf = _real_uniform_psf(shape)
+    op = ToeplitzOp(psf, ishape=shape, axes=(-2, -1))
+    torch.manual_seed(1)
+    x = torch.randn(*shape, dtype=torch.complex64, device=device)
+    inner = _cdot(op(x), x)
+    assert inner.real.item() >= -1e-4, f"PSD violated: <Tx,x> = {inner}"
+
+
+def test_toeplitz_op_3d_shape(device):
+    shape = (8, 8, 8)
+    psf = _real_uniform_psf(shape)
+    op = ToeplitzOp(psf, ishape=shape, axes=(-3, -2, -1))
+    x = torch.randn(*shape, dtype=torch.complex64, device=device)
+    assert op(x).shape == shape
 
 
 # ===========================================================================
 # toeplitz_normal
 # ===========================================================================
 
-class TestToeplitzNormal:
-    """toeplitz_normal(op)(x) must equal op.forward(op.adjoint(x)).
 
-    We set grid_shape == image_shape (no oversampling) so that the Toeplitz
-    density approximation is exact and the two paths agree to floating-point
-    precision.
-    """
+def test_toeplitz_normal_matches_direct_aha(device):
+    """toeplitz_normal(op)(x) == op.forward(op.adjoint(x))."""
+    op = _build_toeplitz_normal_op(seed=30)
+    normal = toeplitz_normal(op)
+    x = torch.randn(*_TOEP_NORMAL_SHAPE, dtype=torch.complex64, device=device)
+    direct = op.forward(op.adjoint(x))
+    result = normal(x)
+    torch.testing.assert_close(result, direct, rtol=1e-4, atol=1e-4)
 
-    # Square grid with no oversampling so all k-space samples land in the
-    # center crop → Toeplitz approximation is exact.
-    _SHAPE = (16, 16)
-    _N_SAMPLES = 80
-    _N_COILS = 3
 
-    def _build(self, seed=0):
-        torch.manual_seed(seed)
-        smaps = torch.randn(self._N_COILS, *self._SHAPE, dtype=torch.complex64)
-        return _make_op(self._SHAPE, self._SHAPE, self._N_SAMPLES, smaps=smaps, seed=seed)
+def test_toeplitz_normal_self_adjoint(device):
+    """toeplitz_normal(op) is self-adjoint: <Nx, y> == <x, Ny>."""
+    op = _build_toeplitz_normal_op(seed=31)
+    normal = toeplitz_normal(op)
+    x = torch.randn(*_TOEP_NORMAL_SHAPE, dtype=torch.complex64, device=device)
+    y = torch.randn(*_TOEP_NORMAL_SHAPE, dtype=torch.complex64, device=device)
+    torch.testing.assert_close(
+        _cdot(normal(x), y), _cdot(x, normal(y)), rtol=1e-4, atol=1e-4
+    )
 
-    def test_matches_direct_aha(self, device):
-        """toeplitz_normal(op)(x) == op.forward(op.adjoint(x))."""
-        op = self._build(seed=30)
-        normal = toeplitz_normal(op)
-        x = torch.randn(*self._SHAPE, dtype=torch.complex64, device=device)
-        direct = op.forward(op.adjoint(x))
-        result = normal(x)
-        torch.testing.assert_close(result, direct, rtol=1e-4, atol=1e-4)
 
-    def test_self_adjoint(self, device):
-        """toeplitz_normal(op) is self-adjoint: <Nx, y> == <x, Ny>."""
-        op = self._build(seed=31)
-        normal = toeplitz_normal(op)
-        x = torch.randn(*self._SHAPE, dtype=torch.complex64, device=device)
-        y = torch.randn(*self._SHAPE, dtype=torch.complex64, device=device)
-        torch.testing.assert_close(
-            _cdot(normal(x), y), _cdot(x, normal(y)), rtol=1e-4, atol=1e-4
-        )
+def test_toeplitz_normal_positive_semi_definite(device):
+    """<Nx, x>.real >= 0 (A^H A is always PSD)."""
+    op = _build_toeplitz_normal_op(seed=32)
+    normal = toeplitz_normal(op)
+    x = torch.randn(*_TOEP_NORMAL_SHAPE, dtype=torch.complex64, device=device)
+    inner = _cdot(normal(x), x)
+    assert inner.real.item() >= -1e-4, f"PSD violated: <Nx,x> = {inner}"
 
-    def test_positive_semi_definite(self, device):
-        """<Nx, x>.real >= 0 (A^H A is always PSD)."""
-        op = self._build(seed=32)
-        normal = toeplitz_normal(op)
-        x = torch.randn(*self._SHAPE, dtype=torch.complex64, device=device)
-        inner = _cdot(normal(x), x)
-        assert inner.real.item() >= -1e-4, f"PSD violated: <Nx,x> = {inner}"
 
-    def test_requires_smaps(self):
-        """toeplitz_normal raises ValueError when no smaps are given."""
-        op = _make_op(self._SHAPE, self._SHAPE, self._N_SAMPLES)  # no smaps
-        with pytest.raises(ValueError, match="smaps"):
-            toeplitz_normal(op)
-
+def test_toeplitz_normal_requires_smaps():
+    """toeplitz_normal raises ValueError when no smaps are given."""
+    op = _make_op(
+        _TOEP_NORMAL_SHAPE, _TOEP_NORMAL_SHAPE, _TOEP_NORMAL_N_SAMPLES
+    )  # no smaps
+    with pytest.raises(ValueError, match="smaps"):
+        toeplitz_normal(op)

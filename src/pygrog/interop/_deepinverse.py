@@ -1,6 +1,6 @@
 """Torch autograd wrapper for SparseFFT — enables gradient-based recon."""
 
-__all__ = ["SparseFFTFunction", "sparse_fft_forward", "sparse_fft_adjoint"]
+__all__ = ["SparseFFTFunction", "sparse_fft_adjoint", "sparse_fft_forward"]
 
 import torch
 from torch.autograd import Function

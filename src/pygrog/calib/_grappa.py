@@ -3,6 +3,7 @@
 __all__ = ["KernelTable"]
 
 import warnings
+from types import SimpleNamespace
 
 from numpy.typing import NDArray
 
@@ -108,10 +109,10 @@ def KernelTable(
     deltas = (deltas - (nsteps - 1) // 2) / (nsteps - 1)
 
     # Pre-compute partial operators
-    Gx = grappa_power(grappa_kernels["x"], deltas)  # (nsteps, nc, nc)
-    Gy = grappa_power(grappa_kernels["y"], deltas)  # (nsteps, nc, nc)
-    if "z" in grappa_kernels and grappa_kernels["z"] is not None:
-        Gz = grappa_power(grappa_kernels["z"], deltas)  # (nsteps, nc, nc), 3D only
+    Gx = grappa_power(grappa_kernels.x, deltas)  # (nsteps, nc, nc)
+    Gy = grappa_power(grappa_kernels.y, deltas)  # (nsteps, nc, nc)
+    if grappa_kernels.z is not None:
+        Gz = grappa_power(grappa_kernels.z, deltas)  # (nsteps, nc, nc), 3D only
         ndim = 3
     else:
         Gz = None
@@ -124,7 +125,7 @@ def prepare_grappa_table(
     Gx: NDArray[complex],
     Gy: NDArray[complex],
     Gz: NDArray[complex] | None,
-    nsteps: int,
+    nsteps: int,  # noqa: ARG001
     ndim: int,
 ) -> NDArray[complex]:
     """
@@ -204,7 +205,7 @@ def train_grappa(
     train_data: NDArray[complex],
     lamda: float | None = None,
     coords: NDArray[float] | None = None,
-) -> dict:
+) -> SimpleNamespace:
     """
     Train GRAPPA Operator Gridding (GROG) interpolator.
 
@@ -224,9 +225,9 @@ def train_grappa(
 
     Returns
     -------
-    dict
-        Output grog interpolator with keys ``(x, y)`` (single slice 2D)
-        or ``(x, y, z)`` (multi-slice or 3D).
+    SimpleNamespace
+        Output grog interpolator with attributes ``x``, ``y`` (single slice 2D)
+        or ``x``, ``y``, ``z`` (multi-slice or 3D).
 
     Notes
     -----
@@ -253,21 +254,15 @@ def train_grappa(
 # %% subroutines
 @with_torch
 def _train(train_data, lamda, coords):
-    if coords is None:
-        ndim = len(train_data.shape) - 1
-    else:
-        ndim = coords.shape[-1]
+    ndim = len(train_data.shape) - 1 if coords is None else coords.shape[-1]
 
     # get grappa operator
     kern = _calc_grappaop(ndim, train_data, lamda, coords)
-    Gx = kern["Gx"]
-    Gy = kern["Gy"]
-    if ndim == 3:
-        Gz = kern["Gz"]
-    else:
-        Gz = None
+    Gx = kern.Gx
+    Gy = kern.Gy
+    Gz = kern.Gz if ndim == 3 else None
 
-    return {"x": Gx, "y": Gy, "z": Gz}
+    return SimpleNamespace(x=Gx, y=Gy, z=Gz)
 
 
 def _calc_grappaop(ndim, train_data, lamda, coords):
@@ -282,13 +277,13 @@ def _calc_grappaop(ndim, train_data, lamda, coords):
         elif ndim == 3:
             gz, gy, gx = _grappa_op_3d(train_data, lamda)
 
-    return {"Gx": gx, "Gy": gy, "Gz": gz}
+    return SimpleNamespace(Gx=gx, Gy=gy, Gz=gz)
 
 
 def _radial_grappa_op(calib, lamda, coords):
     """Return a 2D GROG operators from radial data."""
     calib = calib.movedim(0, -1)
-    nr, ns, nc = calib.shape
+    nr, _ns, nc = calib.shape
 
     # extract x and y components of trajectory
     xcoord = coords[..., 0].T

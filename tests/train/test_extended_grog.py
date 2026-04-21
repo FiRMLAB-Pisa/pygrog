@@ -1,6 +1,6 @@
 """Test Extended GROG interpolator."""
 
-import os
+import pathlib
 import tempfile
 
 import numpy as np
@@ -66,7 +66,7 @@ def test_save_load_interpolator_without_kernels(cartesian_2d_data):
     # Save to temporary file
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Test pickle format
-        pkl_path = os.path.join(tmp_dir, "grog_plan.npy")
+        pkl_path = pathlib.Path(tmp_dir) / "grog_plan.npy"
         grog.to_file(pkl_path)
 
         # Load from pickle file
@@ -91,7 +91,7 @@ def test_save_load_set_kernels_workflow(identity_interpolator, cartesian_2d_data
     # Save to temporary file
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Test numpy format
-        npy_path = os.path.join(tmp_dir, "grog_plan.npy")
+        npy_path = pathlib.Path(tmp_dir) / "grog_plan.npy"
         grog.to_file(npy_path)
 
         # Load from numpy file

@@ -1,18 +1,46 @@
-PyGROG Documentation
-====================
+.. include:: ../README.md
+   :parser: myst_parser.sphinx_
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Contents
+   :hidden:
+   :caption: User Guides
 
-   installation_guide
-   api/index
-
-
-API Reference
--------------
+   getting_started
+   install
 
 .. toctree::
+   :hidden:
    :maxdepth: 2
+   :caption: Examples
 
-   api/index
+   generated/autoexamples/index
+
+.. toctree::
+   :hidden:
+   :caption: API Reference
+
+   api
+
+.. toctree::
+   :hidden:
+   :caption: Explanations
+
+   explanations/index
+
+.. toctree::
+   :hidden:
+   :caption: Miscellaneous
+
+   misc/contributors
+   misc/code_of_conduct
+   misc/license
+   misc/development
+
+.. toctree::
+   :hidden:
+   :caption: Related Projects
+
+   mri-nufft <https://mind-inria.github.io/mri-nufft/>
+   mrpro <https://mrpro.readthedocs.io/>
+   sigpy <https://sigpy.readthedocs.io/>
+   deepinverse <https://deepinv.github.io/>

@@ -3,7 +3,7 @@
 __all__ = ["calc_toeplitz_kernel"]
 
 import torch
-from numpy.typing import ArrayLike
+from numpy.typing import NDArray
 from mrinufft._array_compat import with_torch
 
 from .._base._fftc import fft
@@ -12,9 +12,9 @@ from .._base._nufft import nufft, nufft_adjoint
 
 @with_torch
 def calc_toeplitz_kernel(
-    coords: ArrayLike,
-    shape: ArrayLike,
-    weights: ArrayLike = None,
+    coords: NDArray,
+    shape: NDArray,
+    weights: NDArray | None = None,
     oversamp: float = 1.25,
     eps: float = 1e-6,
     normalize_coords: bool = True,
@@ -26,10 +26,10 @@ def calc_toeplitz_kernel(
 
     Parameters
     ----------
-    coord : ArrayLike
+    coord : NDArray
         Fourier domain coordinate array of shape ``(..., ndim)``.
         ``ndim`` determines the number of dimensions to apply the NUFFT.
-    shape : ArrayLike[int] | None, optional
+    shape : NDArray[int] | None, optional
         Shape of the form ``(..., n_{ndim - 1}, ..., n_1, n_0)``.
         The default is ``None`` (estimated from ``coord``).
     oversamp : float, optional
@@ -43,7 +43,7 @@ def calc_toeplitz_kernel(
 
     Returns
     -------
-    ArrayLike
+    NDArray
         Signal domain data of shape
         ``input.shape[:-ndim] + coord.shape[:-1]``.
 

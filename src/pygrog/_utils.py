@@ -1,6 +1,6 @@
 """Core utilities for pygrog — torch-native replacements for sigpy helpers."""
 
-__all__ = ["resize", "rescale_coords", "normalize_axes", "estimate_shape"]
+__all__ = ["estimate_shape", "normalize_axes", "rescale_coords", "resize"]
 
 import math
 
@@ -10,7 +10,10 @@ from numpy.typing import NDArray
 import torch
 
 
-def resize(input: torch.Tensor, oshape: list[int] | tuple[int]) -> torch.Tensor:
+def resize(
+    input: torch.Tensor,  # noqa: A002
+    oshape: list[int] | tuple[int],
+) -> torch.Tensor:
     """
     Resize tensor via center crop / zero-pad to target shape.
 
@@ -49,9 +52,7 @@ def resize(input: torch.Tensor, oshape: list[int] | tuple[int]) -> torch.Tensor:
     return result
 
 
-def normalize_axes(
-    ndim: int, axes: int | list[int] | tuple[int] | None
-) -> list[int]:
+def normalize_axes(ndim: int, axes: int | list[int] | tuple[int] | None) -> list[int]:
     """
     Normalize FFT axes specification.
 

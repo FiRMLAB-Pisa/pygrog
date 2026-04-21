@@ -12,20 +12,22 @@ GPU is available.
 
 import numpy as np
 import torch
-import pytest
 
-from pygrog.gadgets._subspace import SubspaceProjection, SubspaceSparseFFT, with_subspace
+from pygrog.gadgets._subspace import (
+    SubspaceProjection,
+    SubspaceSparseFFT,
+    with_subspace,
+)
 from pygrog.gadgets._off_resonance import (
     OffResonanceSparseFFT,
     OffResonanceCorrection,
-    with_off_resonance,
 )
 from pygrog.operator._sparse_fft import SparseFFT
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_sparse_fft(grid_shape, image_shape, n_samples, *, smaps=None, seed=0):
     rng = np.random.default_rng(seed)
@@ -43,8 +45,12 @@ def _make_orc_op(image_shape, n_samples, n_coils, L, *, seed=0, smaps=True):
     """Return OffResonanceSparseFFT with manufactured (random) B and C."""
     torch.manual_seed(seed)
     grid_shape = tuple(s + 4 for s in image_shape)
-    smap_tensor = torch.randn(n_coils, *image_shape, dtype=torch.complex64) if smaps else None
-    base = _make_sparse_fft(grid_shape, image_shape, n_samples, smaps=smap_tensor, seed=seed)
+    smap_tensor = (
+        torch.randn(n_coils, *image_shape, dtype=torch.complex64) if smaps else None
+    )
+    base = _make_sparse_fft(
+        grid_shape, image_shape, n_samples, smaps=smap_tensor, seed=seed
+    )
     # Small magnitudes so forward/adjoint numerics stay well-conditioned
     B = (torch.randn(n_samples, L, dtype=torch.complex64) * 0.1).numpy()
     C = (torch.randn(L, *image_shape, dtype=torch.complex64) * 0.1).numpy()
@@ -56,8 +62,11 @@ def _make_subspace_op(image_shape, n_samples, n_coils, K, T, *, seed=0):
     torch.manual_seed(seed)
     smaps = torch.randn(n_coils, *image_shape, dtype=torch.complex64)
     base = _make_sparse_fft(
-        tuple(s + 4 for s in image_shape), image_shape, n_samples,
-        smaps=smaps, seed=seed
+        tuple(s + 4 for s in image_shape),
+        image_shape,
+        n_samples,
+        smaps=smaps,
+        seed=seed,
     )
     rng = torch.Generator().manual_seed(seed)
     # Random full-rank basis (K < T), normalised columns
@@ -66,210 +75,224 @@ def _make_subspace_op(image_shape, n_samples, n_coils, K, T, *, seed=0):
     return SubspaceSparseFFT(base, basis)
 
 
+# Constants for OffResonanceCorrection tests
+_ORC_IMG = (12, 12)
+_ORC_N_SAMPLES = 48
+_ORC_N_COILS = 3
+_ORC_L = 3
+
+
+def _build_orc(seed=0):
+    base = _make_sparse_fft((16, 16), _ORC_IMG, _ORC_N_SAMPLES, seed=seed)
+    field_map = (
+        np.random.default_rng(seed).standard_normal(_ORC_IMG).astype(np.float32) * 5
+    )
+    readout_time = np.linspace(0, 1e-3, _ORC_N_SAMPLES, dtype=np.float32)
+    return OffResonanceCorrection(base, field_map, readout_time, n_components=-1)
+
+
+# Constants for SubspaceSparseFFT tests
+_SUB_IMG = (16, 16)
+_SUB_N_SAMPLES = 64
+_SUB_N_COILS = 3
+_SUB_K, _SUB_T = 4, 8  # subspace rank, number of frames
+
+# Constants for OffResonanceSparseFFT tests
+_ORS_IMG = (16, 16)
+_ORS_N_SAMPLES = 64
+_ORS_N_COILS = 3
+_ORS_L = 4
+
+
 # ===========================================================================
 # SubspaceProjection
 # ===========================================================================
 
-class TestSubspaceProjection:
-    def test_fit_and_forward_shape(self):
-        n_frames, n_spatial = 20, 100
-        data = torch.randn(n_frames, n_spatial, dtype=torch.complex64)
-        proj = SubspaceProjection(n_components=5)
-        proj.fit(data)
-        assert proj.basis.shape == (5, n_frames)
-        coeff = proj.forward(data)
-        assert coeff.shape == (5, n_spatial)
 
-    def test_basis_orthonormal(self):
-        """Fitted basis rows are orthonormal: basis @ basis^H ≈ I."""
-        n_frames, n_spatial = 30, 200
-        data = torch.randn(n_frames, n_spatial, dtype=torch.complex64)
-        proj = SubspaceProjection(n_components=5)
-        proj.fit(data)
-        G = proj.basis @ proj.basis.conj().T  # (5, 5) Gram matrix
-        torch.testing.assert_close(
-            G, torch.eye(5, dtype=torch.complex64), rtol=1e-5, atol=1e-5
-        )
+def test_subspace_projection_fit_and_forward_shape():
+    n_frames, n_spatial = 20, 100
+    data = torch.randn(n_frames, n_spatial, dtype=torch.complex64)
+    proj = SubspaceProjection(n_components=5)
+    proj.fit(data)
+    assert proj.basis.shape == (5, n_frames)
+    coeff = proj.forward(data)
+    assert coeff.shape == (5, n_spatial)
 
-    def test_full_rank_roundtrip(self):
-        """Full-rank projection (K=n_frames) is an exact roundtrip."""
-        n_frames, nx, ny = 16, 8, 8
-        data = torch.randn(n_frames, nx, ny, dtype=torch.complex64)
-        proj = SubspaceProjection(n_components=n_frames)
-        proj.fit(data.reshape(n_frames, -1))
-        recon = proj.adjoint(proj.forward(data))
-        torch.testing.assert_close(recon, data, atol=1e-4, rtol=1e-5)
 
-    def test_projection_is_idempotent(self):
-        """Projecting already-projected data changes nothing."""
-        n_frames, n_spatial = 20, 100
-        data = torch.randn(n_frames, n_spatial, dtype=torch.complex64)
-        proj = SubspaceProjection(n_components=5)
-        proj.fit(data)
-        coeff = proj.forward(data)
-        recon = proj.adjoint(coeff)   # back to frame space
-        coeff2 = proj.forward(recon)  # project again
-        torch.testing.assert_close(coeff2, coeff, rtol=1e-5, atol=1e-5)
+def test_subspace_projection_basis_orthonormal():
+    """Fitted basis rows are orthonormal: basis @ basis^H ≈ I."""
+    n_frames, n_spatial = 30, 200
+    data = torch.randn(n_frames, n_spatial, dtype=torch.complex64)
+    proj = SubspaceProjection(n_components=5)
+    proj.fit(data)
+    G = proj.basis @ proj.basis.conj().T  # (5, 5) Gram matrix
+    torch.testing.assert_close(
+        G, torch.eye(5, dtype=torch.complex64), rtol=1e-5, atol=1e-5
+    )
+
+
+def test_subspace_projection_full_rank_roundtrip():
+    """Full-rank projection (K=n_frames) is an exact roundtrip."""
+    n_frames, nx, ny = 16, 8, 8
+    data = torch.randn(n_frames, nx, ny, dtype=torch.complex64)
+    proj = SubspaceProjection(n_components=n_frames)
+    proj.fit(data.reshape(n_frames, -1))
+    recon = proj.adjoint(proj.forward(data))
+    torch.testing.assert_close(recon, data, atol=1e-4, rtol=1e-5)
+
+
+def test_subspace_projection_is_idempotent():
+    """Projecting already-projected data changes nothing."""
+    n_frames, n_spatial = 20, 100
+    data = torch.randn(n_frames, n_spatial, dtype=torch.complex64)
+    proj = SubspaceProjection(n_components=5)
+    proj.fit(data)
+    coeff = proj.forward(data)
+    recon = proj.adjoint(coeff)  # back to frame space
+    coeff2 = proj.forward(recon)  # project again
+    torch.testing.assert_close(coeff2, coeff, rtol=1e-5, atol=1e-5)
 
 
 # ===========================================================================
 # SubspaceSparseFFT
 # ===========================================================================
 
-class TestSubspaceSparseFFT:
-    """Exercises the with_subspace decorator + SubspaceSparseFFT class."""
 
-    _IMG = (16, 16)
-    _N_SAMPLES = 64
-    _N_COILS = 3
-    _K, _T = 4, 8  # subspace rank, number of frames
+def test_subspace_sparse_fft_forward_shape(device):
+    op = _make_subspace_op(_SUB_IMG, _SUB_N_SAMPLES, _SUB_N_COILS, _SUB_K, _SUB_T)
+    ksp = torch.randn(
+        _SUB_T, _SUB_N_COILS, _SUB_N_SAMPLES, dtype=torch.complex64, device=device
+    )
+    out = op.forward(ksp)
+    assert out.shape == (_SUB_K, *_SUB_IMG)
+    assert out.device.type == device.type
 
-    def test_forward_shape(self, device):
-        op = _make_subspace_op(self._IMG, self._N_SAMPLES, self._N_COILS, self._K, self._T)
-        ksp = torch.randn(self._T, self._N_COILS, self._N_SAMPLES,
-                          dtype=torch.complex64, device=device)
-        out = op.forward(ksp)
-        assert out.shape == (self._K, *self._IMG)
-        assert out.device.type == device.type
 
-    def test_adjoint_shape(self, device):
-        op = _make_subspace_op(self._IMG, self._N_SAMPLES, self._N_COILS, self._K, self._T)
-        coeffs = torch.randn(self._K, *self._IMG, dtype=torch.complex64, device=device)
-        out = op.adjoint(coeffs)
-        assert out.shape == (self._T, self._N_COILS, self._N_SAMPLES)
-        assert out.device.type == device.type
+def test_subspace_sparse_fft_adjoint_shape(device):
+    op = _make_subspace_op(_SUB_IMG, _SUB_N_SAMPLES, _SUB_N_COILS, _SUB_K, _SUB_T)
+    coeffs = torch.randn(_SUB_K, *_SUB_IMG, dtype=torch.complex64, device=device)
+    out = op.adjoint(coeffs)
+    assert out.shape == (_SUB_T, _SUB_N_COILS, _SUB_N_SAMPLES)
+    assert out.device.type == device.type
 
-    def test_adjointness(self, device):
-        """<forward(x), y> == <x, adjoint(y)>."""
-        op = _make_subspace_op(self._IMG, self._N_SAMPLES, self._N_COILS, self._K, self._T, seed=1)
-        x = torch.randn(self._T, self._N_COILS, self._N_SAMPLES,
-                        dtype=torch.complex64, device=device)
-        y = torch.randn(self._K, *self._IMG, dtype=torch.complex64, device=device)
-        torch.testing.assert_close(
-            _cdot(op.forward(x), y), _cdot(x, op.adjoint(y)), rtol=1e-4, atol=1e-4
-        )
 
-    def test_with_subspace_wrapper(self, device):
-        """with_subspace() returns a SubspaceSparseFFT with correct types."""
-        torch.manual_seed(2)
-        smaps = torch.randn(self._N_COILS, *self._IMG, dtype=torch.complex64)
-        base = _make_sparse_fft(
-            tuple(s + 4 for s in self._IMG), self._IMG, self._N_SAMPLES,
-            smaps=smaps, seed=2
-        )
-        basis = torch.randn(self._K, self._T, dtype=torch.complex64)
-        op = with_subspace(base, basis)
-        assert isinstance(op, SubspaceSparseFFT)
-        ksp = torch.randn(self._T, self._N_COILS, self._N_SAMPLES,
-                          dtype=torch.complex64, device=device)
-        assert op.forward(ksp).shape == (self._K, *self._IMG)
+def test_subspace_sparse_fft_adjointness(device):
+    """<forward(x), y> == <x, adjoint(y)>."""
+    op = _make_subspace_op(
+        _SUB_IMG, _SUB_N_SAMPLES, _SUB_N_COILS, _SUB_K, _SUB_T, seed=1
+    )
+    x = torch.randn(
+        _SUB_T, _SUB_N_COILS, _SUB_N_SAMPLES, dtype=torch.complex64, device=device
+    )
+    y = torch.randn(_SUB_K, *_SUB_IMG, dtype=torch.complex64, device=device)
+    torch.testing.assert_close(
+        _cdot(op.forward(x), y), _cdot(x, op.adjoint(y)), rtol=1e-4, atol=1e-4
+    )
+
+
+def test_subspace_sparse_fft_with_subspace_wrapper(device):
+    """with_subspace() returns a SubspaceSparseFFT with correct types."""
+    torch.manual_seed(2)
+    smaps = torch.randn(_SUB_N_COILS, *_SUB_IMG, dtype=torch.complex64)
+    base = _make_sparse_fft(
+        tuple(s + 4 for s in _SUB_IMG), _SUB_IMG, _SUB_N_SAMPLES, smaps=smaps, seed=2
+    )
+    basis = torch.randn(_SUB_K, _SUB_T, dtype=torch.complex64)
+    op = with_subspace(base, basis)
+    assert isinstance(op, SubspaceSparseFFT)
+    ksp = torch.randn(
+        _SUB_T, _SUB_N_COILS, _SUB_N_SAMPLES, dtype=torch.complex64, device=device
+    )
+    assert op.forward(ksp).shape == (_SUB_K, *_SUB_IMG)
 
 
 # ===========================================================================
 # OffResonanceSparseFFT
 # ===========================================================================
 
-class TestOffResonanceSparseFFT:
-    """Tests for the SparseFFT decorator (manufactured B / C factors)."""
 
-    _IMG = (16, 16)
-    _N_SAMPLES = 64
-    _N_COILS = 3
-    _L = 4
+def test_off_resonance_sparse_fft_forward_shape_with_smaps(device):
+    op = _make_orc_op(_ORS_IMG, _ORS_N_SAMPLES, _ORS_N_COILS, _ORS_L, seed=10)
+    ksp = torch.randn(
+        _ORS_N_COILS, _ORS_N_SAMPLES, dtype=torch.complex64, device=device
+    )
+    out = op.forward(ksp)
+    assert out.shape == _ORS_IMG
+    assert out.device.type == device.type
 
-    def test_forward_shape_with_smaps(self, device):
-        op = _make_orc_op(self._IMG, self._N_SAMPLES, self._N_COILS, self._L, seed=10)
-        ksp = torch.randn(self._N_COILS, self._N_SAMPLES,
-                          dtype=torch.complex64, device=device)
-        out = op.forward(ksp)
-        assert out.shape == self._IMG
-        assert out.device.type == device.type
 
-    def test_adjoint_shape_with_smaps(self, device):
-        op = _make_orc_op(self._IMG, self._N_SAMPLES, self._N_COILS, self._L, seed=11)
-        img = torch.randn(*self._IMG, dtype=torch.complex64, device=device)
-        out = op.adjoint(img)
-        assert out.shape == (self._N_COILS, self._N_SAMPLES)
-        assert out.device.type == device.type
+def test_off_resonance_sparse_fft_adjoint_shape_with_smaps(device):
+    op = _make_orc_op(_ORS_IMG, _ORS_N_SAMPLES, _ORS_N_COILS, _ORS_L, seed=11)
+    img = torch.randn(*_ORS_IMG, dtype=torch.complex64, device=device)
+    out = op.adjoint(img)
+    assert out.shape == (_ORS_N_COILS, _ORS_N_SAMPLES)
+    assert out.device.type == device.type
 
-    def test_adjointness_with_smaps(self, device):
-        """<forward(x), y> == <x, adjoint(y)> (SENSE + B0 correction path)."""
-        op = _make_orc_op(self._IMG, self._N_SAMPLES, self._N_COILS, self._L, seed=12)
-        x = torch.randn(self._N_COILS, self._N_SAMPLES,
-                        dtype=torch.complex64, device=device)
-        y = torch.randn(*self._IMG, dtype=torch.complex64, device=device)
-        torch.testing.assert_close(
-            _cdot(op.forward(x), y), _cdot(x, op.adjoint(y)), rtol=1e-4, atol=1e-4
-        )
 
-    def test_adjointness_no_smaps(self, device):
-        """Adjointness also holds when the base operator has no smaps (loop path)."""
-        op = _make_orc_op(self._IMG, self._N_SAMPLES, self._N_COILS, self._L,
-                          seed=13, smaps=False)
-        # Without smaps: forward → (n_coils, *image_shape), adjoint ← same
-        x = torch.randn(self._N_COILS, self._N_SAMPLES,
-                        dtype=torch.complex64, device=device)
-        y = torch.randn(self._N_COILS, *self._IMG, dtype=torch.complex64, device=device)
-        torch.testing.assert_close(
-            _cdot(op.forward(x), y), _cdot(x, op.adjoint(y)), rtol=1e-4, atol=1e-4
-        )
+def test_off_resonance_sparse_fft_adjointness_with_smaps(device):
+    """<forward(x), y> == <x, adjoint(y)> (SENSE + B0 correction path)."""
+    op = _make_orc_op(_ORS_IMG, _ORS_N_SAMPLES, _ORS_N_COILS, _ORS_L, seed=12)
+    x = torch.randn(_ORS_N_COILS, _ORS_N_SAMPLES, dtype=torch.complex64, device=device)
+    y = torch.randn(*_ORS_IMG, dtype=torch.complex64, device=device)
+    torch.testing.assert_close(
+        _cdot(op.forward(x), y), _cdot(x, op.adjoint(y)), rtol=1e-4, atol=1e-4
+    )
 
-    def test_normal_is_self_adjoint(self, device):
-        """normal(x) = forward(adjoint(x)) is self-adjoint."""
-        op = _make_orc_op(self._IMG, self._N_SAMPLES, self._N_COILS, self._L, seed=14)
-        x = torch.randn(*self._IMG, dtype=torch.complex64, device=device)
-        y = torch.randn(*self._IMG, dtype=torch.complex64, device=device)
-        torch.testing.assert_close(
-            _cdot(op.normal(x), y), _cdot(x, op.normal(y)), rtol=1e-3, atol=1e-3
-        )
+
+def test_off_resonance_sparse_fft_adjointness_no_smaps(device):
+    """Adjointness also holds when the base operator has no smaps (loop path)."""
+    op = _make_orc_op(
+        _ORS_IMG, _ORS_N_SAMPLES, _ORS_N_COILS, _ORS_L, seed=13, smaps=False
+    )
+    # Without smaps: forward → (n_coils, *image_shape), adjoint ← same
+    x = torch.randn(_ORS_N_COILS, _ORS_N_SAMPLES, dtype=torch.complex64, device=device)
+    y = torch.randn(_ORS_N_COILS, *_ORS_IMG, dtype=torch.complex64, device=device)
+    torch.testing.assert_close(
+        _cdot(op.forward(x), y), _cdot(x, op.adjoint(y)), rtol=1e-4, atol=1e-4
+    )
+
+
+def test_off_resonance_sparse_fft_normal_is_self_adjoint(device):
+    """normal(x) = forward(adjoint(x)) is self-adjoint."""
+    op = _make_orc_op(_ORS_IMG, _ORS_N_SAMPLES, _ORS_N_COILS, _ORS_L, seed=14)
+    x = torch.randn(*_ORS_IMG, dtype=torch.complex64, device=device)
+    y = torch.randn(*_ORS_IMG, dtype=torch.complex64, device=device)
+    torch.testing.assert_close(
+        _cdot(op.normal(x), y), _cdot(x, op.normal(y)), rtol=1e-3, atol=1e-3
+    )
 
 
 # ===========================================================================
 # OffResonanceCorrection (standalone gadget)
 # ===========================================================================
 
-class TestOffResonanceCorrection:
-    """Uses a trivial (all-zero) B0 map so factorisation is fast."""
 
-    _IMG = (12, 12)
-    _N_SAMPLES = 48
-    _N_COILS = 3
-    _L = 3
+def test_off_resonance_correction_n_components():
+    orc = _build_orc()
+    assert orc.n_components >= 1
 
-    def _build(self, seed=0):
-        base = _make_sparse_fft((16, 16), self._IMG, self._N_SAMPLES, seed=seed)
-        field_map = np.random.default_rng(seed).standard_normal(self._IMG).astype(np.float32) * 5
-        readout_time = np.linspace(0, 1e-3, self._N_SAMPLES, dtype=np.float32)
-        return OffResonanceCorrection(
-            base, field_map, readout_time, n_components=-1
-        )
 
-    def test_n_components(self):
-        orc = self._build()
-        assert orc.n_components >= 1
+def test_off_resonance_correction_forward_shape(device):
+    orc = _build_orc(seed=20)
+    img = torch.randn(_ORC_N_COILS, *_ORC_IMG, dtype=torch.complex64, device=device)
+    ksp = orc.forward(img)
+    assert ksp.shape == (_ORC_N_COILS, _ORC_N_SAMPLES)
 
-    def test_forward_shape(self, device):
-        orc = self._build(seed=20)
-        img = torch.randn(self._N_COILS, *self._IMG,
-                          dtype=torch.complex64, device=device)
-        ksp = orc.forward(img)
-        assert ksp.shape == (self._N_COILS, self._N_SAMPLES)
 
-    def test_adjoint_shape(self, device):
-        orc = self._build(seed=21)
-        ksp = torch.randn(self._N_COILS, self._N_SAMPLES,
-                          dtype=torch.complex64, device=device)
-        img = orc.adjoint(ksp)
-        assert img.shape == (self._N_COILS, *self._IMG)
+def test_off_resonance_correction_adjoint_shape(device):
+    orc = _build_orc(seed=21)
+    ksp = torch.randn(
+        _ORC_N_COILS, _ORC_N_SAMPLES, dtype=torch.complex64, device=device
+    )
+    img = orc.adjoint(ksp)
+    assert img.shape == (_ORC_N_COILS, *_ORC_IMG)
 
-    def test_adjointness(self, device):
-        """<forward(x), y> == <x, adjoint(y)>."""
-        orc = self._build(seed=22)
-        x = torch.randn(self._N_COILS, *self._IMG,
-                        dtype=torch.complex64, device=device)
-        y = torch.randn(self._N_COILS, self._N_SAMPLES,
-                        dtype=torch.complex64, device=device)
-        torch.testing.assert_close(
-            _cdot(orc.forward(x), y), _cdot(x, orc.adjoint(y)), rtol=1e-4, atol=1e-4
-        )
 
+def test_off_resonance_correction_adjointness(device):
+    """<forward(x), y> == <x, adjoint(y)>."""
+    orc = _build_orc(seed=22)
+    x = torch.randn(_ORC_N_COILS, *_ORC_IMG, dtype=torch.complex64, device=device)
+    y = torch.randn(_ORC_N_COILS, _ORC_N_SAMPLES, dtype=torch.complex64, device=device)
+    torch.testing.assert_close(
+        _cdot(orc.forward(x), y), _cdot(x, orc.adjoint(y)), rtol=1e-4, atol=1e-4
+    )

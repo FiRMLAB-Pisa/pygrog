@@ -9,7 +9,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "pygrog"
 description = "An interoperable GROG package to accelerate Non-Cartesian MR reconstructions."
-readme = "README.rst"
+readme = "README.md"
 
 requires-python = ">=3.10"
 dynamic = ["version"]
@@ -40,7 +40,7 @@ dependencies = [
     "torch>=2.0",
 ]
 
-[project.optional-dependencies] # Optional
+[project.optional-dependencies]
 gpu = [
     "cupy-cuda12x",
 ]
@@ -48,25 +48,25 @@ io = [
     "h5py",
 ]
 dev = [
-    "black", 
-    "isort", 
-    "ruff", 
-    "pre-commit"
-]
-doc = [
-    "sphinx-book-theme",
-    "sphinx-copybutton", 
-    "sphinx-gallery",
-    "matplotlib",
+    # style / linting
+    "black",
+    "isort",
+    "ruff",
+    "pre-commit",
+    # testing
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist",
+    "pytest-sugar",
+    "pytest-cases",
     "coverage",
-    "codecov"
-]
-test = [
-    "pytest<8.0.0", 
-    "pytest-cov", 
-    "pytest-xdist", 
-    "pytest-sugar", 
-    "pytest-cases"
+    "codecov",
+    # documentation
+    "sphinx-book-theme",
+    "sphinx-copybutton",
+    "sphinx-gallery",
+    "myst-parser",
+    "matplotlib",
 ]
 
 # List URLs that are relevant to your project

@@ -16,8 +16,6 @@ __all__ = ["GrogLinearOp"]
 
 import torch
 
-from ..operator._sparse_fft import SparseFFT
-
 
 class GrogLinearOp:
     """Wrap a pygrog operator as an ``mrpro.operators.LinearOperator``.

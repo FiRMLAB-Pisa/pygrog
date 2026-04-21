@@ -1,0 +1,7 @@
+sphinx-book-theme
+sphinx-copybutton
+sphinx-gallery
+myst-parser
+matplotlib
+numpy
+torch

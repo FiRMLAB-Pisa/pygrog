@@ -31,16 +31,17 @@ def basic_usage_example():
     # Create sample data
     n_points = 50000
     n_bins = 5000
+    rng = np.random.default_rng(0)
 
     # Complex points to be binned
-    points = np.random.randn(n_points).astype(np.complex64)
-    points += 1j * np.random.randn(n_points).astype(np.float32)
+    points = rng.standard_normal(n_points).astype(np.complex64)
+    points += 1j * rng.standard_normal(n_points).astype(np.float32)
 
     # Real weights
-    weights = np.random.rand(n_points).astype(np.float32)
+    weights = rng.random(n_points).astype(np.float32)
 
     # Bin indices (must be within [0, n_bins))
-    indices = np.random.randint(0, n_bins, n_points, dtype=np.uint64)
+    indices = rng.integers(0, n_bins, n_points, dtype=np.uint64)
 
     # Output bins (modified in-place)
     bins = np.zeros(n_bins, dtype=np.complex64)
@@ -63,12 +64,13 @@ def comparison_with_numpy():
 
     n_points = 100000
     n_bins = 10000
+    rng = np.random.default_rng(0)
 
     # Generate test data
-    points = np.random.randn(n_points).astype(np.complex64)
-    points += 1j * np.random.randn(n_points).astype(np.float32)
-    weights = np.random.rand(n_points).astype(np.float32)
-    indices = np.random.randint(0, n_bins, n_points, dtype=np.uint64)
+    points = rng.standard_normal(n_points).astype(np.complex64)
+    points += 1j * rng.standard_normal(n_points).astype(np.float32)
+    weights = rng.random(n_points).astype(np.float32)
+    indices = rng.integers(0, n_bins, n_points, dtype=np.uint64)
 
     # Test numpy implementation
     bins_numpy = np.zeros(n_bins, dtype=np.complex64)
@@ -154,11 +156,12 @@ def memory_layout_tips():
     print("\n=== Memory Layout Tips ===")
 
     n_points = 10000
+    rng = np.random.default_rng(0)
 
     # Non-contiguous arrays (slower)
-    points_nc = np.random.randn(n_points, 2).astype(np.float32)
+    points_nc = rng.standard_normal((n_points, 2)).astype(np.float32)
     points_nc = points_nc[:, 0] + 1j * points_nc[:, 1]  # Non-contiguous
-    weights_nc = np.random.rand(n_points * 2)[::2].astype(np.float32)  # Non-contiguous
+    weights_nc = rng.random(n_points * 2)[::2].astype(np.float32)  # Non-contiguous
 
     print(f"Points contiguous: {points_nc.flags.c_contiguous}")
     print(f"Weights contiguous: {weights_nc.flags.c_contiguous}")
@@ -167,9 +170,9 @@ def memory_layout_tips():
     # but it's more efficient to start with contiguous arrays
 
     # Optimal layout
-    points_opt = np.random.randn(n_points).astype(np.complex64)
-    points_opt += 1j * np.random.randn(n_points).astype(np.float32)
-    weights_opt = np.random.rand(n_points).astype(np.float32)
+    points_opt = rng.standard_normal(n_points).astype(np.complex64)
+    points_opt += 1j * rng.standard_normal(n_points).astype(np.float32)
+    weights_opt = rng.random(n_points).astype(np.float32)
 
     print(f"Optimized points contiguous: {points_opt.flags.c_contiguous}")
     print(f"Optimized weights contiguous: {weights_opt.flags.c_contiguous}")
@@ -188,9 +191,9 @@ def main():
         threading_behavior()
         memory_layout_tips()
 
-        print(f"\n=== Summary ===")
+        print("\n=== Summary ===")
         print(f"SIMD level: {detect_simd_level()}")
-        print(f"Fast binning is working correctly!")
+        print("Fast binning is working correctly!")
 
     except ImportError as e:
         print(f"Fast binning C++ extension not available: {e}")

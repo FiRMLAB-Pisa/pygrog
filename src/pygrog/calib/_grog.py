@@ -10,7 +10,6 @@ This is a *pure-torch* implementation (scipy is not needed at runtime).
 __all__ = ["GrogInterpolator"]
 
 import gc
-import os
 import pathlib
 
 from types import SimpleNamespace
@@ -222,7 +221,7 @@ class GrogInterpolator:
     def to_file(self, filepath: str | pathlib.Path) -> None:
         """Save the GROG plan to disk."""
         filepath = pathlib.Path(filepath)
-        os.makedirs(filepath.parent, exist_ok=True)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
         if filepath.suffix == ".npy":
             np.save(filepath, self.plan)
         elif filepath.suffix in (".mrd", ".h5"):
@@ -517,7 +516,7 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map):
     and compute:
 
     - ``target_idx``: flat index into the oversampled grid  (…, npts, kw_eff)
-    - ``distances``:  (target − source) in grid units        (…, npts, kw_eff, ndim)
+    - ``distances``:  (target - source) in grid units        (…, npts, kw_eff, ndim)
     - ``weights``:    density-compensation (1/count)          (…, npts, kw_eff)
     - ``time_map``:   replicated time stamp                   (…, npts, kw_eff) or None
 
@@ -528,14 +527,15 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map):
 
     shape = _default_shape(ndim, shape)
     oversamp = _default_oversamp(ndim, oversamp)
-    grid_shape = tuple(int(np.ceil(s * o)) for s, o in zip(shape, oversamp))
+    grid_shape = tuple(
+        int(np.ceil(s * o)) for s, o in zip(shape, oversamp, strict=False)
+    )
 
     # Rescale coords so that FOV spans [-shape/2, shape/2-1]
     coords_scaled = _rescale_coords(coords, shape[-ndim:])
 
     # --- enumerate kernel offsets ------------------------------------------
     offsets = _kernel_offsets(ndim, kernel_width, kernel_shape)  # (kw_eff, ndim)
-    kw_eff = offsets.shape[0]
     radius = 0.5 * kernel_width  # used for KernelTable later
 
     # --- for each source, compute target grid indices ----------------------
@@ -544,7 +544,10 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map):
     # Convert coords_scaled to grid indices
     origins = np.array([-(s // 2) for s in shape], dtype=np.float32)  # (ndim,)
     grid_steps = np.array(
-        [(s - 1) / (gs - 1) if gs > 1 else 1.0 for s, gs in zip(shape, grid_shape)],
+        [
+            (s - 1) / (gs - 1) if gs > 1 else 1.0
+            for s, gs in zip(shape, grid_shape, strict=False)
+        ],
         dtype=np.float32,
     )  # spacing between grid points in coord units
 
@@ -736,7 +739,7 @@ def _store_plan_inside_mrd(dset, plan):
 def _load_plan_from_mrd(dset):
     grp = dset["dataset/grog_plan"]
     loaded = {}
-    for key in grp.keys():
+    for key in grp:
         data = grp[key][()]
         if isinstance(data, np.ndarray) and data.dtype.kind == "O":
             loaded[key] = [np.array(x) for x in data]

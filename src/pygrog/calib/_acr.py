@@ -103,18 +103,12 @@ def extract_acr(
         # select data
         _data = data[..., cal_idx]
         _coords = coords[..., cal_idx, :]
-        if weights is not None:
-            _weights = weights[..., cal_idx]
-        else:
-            _weights = None
+        _weights = weights[..., cal_idx] if weights is not None else None
 
         if stack:
             _data = _data[..., cal_idx_z, :]
             _coords = _coords[..., cal_idx_z, :, :]
-            if weights is not None:
-                _weights = _weights[..., cal_idx_z, :]
-            else:
-                _weights = None
+            _weights = _weights[..., cal_idx_z, :] if weights is not None else None
 
         return _data, _coords, _weights
 
@@ -126,7 +120,7 @@ def _center_crop(arr, oshape):
     if len(oshape) < arr.ndim:
         oshape = list(arr.shape[: arr.ndim - len(oshape)]) + oshape
     slices = []
-    for i_len, o_len in zip(arr.shape, oshape):
+    for i_len, o_len in zip(arr.shape, oshape, strict=False):
         if o_len <= i_len:
             start = (i_len - o_len) // 2
             slices.append(slice(start, start + o_len))

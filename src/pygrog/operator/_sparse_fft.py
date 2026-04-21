@@ -21,14 +21,13 @@ data device, each coil is transferred asynchronously on alternating CUDA streams
 while the previous coil's FFT executes concurrently.
 """
 
-__all__ = ["SparseFFT", "scatter_add", "gather"]
+__all__ = ["SparseFFT", "gather", "scatter_add"]
 
 import pathlib
 
 import numpy as np
 import torch
 
-from .._utils import resize
 from .._base._fftc import fft, ifft
 
 # ---------------------------------------------------------------------------
@@ -271,7 +270,7 @@ class SparseFFT:
         # Pre-compute center-slice for adjoint zero-pad
         self._pad_slices = tuple(
             slice((gs - is_) // 2, (gs - is_) // 2 + is_)
-            for gs, is_ in zip(self.grid_shape, self.image_shape)
+            for gs, is_ in zip(self.grid_shape, self.image_shape, strict=False)
         )
 
         self.device = torch.device(device) if device is not None else None
@@ -436,7 +435,7 @@ class SparseFFT:
     def _scatter_ifft_crop_batch(self, batch_kspace: torch.Tensor) -> torch.Tensor:
         """Scatter (per-component loop) → **one batched IFFT** → crop.
 
-        Reduces ``B × n_coils`` IFFT calls to a single
+        Reduces ``B x n_coils`` IFFT calls to a single
         ``torch.fft.ifftn((B, *grid_shape))`` call.  The scatter loop is
         unchanged (needs a batched C++ kernel for full fusion).
 
@@ -445,7 +444,7 @@ class SparseFFT:
         batch_kspace : torch.Tensor
             ``(B, n_samples)`` complex, **unsorted**.  Each row is an
             independently-weighted k-space vector (e.g. one ORC component
-            × one coil, or one subspace frame × one coil).
+            x one coil, or one subspace frame x one coil).
 
         Returns
         -------
@@ -473,13 +472,13 @@ class SparseFFT:
         # ONE batched IFFT + center-crop over last ``ndim`` dims
         # axes=(-k,...,-1) work correctly on any batch prefix
         grids_nd = grids.reshape(B, *self.grid_shape)
-        imgs = ifft(grids_nd, oshape=(B,) + self.image_shape, axes=self.fft_axes)
+        imgs = ifft(grids_nd, oshape=(B, *self.image_shape), axes=self.fft_axes)
         return imgs.to(src_device)
 
     def _fft_pad_gather_batch(self, batch_imgs: torch.Tensor) -> torch.Tensor:
-        """ONE batched FFT → zero-pad → gather (per-component loop).
+        """ONE batched FFT -> zero-pad -> gather (per-component loop).
 
-        Reduces ``B × n_coils`` FFT calls to a single
+        Reduces ``B x n_coils`` FFT calls to a single
         ``torch.fft.fftn((B, *image_shape))`` call.  The gather loop is
         unchanged (needs a batched C++ kernel for full fusion).
 
@@ -487,7 +486,7 @@ class SparseFFT:
         ----------
         batch_imgs : torch.Tensor
             ``(B, *image_shape)`` complex.  Each slice ``[b]`` is an
-            independently-weighted image (e.g. one ORC component × one coil).
+            independently-weighted image (e.g. one ORC component x one coil).
 
         Returns
         -------
@@ -509,20 +508,19 @@ class SparseFFT:
 
         # Zero-pad to grid in one tensor op: (B, *grid_shape)
         padded = torch.zeros(B, *self.grid_shape, dtype=dtype, device=comp_device)
-        padded[(slice(None),) + self._pad_slices] = fft_results
+        padded[(slice(None), *self._pad_slices)] = fft_results
         padded_flat = padded.reshape(B, -1)
 
         # Gather B times — C++ kernel, bottleneck until batched kernel exists
-        output = torch.stack([
-            _gather(padded_flat[b], indices, sqrt_w)[inv_perm]
-            for b in range(B)
-        ])
+        output = torch.stack(
+            [_gather(padded_flat[b], indices, sqrt_w)[inv_perm] for b in range(B)]
+        )
         return output.to(src_device)  # (B, n_samples)
 
     # ------------------------------------------------------------------
     # Core single-coil ops (fused)
     # ------------------------------------------------------------------
-    def _scatter_ifft_crop(self, coil_data, indices, sqrt_w, grid, dtype):
+    def _scatter_ifft_crop(self, coil_data, indices, sqrt_w, grid, _dtype):
         """Scatter -> IFFT -> crop for one coil.  Reuses *grid* buffer."""
         grid.zero_()
         self._scatter(grid, coil_data, indices, sqrt_w)
@@ -530,7 +528,7 @@ class SparseFFT:
             grid.reshape(self.grid_shape), oshape=self.image_shape, axes=self.fft_axes
         )
 
-    def _fft_pad_gather(self, coil_img, indices, sqrt_w, inv_perm, padded, dtype):
+    def _fft_pad_gather(self, coil_img, indices, sqrt_w, inv_perm, padded, _dtype):
         """FFT -> zero-pad -> gather -> unpermute for one coil.
 
         Reuses the *padded* buffer to avoid a fresh allocation per coil.

@@ -15,7 +15,7 @@ Exit codes:
 
 import sys
 
-_PASS = "\033[1;32m[PASS]\033[0m"
+_PASS = "\033[1;32m[PASS]\033[0m"  # noqa: S105
 _FAIL = "\033[1;31m[FAIL]\033[0m"
 _INFO = "\033[1;34m[INFO]\033[0m"
 _WARN = "\033[1;33m[WARN]\033[0m"

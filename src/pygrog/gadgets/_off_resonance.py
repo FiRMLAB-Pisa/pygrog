@@ -10,7 +10,7 @@ Provides two complementary approaches to B0/R2* field-map correction:
   :func:`~pygrog.operator.toeplitz_normal`.
 
 Both paths use the same mri-nufft field-map factorisation
-(``E ≈ B @ C``, time × space) and support the same three methods:
+(``E ≈ B @ C``, time x space) and support the same three methods:
 ``'svd'`` (default), ``'mti'``, and ``'mfi'``.
 """
 
@@ -134,13 +134,15 @@ class OffResonanceCorrection:
             Shape ``(n_coils, n_samples)``.
         """
         device = image.device
-        B = self._B.to(device, dtype=image.dtype)   # (n_samples, L)
-        C = self._C.to(device, dtype=image.dtype)   # (L, *spatial)
+        B = self._B.to(device, dtype=image.dtype)  # (n_samples, L)
+        C = self._C.to(device, dtype=image.dtype)  # (L, *spatial)
 
         # Pre-weight image per component: (L, n_coils, *spatial)
         weighted = C.unsqueeze(1) * image.unsqueeze(0)
         # NUFFT per component → (L, n_coils, n_samples)
-        ksps = torch.stack([self.sparse_fft.adjoint(weighted[l]) for l in range(self.n_components)])
+        ksps = torch.stack(
+            [self.sparse_fft.adjoint(weighted[l]) for l in range(self.n_components)]
+        )
         # Weighted sum: B.T is (L, n_samples), broadcast over coils
         return (B.T.unsqueeze(1) * ksps).sum(0)
 
@@ -160,13 +162,15 @@ class OffResonanceCorrection:
             Shape ``(n_coils, *spatial)``.
         """
         device = kspace.device
-        B = self._B.to(device, dtype=kspace.dtype)   # (n_samples, L)
-        C = self._C.to(device, dtype=kspace.dtype)   # (L, *spatial)
+        B = self._B.to(device, dtype=kspace.dtype)  # (n_samples, L)
+        C = self._C.to(device, dtype=kspace.dtype)  # (L, *spatial)
 
         # Pre-weight k-space per component: (L, n_coils, n_samples)
         weighted = kspace.unsqueeze(0) * B.conj().T.unsqueeze(1)
         # NUFFT per component → (L, n_coils, *spatial)
-        imgs = torch.stack([self.sparse_fft.forward(weighted[l]) for l in range(self.n_components)])
+        imgs = torch.stack(
+            [self.sparse_fft.forward(weighted[l]) for l in range(self.n_components)]
+        )
         # Weighted sum: C.conj() is (L, *spatial), broadcast over coils
         return (C.conj().unsqueeze(1) * imgs).sum(0)
 
@@ -218,7 +222,9 @@ def with_off_resonance(
 
     b0_map = np.asarray(b0_map, dtype=np.float32)
     readout_time = np.asarray(readout_time, dtype=np.float32).ravel()
-    r2star_np = np.asarray(r2star_map, dtype=np.float32) if r2star_map is not None else None
+    r2star_np = (
+        np.asarray(r2star_map, dtype=np.float32) if r2star_map is not None else None
+    )
 
     field_map = get_complex_fieldmap_rad(b0_map, r2star_np)
 
@@ -296,16 +302,15 @@ class OffResonanceSparseFFT:
         C = self.C.to(device, dtype=sparse_kspace.dtype)
         n_coils = sparse_kspace.shape[0]
 
-        use_batch = (
-            self._base.smaps is not None
-            and hasattr(self._base, "_scatter_ifft_crop_batch")
+        use_batch = self._base.smaps is not None and hasattr(
+            self._base, "_scatter_ifft_crop_batch"
         )
 
         if use_batch:
             conj_smaps = self._base._conj_smaps.to(device, dtype=sparse_kspace.dtype)
-            weighted = (
-                sparse_kspace.unsqueeze(0) * B.conj().T.unsqueeze(1)
-            ).reshape(-1, self.n_samples)
+            weighted = (sparse_kspace.unsqueeze(0) * B.conj().T.unsqueeze(1)).reshape(
+                -1, self.n_samples
+            )
             imgs_flat = self._base._scatter_ifft_crop_batch(weighted)
             imgs = (
                 imgs_flat.reshape(self.L, n_coils, *self.image_shape)
@@ -313,7 +318,9 @@ class OffResonanceSparseFFT:
             ).sum(1)
         else:
             weighted = sparse_kspace.unsqueeze(0) * B.conj().T.unsqueeze(1)
-            imgs = torch.stack([self._base.forward(weighted[ll]) for ll in range(self.L)])
+            imgs = torch.stack(
+                [self._base.forward(weighted[ll]) for ll in range(self.L)]
+            )
 
         # C: (L, *image_shape).  imgs may be (L, *image_shape) [smaps path]
         # or (L, n_coils, *image_shape) [no-smaps loop path].  Insert
@@ -346,21 +353,22 @@ class OffResonanceSparseFFT:
         c = C.view(self.L, *([1] * n_extra), *self.image_shape)
         weighted = c * image.unsqueeze(0)
 
-        use_batch = (
-            self._base.smaps is not None
-            and hasattr(self._base, "_fft_pad_gather_batch")
+        use_batch = self._base.smaps is not None and hasattr(
+            self._base, "_fft_pad_gather_batch"
         )
 
         if use_batch:
             smaps = self._base.smaps.to(device, dtype=image.dtype)
             n_coils = smaps.shape[0]
-            all_imgs = (
-                weighted.unsqueeze(1) * smaps.unsqueeze(0)
-            ).reshape(-1, *self.image_shape)
+            all_imgs = (weighted.unsqueeze(1) * smaps.unsqueeze(0)).reshape(
+                -1, *self.image_shape
+            )
             all_ksps = self._base._fft_pad_gather_batch(all_imgs)
             ksps = all_ksps.reshape(self.L, n_coils, self.n_samples)
         else:
-            ksps = torch.stack([self._base.adjoint(weighted[ll]) for ll in range(self.L)])
+            ksps = torch.stack(
+                [self._base.adjoint(weighted[ll]) for ll in range(self.L)]
+            )
 
         return (B.T.unsqueeze(1) * ksps).sum(0)
 

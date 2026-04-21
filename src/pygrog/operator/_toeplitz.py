@@ -138,7 +138,7 @@ class _ToeplitzORC:
           \mathrm{IFFT}\!\bigl(D_{l,l'}\, \mathrm{FFT}(S_c\, C_{l'}\, x)\bigr)
 
     where :math:`D_{l,l'}[k] = \sum_{i:\mathrm{idx}_i=k} w_i\,
-    \bar B_{i,l}\, B_{i,l'}` are *L × L* complex density matrices
+    \bar B_{i,l}\, B_{i,l'}` are *L x L* complex density matrices
     on the (cropped) grid.
     """
 

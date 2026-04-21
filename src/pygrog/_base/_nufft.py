@@ -2,6 +2,7 @@
 
 __all__ = ["nufft", "nufft_adjoint"]
 
+import contextlib
 import math
 
 import numpy as np
@@ -70,7 +71,7 @@ class _MRIPytorchFinufft(FourierOperatorBase):
         squeeze_dims=True,
         upsampfac=2.0,
         eps=1e-6,
-        **kwargs,
+        **_kwargs,
     ):
         super().__init__()
         self.shape = shape
@@ -99,18 +100,14 @@ class _MRIPytorchFinufft(FourierOperatorBase):
 
     def _safe_squeeze(self, arr):
         if self.squeeze_dims:
-            try:
+            with contextlib.suppress(ValueError, IndexError):
                 arr = arr.squeeze(axis=1)
-            except (ValueError, IndexError):
-                pass
-            try:
+            with contextlib.suppress(ValueError, IndexError):
                 arr = arr.squeeze(axis=0)
-            except (ValueError, IndexError):
-                pass
         return arr
 
     @with_torch
-    def op(self, data, out=None):
+    def op(self, data, _out=None):
         """Forward NUFFT: image → non-uniform k-space (type 2)."""
         points = self._get_points(data.device)
         B, C = self.n_batchs, self.n_coils
@@ -134,7 +131,7 @@ class _MRIPytorchFinufft(FourierOperatorBase):
         return self._safe_squeeze(ksp)
 
     @with_torch
-    def adj_op(self, coeffs, out=None):
+    def adj_op(self, coeffs, _out=None):
         """Adjoint NUFFT: non-uniform k-space → image (type 1)."""
         points = self._get_points(coeffs.device)
         B, C, K = self.n_batchs, self.n_coils, self.n_samples
@@ -159,7 +156,7 @@ class _MRIPytorchFinufft(FourierOperatorBase):
 
 
 def nufft(
-    input: NDArray[complex],
+    input: NDArray[complex],  # noqa: A002
     coords: NDArray[float],
     oversamp: float = 1.25,
     eps: float = 1e-3,
@@ -203,7 +200,7 @@ def nufft(
 
 
 def nufft_adjoint(
-    input: NDArray[complex],
+    input: NDArray[complex],  # noqa: A002
     coords: NDArray[float],
     oshape: list[int] | tuple[int] | None = None,
     oversamp: float = 1.25,
@@ -244,7 +241,7 @@ def nufft_adjoint(
 
     """
     fourier_ndim = len(coords) - 1
-    input = input.reshape(*input.shape[:-fourier_ndim], -1)
+    input = input.reshape(*input.shape[:-fourier_ndim], -1)  # noqa: A001
     plan = __nufft_init__(coords, oshape, oversamp, eps, normalize_coords)
     return _apply_adj(plan, input)
 
@@ -258,14 +255,10 @@ def __nufft_init__(
     normalize_coords: bool = True,
 ):
     # Convert coords to numpy float32 for operator initialization
-    try:
+    with contextlib.suppress(AttributeError):
         coords = coords.numpy(force=True)  # torch tensor
-    except AttributeError:
-        pass
-    try:
+    with contextlib.suppress(AttributeError):
         coords = coords.get()  # cupy array
-    except AttributeError:
-        pass
     coords = np.asarray(coords, dtype=np.float32)
 
     if shape is None:
@@ -285,11 +278,11 @@ def __nufft_init__(
 
 
 @with_torch
-def _apply(plan, input):
+def _apply(plan, input):  # noqa: A002
     # reshape from (..., *grid_shape) to (B, *grid_shape)
     ndim = plan.ndim
     broadcast_shape = input.shape[:-ndim]
-    input = input.reshape(-1, *input.shape[-ndim:])
+    input = input.reshape(-1, *input.shape[-ndim:])  # noqa: A001
 
     # actual computation
     if input.ndim == ndim:
@@ -305,11 +298,11 @@ def _apply(plan, input):
 
 
 @with_torch
-def _apply_adj(plan, input):
+def _apply_adj(plan, input):  # noqa: A002
     # reshape from (..., samples) to (B, samples)
     nsamples = plan.n_samples
     broadcast_shape = input.shape[:-1]
-    input = input.reshape(-1, nsamples)
+    input = input.reshape(-1, nsamples)  # noqa: A001
 
     # actual computation
     if input.ndim == 1:
