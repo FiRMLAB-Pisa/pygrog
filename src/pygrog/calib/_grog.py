@@ -335,7 +335,18 @@ class GrogInterpolator:
         gridded = self._grid_full(data_t)
 
         if ret_image:
-            ...  # placeholder for IFFT reconstruction
+            from ..operator._sparse_fft import SparseFFT
+
+            op = SparseFFT(plan=self.plan)
+            # gridded: (n_coils, *grid_shape) — forward() expects (n_coils, n_samples)
+            # but SparseFFT.forward does scatter+IFFT+crop from a full grid;
+            # reshape to (n_coils, grid_size) and pass as already-gridded k-space.
+            ksp_flat = gridded.reshape(gridded.shape[0], -1)  # (n_coils, grid_size)
+            img_coils = op.forward(ksp_flat)  # (n_coils, *image_shape)
+            image = img_coils.abs().square().sum(0).sqrt()  # RSS: (*image_shape,)
+            gc.collect()
+            out = image.numpy() if is_numpy else image
+            return out
 
         gc.collect()
 

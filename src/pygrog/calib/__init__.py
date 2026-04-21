@@ -1,12 +1,11 @@
-"""Recon calibration routines."""
+"""Calibration routines: GRAPPA kernel estimation and GROG interpolation."""
 
 __all__ = []
 
-from ._acr import *  # noqa
-from ._nlinv import *  # noqa
+from ._grappa import *  # noqa
+from ._grog import *  # noqa
 
-from . import _acr  # noqa
-from . import _nlinv  # noqa
+from . import _grappa, _grog  # noqa
 
-__all__.extend(_acr.__all__)
-__all__.extend(_nlinv.__all__)
+__all__.extend(_grappa.__all__)
+__all__.extend(_grog.__all__)

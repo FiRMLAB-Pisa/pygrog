@@ -33,3 +33,11 @@ def n_coils():
 @pytest.fixture
 def n_samples():
     return 256
+
+
+@pytest.fixture(params=["cpu", "cuda"])
+def device(request):
+    """Parametrized device fixture — CUDA tests skip when GPU is not available."""
+    if request.param == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+    return torch.device(request.param)

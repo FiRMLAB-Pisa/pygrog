@@ -1,104 +1,235 @@
 """
-Test the fast binning implementation.
+Tests for scatter_add and gather — the C++/CUDA binning primitives.
+
+CPU path:  sorted-index clean-partition OMP scatter + auto-vectorised gather.
+           SIMD level (SSE2 / AVX2 / AVX-512) is selected transparently at
+           load time via target_clones (GCC/Clang) or CPUID dispatch (MSVC).
+
+CUDA path: simple global-atomic scatter_add *and* shared-memory binned
+           scatter_add_binned (called by SparseFFT._scatter when on GPU).
+
+All public functions live in ``pygrog.operator``.
 """
 
 import numpy as np
 import pytest
+import torch
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(params=["cpu", "cuda"])
+def device(request):
+    if request.param == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+    return torch.device(request.param)
 
 
-def test_fast_binning_import():
-    """Test that we can import the fast binning module."""
-    try:
-        from pygrog.operator import fast_binning_add_at, detect_simd_level
-
-        return True
-    except ImportError:
-        pytest.skip("Fast binning C++ extension not available")
-
-
-def test_fast_binning_functionality():
-    """Test the fast binning functionality."""
-    try:
-        from pygrog.operator import fast_binning_add_at, detect_simd_level
-    except ImportError:
-        pytest.skip("Fast binning C++ extension not available")
-
-    # Print SIMD level for debugging
-    simd_level = detect_simd_level()
-    print(f"SIMD level: {simd_level}")
-
-    # Create test data
-    n_points = 1000
-    n_bins = 100
-
-    points = np.random.randn(n_points).astype(np.complex64)
-    points += 1j * np.random.randn(n_points).astype(np.float32)
-    weights = np.random.rand(n_points).astype(np.float32)
-    indices = np.random.randint(0, n_bins, n_points, dtype=np.uint64)
-
-    # Test fast implementation
-    bins_fast = np.zeros(n_bins, dtype=np.complex64)
-    fast_binning_add_at(bins_fast, points, weights, indices)
-
-    # Test against numpy reference
-    bins_numpy = np.zeros(n_bins, dtype=np.complex64)
-    weighted_points = points * weights
-    np.add.at(bins_numpy, indices, weighted_points)
-
-    # Compare results
-    np.testing.assert_allclose(bins_fast, bins_numpy, rtol=1e-5, atol=1e-5)
+def _make_sorted(n_pts, grid_size, device):
+    """Return (indices, weights, data) with indices sorted ascending."""
+    idx = torch.randint(0, grid_size, (n_pts,), dtype=torch.int64, device=device)
+    idx, _ = idx.sort()
+    w = torch.rand(n_pts, dtype=torch.float32, device=device)
+    data = torch.randn(n_pts, dtype=torch.complex64, device=device)
+    return idx, w, data
 
 
-def test_fast_binning_benchmark():
-    """Test the benchmarking functionality."""
-    try:
-        from pygrog.operator import benchmark_binning
-    except ImportError:
-        pytest.skip("Fast binning C++ extension not available")
+# ---------------------------------------------------------------------------
+# Import / availability
+# ---------------------------------------------------------------------------
 
-    results = benchmark_binning(n_points=10000, n_bins=1000, num_runs=3)
-
-    assert "simd_level" in results
-    assert "n_points" in results
-    assert "n_bins" in results
-
-    if "speedup" in results:
-        print(f"Speedup: {results['speedup']:.2f}x")
-        assert results["speedup"] > 0  # Should be positive
+def test_scatter_add_importable():
+    """scatter_add and gather must be importable from pygrog.operator."""
+    from pygrog.operator import scatter_add, gather  # noqa: F401
 
 
-def test_edge_cases():
-    """Test edge cases."""
-    try:
-        from pygrog.operator import fast_binning_add_at
-    except ImportError:
-        pytest.skip("Fast binning C++ extension not available")
-
-    # Empty arrays
-    bins = np.zeros(10, dtype=np.complex64)
-    points = np.array([], dtype=np.complex64)
-    weights = np.array([], dtype=np.float32)
-    indices = np.array([], dtype=np.uint64)
-
-    fast_binning_add_at(bins, points, weights, indices)
-    assert np.allclose(bins, 0)
-
-    # Single element
-    bins = np.zeros(5, dtype=np.complex64)
-    points = np.array([1.0 + 2.0j], dtype=np.complex64)
-    weights = np.array([0.5], dtype=np.float32)
-    indices = np.array([2], dtype=np.uint64)
-
-    fast_binning_add_at(bins, points, weights, indices)
-    expected = np.zeros(5, dtype=np.complex64)
-    expected[2] = 0.5 + 1.0j
-
-    np.testing.assert_allclose(bins, expected)
+def test_extension_loads():
+    """The C++ extension (_pygrog_torch) must load without error."""
+    from pygrog.operator._sparse_fft import _get_torch_ext
+    ext = _get_torch_ext()
+    assert hasattr(ext, "scatter_add")
+    assert hasattr(ext, "gather")
+    assert hasattr(ext, "scatter_add_binned")
 
 
-if __name__ == "__main__":
-    test_fast_binning_import()
-    test_fast_binning_functionality()
-    test_fast_binning_benchmark()
-    test_edge_cases()
-    print("All tests passed!")
+# ---------------------------------------------------------------------------
+# scatter_add correctness (CPU and CUDA)
+# ---------------------------------------------------------------------------
+
+class TestScatterAdd:
+    def test_matches_torch_reference(self, device):
+        """scatter_add must equal torch.scatter_add reference."""
+        from pygrog.operator import scatter_add
+
+        grid_size, n_pts = 64, 512
+        idx, w, data = _make_sorted(n_pts, grid_size, device)
+
+        grid = torch.zeros(grid_size, dtype=torch.complex64, device=device)
+        scatter_add(grid, data, idx, w)
+
+        # Reference via torch.scatter_add on real/imag separately
+        weighted = data * w.to(torch.complex64)
+        ref = torch.zeros(grid_size, dtype=torch.complex64, device=device)
+        ref.scatter_add_(0, idx, weighted)
+
+        torch.testing.assert_close(grid, ref, rtol=1e-4, atol=1e-4)
+
+    def test_accumulates_into_existing(self, device):
+        """scatter_add must *add* to existing grid values (in-place +=)."""
+        from pygrog.operator import scatter_add
+
+        grid_size, n_pts = 32, 128
+        idx, w, data = _make_sorted(n_pts, grid_size, device)
+
+        grid = torch.ones(grid_size, dtype=torch.complex64, device=device)
+        grid_ref = grid.clone()
+
+        scatter_add(grid, data, idx, w)
+
+        weighted = data * w.to(torch.complex64)
+        grid_ref.scatter_add_(0, idx, weighted)
+
+        torch.testing.assert_close(grid, grid_ref, rtol=1e-4, atol=1e-4)
+
+    def test_empty_data(self, device):
+        """scatter_add with zero points must leave grid unchanged."""
+        from pygrog.operator import scatter_add
+
+        grid = torch.zeros(16, dtype=torch.complex64, device=device)
+        idx = torch.empty(0, dtype=torch.int64, device=device)
+        w = torch.empty(0, dtype=torch.float32, device=device)
+        data = torch.empty(0, dtype=torch.complex64, device=device)
+
+        scatter_add(grid, data, idx, w)
+        assert grid.abs().max() == 0.0
+
+    def test_single_point(self, device):
+        """Scatter a single weighted point to a known bin."""
+        from pygrog.operator import scatter_add
+
+        grid = torch.zeros(10, dtype=torch.complex64, device=device)
+        idx = torch.tensor([3], dtype=torch.int64, device=device)
+        w = torch.tensor([0.5], dtype=torch.float32, device=device)
+        data = torch.tensor([1.0 + 2.0j], dtype=torch.complex64, device=device)
+
+        scatter_add(grid, data, idx, w)
+
+        assert abs(grid[3].item() - (0.5 + 1.0j)) < 1e-5
+        assert grid[:3].abs().max() == 0.0
+        assert grid[4:].abs().max() == 0.0
+
+    def test_all_same_bin(self, device):
+        """All points into one bin — result equals sum of weighted values."""
+        from pygrog.operator import scatter_add
+
+        n_pts, grid_size = 256, 16
+        target = 7
+        idx = torch.full((n_pts,), target, dtype=torch.int64, device=device)
+        w = torch.ones(n_pts, dtype=torch.float32, device=device)
+        data = torch.ones(n_pts, dtype=torch.complex64, device=device)
+
+        grid = torch.zeros(grid_size, dtype=torch.complex64, device=device)
+        scatter_add(grid, data, idx, w)
+
+        assert abs(grid[target].real.item() - n_pts) < 1e-3
+        assert grid[target].imag.abs().item() < 1e-5
+
+
+# ---------------------------------------------------------------------------
+# gather correctness (CPU and CUDA)
+# ---------------------------------------------------------------------------
+
+class TestGather:
+    def test_matches_index_select(self, device):
+        """gather must equal weights * grid[indices]."""
+        from pygrog.operator import gather
+
+        grid_size, n_pts = 64, 256
+        idx, w, _ = _make_sorted(n_pts, grid_size, device)
+        grid = torch.randn(grid_size, dtype=torch.complex64, device=device)
+
+        out = gather(grid, idx, w)
+
+        ref = grid[idx] * w.to(torch.complex64)
+        torch.testing.assert_close(out, ref, rtol=1e-5, atol=1e-5)
+
+    def test_empty(self, device):
+        """gather with zero points must return empty tensor."""
+        from pygrog.operator import gather
+
+        grid = torch.randn(16, dtype=torch.complex64, device=device)
+        idx = torch.empty(0, dtype=torch.int64, device=device)
+        w = torch.empty(0, dtype=torch.float32, device=device)
+
+        out = gather(grid, idx, w)
+        assert out.numel() == 0
+
+    def test_zero_weight(self, device):
+        """Zero weights must produce zero output regardless of grid values."""
+        from pygrog.operator import gather
+
+        grid = torch.ones(8, dtype=torch.complex64, device=device) * 99.0
+        idx = torch.arange(8, dtype=torch.int64, device=device)
+        w = torch.zeros(8, dtype=torch.float32, device=device)
+
+        out = gather(grid, idx, w)
+        assert out.abs().max() < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# scatter → gather round-trip
+# ---------------------------------------------------------------------------
+
+class TestScatterGatherRoundtrip:
+    def test_round_trip_identity(self, device):
+        """scatter then gather with weight=1 recovers weighted sum correctly."""
+        from pygrog.operator import scatter_add, gather
+
+        grid_size = 32
+        n_pts = grid_size  # one point per bin, sorted
+        idx = torch.arange(n_pts, dtype=torch.int64, device=device)
+        w = torch.ones(n_pts, dtype=torch.float32, device=device)
+        data = torch.randn(n_pts, dtype=torch.complex64, device=device)
+
+        grid = torch.zeros(grid_size, dtype=torch.complex64, device=device)
+        scatter_add(grid, data, idx, w)
+
+        # With unit weights and one-point-per-bin, gather == original data
+        out = gather(grid, idx, w)
+        torch.testing.assert_close(out, data, rtol=1e-5, atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# Binned CUDA scatter (SparseFFT._scatter with bin_starts)
+# ---------------------------------------------------------------------------
+
+class TestBinnedCudaScatter:
+    """Verify that the shared-memory binned scatter equals the simple scatter."""
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_binned_matches_simple(self):
+        from pygrog.operator._sparse_fft import _scatter_add, _get_torch_ext
+
+        device = torch.device("cuda")
+        grid_size = 1024
+        n_pts = 4096
+        bin_size = 256
+
+        idx, w, data = _make_sorted(n_pts, grid_size, device)
+
+        # Simple scatter
+        grid_simple = torch.zeros(grid_size, dtype=torch.complex64, device=device)
+        _scatter_add(grid_simple, data, idx, w)
+
+        # Binned scatter — build bin_starts
+        n_bins = (grid_size + bin_size - 1) // bin_size
+        bin_edges = torch.arange(n_bins + 1, dtype=torch.int64, device=device) * bin_size
+        bin_edges[-1] = grid_size
+        bin_starts = torch.searchsorted(idx, bin_edges)
+
+        grid_binned = torch.zeros(grid_size, dtype=torch.complex64, device=device)
+        _scatter_add(grid_binned, data, idx, w, bin_starts=bin_starts, bin_size=bin_size)
+
+        torch.testing.assert_close(grid_simple, grid_binned, rtol=1e-4, atol=1e-4)
+

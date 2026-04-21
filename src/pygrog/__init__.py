@@ -13,7 +13,7 @@ except ImportError:
         __version__ = "0.1.0+dev"
 
 from . import calib  # noqa
-from . import grog  # noqa
 from . import operator  # noqa
 from . import gadgets  # noqa
+from . import utils  # noqa
 from . import interop  # noqa

@@ -154,6 +154,7 @@ void scatter_add_cuda(
 {
     const int64_t N         = data.size(0);
     const int64_t grid_size = grid.size(0);
+    if (N == 0) return;
     auto stream = at::cuda::getCurrentCUDAStream();
 
     constexpr int BLOCK = 256;
@@ -181,6 +182,7 @@ void scatter_add_binned_cuda(
 {
     const int64_t grid_size = grid.size(0);
     const int64_t n_bins    = bin_starts.size(0) - 1;
+    if (n_bins <= 0) return;
     auto stream = at::cuda::getCurrentCUDAStream();
 
     constexpr int BLOCK = 256;
@@ -208,6 +210,7 @@ torch::Tensor gather_cuda(
     const int64_t N         = indices.size(0);
     const int64_t grid_size = grid.size(0);
     auto output = torch::zeros({N}, grid.options());
+    if (N == 0) return output;
     auto stream = at::cuda::getCurrentCUDAStream();
 
     constexpr int BLOCK = 256;

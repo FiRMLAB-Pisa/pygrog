@@ -54,8 +54,8 @@ def toeplitz_normal(op):
         ``normal(x) → A^H A x`` implemented via k-space density
         multiplication (no scatter / gather).
     """
-    from ._off_resonance import OffResonanceSparseFFT
-    from ._subspace import SubspaceSparseFFT
+    from ..gadgets._off_resonance import OffResonanceSparseFFT
+    from ..gadgets._subspace import SubspaceSparseFFT
 
     if isinstance(op, SubspaceSparseFFT):
         inner = op._base

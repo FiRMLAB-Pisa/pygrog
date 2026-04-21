@@ -21,7 +21,7 @@ data device, each coil is transferred asynchronously on alternating CUDA streams
 while the previous coil's FFT executes concurrently.
 """
 
-__all__ = ["SparseFFT"]
+__all__ = ["SparseFFT", "scatter_add", "gather"]
 
 import pathlib
 
@@ -130,6 +130,52 @@ def _gather(grid, indices, weights):
     """out[i] = weights[i] * grid[indices[i]]."""
     ext = _get_torch_ext()
     return ext.gather(grid, indices, weights)
+
+
+def scatter_add(
+    grid: torch.Tensor,
+    data: torch.Tensor,
+    indices: torch.Tensor,
+    weights: torch.Tensor,
+) -> None:
+    """Scatter-add: ``grid[indices[i]] += weights[i] * data[i]`` (in-place).
+
+    Parameters
+    ----------
+    grid : torch.Tensor
+        Flat output grid (complex), modified in-place.
+    data : torch.Tensor
+        Input data values (complex), 1-D.
+    indices : torch.Tensor
+        Target grid indices (int64), 1-D.
+    weights : torch.Tensor
+        Per-sample real weights (float), 1-D.
+    """
+    _scatter_add(grid, data, indices, weights)
+
+
+def gather(
+    grid: torch.Tensor,
+    indices: torch.Tensor,
+    weights: torch.Tensor,
+) -> torch.Tensor:
+    """Gather: ``out[i] = weights[i] * grid[indices[i]]``.
+
+    Parameters
+    ----------
+    grid : torch.Tensor
+        Flat input grid (complex), 1-D.
+    indices : torch.Tensor
+        Source indices (int64), 1-D.
+    weights : torch.Tensor
+        Per-sample real weights (float), 1-D.
+
+    Returns
+    -------
+    torch.Tensor
+        Gathered values (complex), 1-D.
+    """
+    return _gather(grid, indices, weights)
 
 
 # =====================================================================
@@ -383,6 +429,95 @@ class SparseFFT:
         if adjoint:
             return self.adjoint(x)
         return self.forward(x)
+
+    # ------------------------------------------------------------------
+    # Batch helpers for decorators  (Tier-1 FFT fusion)
+    # ------------------------------------------------------------------
+    def _scatter_ifft_crop_batch(self, batch_kspace: torch.Tensor) -> torch.Tensor:
+        """Scatter (per-component loop) → **one batched IFFT** → crop.
+
+        Reduces ``B × n_coils`` IFFT calls to a single
+        ``torch.fft.ifftn((B, *grid_shape))`` call.  The scatter loop is
+        unchanged (needs a batched C++ kernel for full fusion).
+
+        Parameters
+        ----------
+        batch_kspace : torch.Tensor
+            ``(B, n_samples)`` complex, **unsorted**.  Each row is an
+            independently-weighted k-space vector (e.g. one ORC component
+            × one coil, or one subspace frame × one coil).
+
+        Returns
+        -------
+        torch.Tensor
+            ``(B, *image_shape)`` complex, on the same device as input.
+        """
+        B = batch_kspace.shape[0]
+        src_device = batch_kspace.device
+        comp_device = self.device if self.device is not None else src_device
+        dtype = batch_kspace.dtype
+
+        indices = self.indices.to(comp_device)
+        sqrt_w = self.sqrt_weights.to(comp_device)
+        sort_perm = self.sort_perm.to(comp_device)
+        self._ensure_bins(comp_device)
+
+        # Sort all B inputs at once: (B, n_samples) — one indexing op
+        sorted_ksp = batch_kspace.to(comp_device)[:, sort_perm]
+
+        # Scatter B times — C++ kernel, bottleneck until batched kernel exists
+        grids = torch.zeros(B, self.grid_size, dtype=dtype, device=comp_device)
+        for b in range(B):
+            self._scatter(grids[b], sorted_ksp[b], indices, sqrt_w)
+
+        # ONE batched IFFT + center-crop over last ``ndim`` dims
+        # axes=(-k,...,-1) work correctly on any batch prefix
+        grids_nd = grids.reshape(B, *self.grid_shape)
+        imgs = ifft(grids_nd, oshape=(B,) + self.image_shape, axes=self.fft_axes)
+        return imgs.to(src_device)
+
+    def _fft_pad_gather_batch(self, batch_imgs: torch.Tensor) -> torch.Tensor:
+        """ONE batched FFT → zero-pad → gather (per-component loop).
+
+        Reduces ``B × n_coils`` FFT calls to a single
+        ``torch.fft.fftn((B, *image_shape))`` call.  The gather loop is
+        unchanged (needs a batched C++ kernel for full fusion).
+
+        Parameters
+        ----------
+        batch_imgs : torch.Tensor
+            ``(B, *image_shape)`` complex.  Each slice ``[b]`` is an
+            independently-weighted image (e.g. one ORC component × one coil).
+
+        Returns
+        -------
+        torch.Tensor
+            ``(B, n_samples)`` complex, in original (unsorted) k-space order.
+        """
+        B = batch_imgs.shape[0]
+        src_device = batch_imgs.device
+        comp_device = self.device if self.device is not None else src_device
+        dtype = batch_imgs.dtype
+
+        indices = self.indices.to(comp_device)
+        sqrt_w = self.sqrt_weights.to(comp_device)
+        inv_perm = self.inv_perm.to(comp_device)
+        imgs_d = batch_imgs.to(comp_device)
+
+        # ONE batched FFT over last ``ndim`` dims
+        fft_results = fft(imgs_d, axes=self.fft_axes)  # (B, *image_shape)
+
+        # Zero-pad to grid in one tensor op: (B, *grid_shape)
+        padded = torch.zeros(B, *self.grid_shape, dtype=dtype, device=comp_device)
+        padded[(slice(None),) + self._pad_slices] = fft_results
+        padded_flat = padded.reshape(B, -1)
+
+        # Gather B times — C++ kernel, bottleneck until batched kernel exists
+        output = torch.stack([
+            _gather(padded_flat[b], indices, sqrt_w)[inv_perm]
+            for b in range(B)
+        ])
+        return output.to(src_device)  # (B, n_samples)
 
     # ------------------------------------------------------------------
     # Core single-coil ops (fused)
