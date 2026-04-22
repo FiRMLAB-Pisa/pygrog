@@ -62,13 +62,13 @@ From the repository root:
 ```bash
 python benchmark/run_benchmarks.py \
   --output-dir benchmark/results \
-  --n-frames 64 \
-  --n-coeff 5 \
   --warmup 1 \
   --repeats 5
 ```
 
 This runner uses the real legacy MRF benchmark data from `benchmark/data`.
+By default it uses all available frames and full basis rank from the dataset.
+Use `--max-frames` and `--max-coeff` only if you want to cap problem size.
 
 ## Full Pipeline (Single Script)
 
@@ -77,8 +77,6 @@ From repository root, run download-if-needed + benchmark + plotting in one comma
 ```bash
 python scripts/run_benchmark_pipeline.py \
   --output-dir benchmark/results \
-  --n-frames 64 \
-  --n-coeff 5 \
   --warmup 1 \
   --repeats 5
 ```

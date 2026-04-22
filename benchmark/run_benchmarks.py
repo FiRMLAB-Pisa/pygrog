@@ -39,8 +39,8 @@ DATASET_FILES = {
 class BenchmarkConfig:
     shape: tuple[int, ...]
     n_coils: int
-    n_frames: int
-    n_coeff: int
+    max_frames: int | None
+    max_coeff: int | None
     n_spokes: int
     n_readout: int
     repeats: int
@@ -99,7 +99,10 @@ def _prepare_real_inputs(cfg: BenchmarkConfig, data_dir: Path) -> BenchmarkInput
         )
 
     total_frames = kspace_tcns.shape[0]
-    n_frames = min(cfg.n_frames, total_frames)
+    if cfg.max_frames is None:
+        n_frames = total_frames
+    else:
+        n_frames = min(max(1, cfg.max_frames), total_frames)
     kspace_tcns = kspace_tcns[:n_frames]
     trajectory = trajectory[:n_frames]
     dcf = dcf[:n_frames]
@@ -107,10 +110,21 @@ def _prepare_real_inputs(cfg: BenchmarkConfig, data_dir: Path) -> BenchmarkInput
     basis = np.load(required["basis"]).astype(np.complex64)
     if basis.ndim != 2:
         raise ValueError(f"Expected basis.npy to be 2D, got shape {basis.shape}")
+
     if basis.shape[0] == total_frames:
-        basis_kt = basis[:n_frames, : cfg.n_coeff].T
+        total_coeff = basis.shape[1]
+        if cfg.max_coeff is None:
+            n_coeff = total_coeff
+        else:
+            n_coeff = min(max(1, cfg.max_coeff), total_coeff)
+        basis_kt = basis[:n_frames, :n_coeff].T
     elif basis.shape[1] == total_frames:
-        basis_kt = basis[: cfg.n_coeff, :n_frames]
+        total_coeff = basis.shape[0]
+        if cfg.max_coeff is None:
+            n_coeff = total_coeff
+        else:
+            n_coeff = min(max(1, cfg.max_coeff), total_coeff)
+        basis_kt = basis[:n_coeff, :n_frames]
     else:
         raise ValueError(
             f"Unexpected basis.npy shape {basis.shape}; could not align with {total_frames} frames"
@@ -136,6 +150,8 @@ def _prepare_real_inputs(cfg: BenchmarkConfig, data_dir: Path) -> BenchmarkInput
             "dataset_files": DATASET_FILES,
             "total_frames": int(total_frames),
             "used_frames": int(n_frames),
+            "total_coeff": int(total_coeff),
+            "used_coeff": int(n_coeff),
             "trajectory_varies_across_frames": bool(variable_traj),
         },
     )
@@ -551,8 +567,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", type=Path, default=Path("benchmark/data"))
     parser.add_argument("--shape", type=int, nargs="+", default=(160, 160))
     parser.add_argument("--n-coils", type=int, default=8)
-    parser.add_argument("--n-frames", type=int, default=64)
-    parser.add_argument("--n-coeff", type=int, default=5)
+    parser.add_argument(
+        "--max-frames",
+        type=int,
+        default=None,
+        help="Optional cap on number of frames to use. Default: use all frames from data.",
+    )
+    parser.add_argument(
+        "--max-coeff",
+        type=int,
+        default=None,
+        help="Optional cap on number of basis coefficients to use. Default: use full basis rank.",
+    )
     parser.add_argument("--n-spokes", type=int, default=48)
     parser.add_argument("--n-readout", type=int, default=512)
     parser.add_argument("--repeats", type=int, default=5)
@@ -566,8 +592,8 @@ def main() -> None:
     cfg = BenchmarkConfig(
         shape=tuple(args.shape),
         n_coils=args.n_coils,
-        n_frames=args.n_frames,
-        n_coeff=args.n_coeff,
+        max_frames=args.max_frames,
+        max_coeff=args.max_coeff,
         n_spokes=args.n_spokes,
         n_readout=args.n_readout,
         repeats=args.repeats,

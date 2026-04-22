@@ -27,8 +27,18 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--shape", type=int, nargs="+", default=[160, 160])
     parser.add_argument("--n-coils", type=int, default=8)
-    parser.add_argument("--n-frames", type=int, default=64)
-    parser.add_argument("--n-coeff", type=int, default=5)
+    parser.add_argument(
+        "--max-frames",
+        type=int,
+        default=None,
+        help="Optional cap on frames. Default: use all frames from dataset.",
+    )
+    parser.add_argument(
+        "--max-coeff",
+        type=int,
+        default=None,
+        help="Optional cap on basis coefficients. Default: use full basis rank.",
+    )
     parser.add_argument("--n-spokes", type=int, default=48)
     parser.add_argument("--n-readout", type=int, default=512)
     parser.add_argument("--repeats", type=int, default=5)
@@ -90,10 +100,6 @@ def main() -> None:
         *[str(v) for v in args.shape],
         "--n-coils",
         str(args.n_coils),
-        "--n-frames",
-        str(args.n_frames),
-        "--n-coeff",
-        str(args.n_coeff),
         "--n-spokes",
         str(args.n_spokes),
         "--n-readout",
@@ -105,6 +111,10 @@ def main() -> None:
         "--gpu-device",
         str(args.gpu_device),
     ]
+    if args.max_frames is not None:
+        benchmark_cmd += ["--max-frames", str(args.max_frames)]
+    if args.max_coeff is not None:
+        benchmark_cmd += ["--max-coeff", str(args.max_coeff)]
     _run(benchmark_cmd)
 
     plot_cmd = [
