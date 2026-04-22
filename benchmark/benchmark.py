@@ -11,10 +11,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+import psutil
+
 try:
-    import psutil
+    import resource
 except Exception:  # pragma: no cover - optional dependency
-    psutil = None
+    resource = None
 
 try:
     import torch
@@ -55,9 +57,8 @@ def _monitor_resources(
     sample_interval_sec: float,
     gpu_device: int | None,
 ) -> None:
-    proc = psutil.Process() if psutil is not None else None
-    if proc is not None:
-        proc.cpu_percent(interval=None)
+    proc = psutil.Process()
+    proc.cpu_percent(interval=None)
 
     nvml_handle = None
     if gpu_device is not None and pynvml is not None:
@@ -68,11 +69,10 @@ def _monitor_resources(
             nvml_handle = None
 
     while not stop_event.is_set():
-        if proc is not None:
-            cpu = proc.cpu_percent(interval=None)
-            rss = proc.memory_info().rss
-            peaks.cpu_percent = max(peaks.cpu_percent, cpu)
-            peaks.ram_bytes = max(peaks.ram_bytes, rss)
+        cpu = proc.cpu_percent(interval=None)
+        rss = proc.memory_info().rss
+        peaks.cpu_percent = max(peaks.cpu_percent, cpu)
+        peaks.ram_bytes = max(peaks.ram_bytes, rss)
 
         if nvml_handle is not None:
             try:
@@ -141,6 +141,12 @@ def profile(
             pass
 
     peaks = _Peaks()
+    # Seed RAM peak so very short calls still report non-zero process memory.
+    try:
+        peaks.ram_bytes = max(peaks.ram_bytes, psutil.Process().memory_info().rss)
+    except Exception:
+        pass
+
     stop_event = threading.Event()
     thread = threading.Thread(
         target=_monitor_resources,
@@ -178,6 +184,21 @@ def profile(
         except Exception:
             cupy_peak_bytes = None
 
+    ram_bytes = peaks.ram_bytes
+    # Fallback when sampling misses (e.g. very short calls) or psutil is unavailable.
+    if ram_bytes == 0 and resource is not None:
+        try:
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            # Linux reports ru_maxrss in KiB, macOS in bytes.
+            maxrss = int(getattr(usage, "ru_maxrss", 0))
+            if maxrss > 0:
+                if maxrss < (1 << 30):
+                    ram_bytes = maxrss * 1024
+                else:
+                    ram_bytes = maxrss
+        except Exception:
+            pass
+
     metrics = {
         "repeat": repeat,
         "warmup": warmup,
@@ -185,7 +206,7 @@ def profile(
         "runtime_mean_sec": float(statistics.mean(runtimes)),
         "runtime_std_sec": float(statistics.pstdev(runtimes) if len(runtimes) > 1 else 0.0),
         "peak_cpu_percent": float(peaks.cpu_percent),
-        "peak_ram_gb": float(peaks.ram_bytes / (1024**3)),
+        "peak_ram_gb": float(ram_bytes / (1024**3)),
         "peak_gpu_mem_gb_nvml": float(peaks.gpu_mem_bytes / (1024**3)) if peaks.gpu_mem_bytes else None,
         "peak_gpu_mem_gb_torch": float(torch_peak_bytes / (1024**3)) if torch_peak_bytes is not None else None,
         "peak_gpu_mem_gb_cupy": float(cupy_peak_bytes / (1024**3)) if cupy_peak_bytes is not None else None,

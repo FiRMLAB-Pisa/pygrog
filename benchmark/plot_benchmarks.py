@@ -33,25 +33,32 @@ def _to_2d_slice(arr: np.ndarray) -> np.ndarray:
     return out
 
 
+def _normalize_unit(arr: np.ndarray) -> np.ndarray:
+    out = np.asarray(arr, dtype=np.float32)
+    maxv = float(out.max())
+    if maxv <= 0.0:
+        return np.zeros_like(out, dtype=np.float32)
+    return out / maxv
+
+
 def plot_subspace(coeff_nufft: np.ndarray, coeff_grog: np.ndarray, out: Path) -> None:
     k = min(4, coeff_nufft.shape[0])
 
-    fig, axes = plt.subplots(2, k, figsize=(3.5 * k, 6))
+    top_tiles = []
+    bottom_tiles = []
     for i in range(k):
-        n = _to_2d_slice(np.abs(coeff_nufft[i]))
-        g = _to_2d_slice(np.abs(coeff_grog[i]))
-        vmax = max(float(n.max()), float(g.max()), 1e-8)
+        top_tiles.append(_normalize_unit(_to_2d_slice(np.abs(coeff_nufft[i]))))
+        bottom_tiles.append(_normalize_unit(_to_2d_slice(np.abs(coeff_grog[i]))))
 
-        axes[0, i].imshow(n, cmap="magma", origin="lower", vmin=0, vmax=vmax)
-        axes[0, i].set_title(f"NUFFT coeff {i}")
-        axes[0, i].axis("off")
+    top_row = np.concatenate(top_tiles, axis=1)
+    bottom_row = np.concatenate(bottom_tiles, axis=1)
+    canvas = np.concatenate([top_row, bottom_row], axis=0)
 
-        axes[1, i].imshow(g, cmap="magma", origin="lower", vmin=0, vmax=vmax)
-        axes[1, i].set_title(f"GROG coeff {i}")
-        axes[1, i].axis("off")
+    fig, ax = plt.subplots(figsize=(3.2 * k, 6.4))
+    ax.imshow(canvas, cmap="gray", origin="lower", vmin=0.0, vmax=1.0)
+    ax.axis("off")
 
-    plt.tight_layout()
-    fig.savefig(out, dpi=200, bbox_inches="tight")
+    fig.savefig(out, dpi=200, bbox_inches="tight", pad_inches=0.0)
     plt.close(fig)
 
 

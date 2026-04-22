@@ -46,6 +46,7 @@ class BenchmarkConfig:
     repeats: int
     warmup: int
     gpu_device: int
+    require_cufinufft: bool
     data_dir: str
 
 
@@ -551,10 +552,33 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 "nufft_forward": _serialize_metrics(nufft_fwd_gpu_m),
             }
         except Exception as exc:
+            if cfg.require_cufinufft:
+                raise RuntimeError(
+                    "CUFINUFFT benchmark is required but failed to run: "
+                    f"{exc}"
+                ) from exc
             gpu_results["nufft_cufinufft_gpu_skipped"] = {"reason": str(exc)}
     else:
         reason = "CUDA not available" if not torch.cuda.is_available() else cufinufft_err
+        if cfg.require_cufinufft:
+            raise RuntimeError(
+                "CUFINUFFT benchmark is required but unavailable: "
+                f"{reason}"
+            )
         gpu_results["nufft_cufinufft_gpu_skipped"] = {"reason": reason}
+
+    # Keep GPU comparisons fair: only report GPU GROG if GPU NUFFT is available.
+    if "nufft_cufinufft_gpu" not in gpu_results:
+        if "grog_full_gpu" in gpu_results or "grog_dual_stream_gpu" in gpu_results:
+            grog_full = gpu_results.pop("grog_full_gpu", None)
+            grog_dual = gpu_results.pop("grog_dual_stream_gpu", None)
+            gpu_results["grog_gpu_skipped"] = {
+                "reason": (
+                    "Skipped for parity because CUFINUFFT GPU results are unavailable."
+                ),
+                "suppressed_grog_full_gpu": bool(grog_full is not None),
+                "suppressed_grog_dual_stream_gpu": bool(grog_dual is not None),
+            }
 
     results["steps"]["runtime_gpu"] = gpu_results
 
@@ -584,6 +608,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--gpu-device", type=int, default=0)
+    parser.add_argument(
+        "--require-cufinufft",
+        action="store_true",
+        help="Fail if CUFINUFFT GPU NUFFT benchmark cannot run.",
+    )
     return parser.parse_args()
 
 
@@ -599,6 +628,7 @@ def main() -> None:
         repeats=args.repeats,
         warmup=args.warmup,
         gpu_device=args.gpu_device,
+        require_cufinufft=args.require_cufinufft,
         data_dir=str(args.data_dir),
     )
 

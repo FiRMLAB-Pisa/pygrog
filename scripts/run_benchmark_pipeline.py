@@ -44,6 +44,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--gpu-device", type=int, default=0)
+    parser.add_argument(
+        "--require-cufinufft",
+        action="store_true",
+        help="Fail if CUFINUFFT GPU NUFFT benchmark cannot run.",
+    )
 
     return parser.parse_args()
 
@@ -111,6 +116,8 @@ def main() -> None:
         "--gpu-device",
         str(args.gpu_device),
     ]
+    if args.require_cufinufft:
+        benchmark_cmd.append("--require-cufinufft")
     if args.max_frames is not None:
         benchmark_cmd += ["--max-frames", str(args.max_frames)]
     if args.max_coeff is not None:
