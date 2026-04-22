@@ -70,6 +70,10 @@ dev = [
     # examples / non-cartesian references
     "mri-nufft",
     "finufft",
+    "cufinufft; platform_system == 'Linux'",
+    "zenodo-get",
+    "psutil",
+    "pynvml",
     "brainweb-dl",
     "scikit-image",
 ]
