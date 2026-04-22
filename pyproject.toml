@@ -67,6 +67,11 @@ dev = [
     "sphinx-gallery",
     "myst-parser",
     "matplotlib",
+    # examples / non-cartesian references
+    "mri-nufft",
+    "finufft",
+    "brainweb-dl",
+    "scikit-image",
 ]
 
 # List URLs that are relevant to your project

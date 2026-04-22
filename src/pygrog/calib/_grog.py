@@ -112,8 +112,7 @@ class GrogInterpolator:
 
     For every non-Cartesian sample, a fixed-size neighbourhood of Cartesian
     grid points is identified.  Each source sample is replicated to all its
-    neighbours and a pre-computed GRAPPA kernel is applied.  The results are
-    accumulated onto the Cartesian grid using ``scatter_add``.
+    neighbours and a pre-computed GRAPPA kernel is applied.
 
     Parameters
     ----------
@@ -296,7 +295,7 @@ class GrogInterpolator:
         shot_index: int | tuple[int] | None = None,
         ret_image: bool = False,
     ) -> NDArray[complex] | torch.Tensor | None:
-        """Apply GROG gridding.
+        """Apply GROG interpolation to sparse Cartesian neighbour samples.
 
         Parameters
         ----------
@@ -310,7 +309,8 @@ class GrogInterpolator:
 
         Returns
         -------
-        Gridded k-space (or image), or *None* when accumulating shots.
+        Sparse Cartesian samples ``(n_coils, n_samples)`` (or image), or
+        *None* when accumulating shots.
         """
         if not self._interpolator_set:
             raise RuntimeError(
@@ -331,17 +331,13 @@ class GrogInterpolator:
             gc.collect()
             return None
 
-        gridded = self._grid_full(data_t)
+        sparse = self._sparse_full(data_t)
 
         if ret_image:
             from ..operator._sparse_fft import SparseFFT
 
             op = SparseFFT(plan=self.plan)
-            # gridded: (n_coils, *grid_shape) — forward() expects (n_coils, n_samples)
-            # but SparseFFT.forward does scatter+IFFT+crop from a full grid;
-            # reshape to (n_coils, grid_size) and pass as already-gridded k-space.
-            ksp_flat = gridded.reshape(gridded.shape[0], -1)  # (n_coils, grid_size)
-            img_coils = op.forward(ksp_flat)  # (n_coils, *image_shape)
+            img_coils = op.forward(sparse)
             image = img_coils.abs().square().sum(0).sqrt()  # RSS: (*image_shape,)
             gc.collect()
             out = image.numpy() if is_numpy else image
@@ -349,17 +345,17 @@ class GrogInterpolator:
 
         gc.collect()
 
-        out = gridded.numpy() if is_numpy else gridded
+        out = sparse.numpy() if is_numpy else sparse
         return out
 
     def __call__(self, data, shot_index=None, ret_image=False):
         return self.interpolate(data, shot_index, ret_image)
 
     # ------------------------------------------------------------------
-    # Core gridding
+    # Core interpolation
     # ------------------------------------------------------------------
-    def _grid_full(self, data: torch.Tensor) -> torch.Tensor:
-        """Grid the full dataset at once.
+    def _sparse_full(self, data: torch.Tensor) -> torch.Tensor:
+        """Interpolate full dataset to sparse Cartesian neighbour samples.
 
         data : (coils, ..., npts) where ... matches coords leading dims
         plan.target_idx : (..., npts, kw) int64
@@ -369,10 +365,8 @@ class GrogInterpolator:
         """
         plan = self.plan
         target_idx = torch.as_tensor(plan.target_idx)  # (..., npts, kw)
-        weights = torch.as_tensor(plan.weights)  # (..., npts, kw)
         interp_idx = self._interp_idx  # (..., npts, kw)
         kernel = self._interp_kernel  # (K, C, C)
-        grid_size = int(np.prod(plan.grid_shape))
 
         kw = target_idx.shape[-1]
         ncoils = data.shape[0]
@@ -381,7 +375,6 @@ class GrogInterpolator:
         data_flat = data.reshape(ncoils, -1)  # (C, N)
         N = data_flat.shape[1]
         target_flat = target_idx.reshape(-1, kw)  # (N, kw)
-        weights_flat = weights.reshape(-1, kw)  # (N, kw)
         idx_flat = interp_idx.reshape(-1, kw)  # (N, kw)
 
         # Replicate each source → kw copies: (C, N*kw)
@@ -390,24 +383,18 @@ class GrogInterpolator:
         # Flatten indexes
         idx_1d = idx_flat.reshape(-1)  # (N*kw,)
         target_1d = target_flat.reshape(-1)  # (N*kw,)
-        weights_1d = weights_flat.reshape(-1)  # (N*kw,)
 
         # Apply GRAPPA kernels: (N*kw, 1, C)
         data_interp = data_rep.T.unsqueeze(1).contiguous()  # (N*kw, 1, C)
         _interpolate(data_interp, idx_1d, kernel)
         data_interp = data_interp[:, 0, :]  # (N*kw, C)
 
-        # Weight
-        data_interp = data_interp * weights_1d[:, None].to(data_interp.dtype)
-
-        # Scatter onto grid: (C, grid_size)
-        output = torch.zeros(ncoils, grid_size, dtype=data.dtype, device=data.device)
         valid = target_1d >= 0
-        if valid.any():
-            t = target_1d[valid].unsqueeze(0).expand(ncoils, -1)
-            output.scatter_add_(1, t, data_interp[valid].T)
+        if not valid.any():
+            return torch.zeros(ncoils, 0, dtype=data.dtype, device=data.device)
 
-        return output.reshape(ncoils, *plan.grid_shape)
+        # Keep duplicated neighbourhood samples (sparse Cartesian representation).
+        return data_interp[valid].T.contiguous()
 
     def _grid_shot(self, data: torch.Tensor, shot_index: tuple) -> torch.Tensor:
         """Grid a single shot and return its contribution."""

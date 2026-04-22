@@ -1,245 +1,224 @@
 """
-====================================================
-Gadgets: Subspace Projection and Off-Resonance Correction
-====================================================
+===================================================
+Gadgets with mri-nufft Data: Subspace and B0 ORC
+===================================================
 
-This example demonstrates two reconstruction *gadgets* that can be stacked
-on top of :class:`~pygrog.operator.SparseFFT`:
+This example uses a common data pipeline for both PyGROG gadgets:
 
-1. **SubspaceProjection** — projects multi-frame/multi-contrast data onto a
-   low-rank temporal subspace computed by truncated SVD.  Useful for dynamic
-   MRI (e.g., cardiac cine, T2-shuffling).
-2. **OffResonanceCorrection** — compensates B0 field inhomogeneities via a
-   low-rank factorisation of the spatiotemporal phase modulation.
-
-Both gadgets wrap a :class:`~pygrog.operator.SparseFFT` operator and expose
-the same ``forward`` / ``adjoint`` interface, so they can be used
-interchangeably inside iterative solvers.
-
-All data are **synthetic** — no scanner files are required.
-
-.. note::
-
-   `mri-nufft <https://mind-inria.github.io/mri-nufft/>`_ provides equivalent
-   gadgets on top of standard NUFFT backends:
-
-   - **Subspace NUFFT** — ``mri_nufft.functional.subspace_nufft``
-     (see `mri-nufft subspace example
-     <https://mind-inria.github.io/mri-nufft/generated/autoexamples/example_subspace.html>`_).
-   - **Off-resonance corrected NUFFT** — ``mri_nufft.trajectory.MRIFourierCorrected``
-     (see `mri-nufft off-resonance example
-     <https://mind-inria.github.io/mri-nufft/generated/autoexamples/example_offresonance.html>`_).
-
-   The PyGROG gadgets here share the same mathematical formulation but replace
-   the fixed-kernel NUFFT with data-driven GROG gridding.  They can also be
-   stacked together: wrap a :class:`~pygrog.gadgets.SubspaceSparseFFT` inside
-   :class:`~pygrog.gadgets.OffResonanceCorrection` for joint subspace +
-   off-resonance corrected reconstruction.
+1. BrainWeb phantom from ``brainweb-dl``.
+2. Trajectory + k-space simulation + reference adjoint from ``mri-nufft``.
+3. GROG gridding to feed :class:`~pygrog.operator.SparseFFT`.
+4. Comparison against mri-nufft reference formulations.
 """
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+from mrinufft import get_operator, initialize_2D_radial
+from mrinufft.density import voronoi
+from mrinufft.extras import fse_simulation, get_brainweb_map, make_b0map
+from mrinufft.operators import MRISubspace
+from mrinufft.operators.off_resonance import MRIFourierCorrected
+from mrinufft.trajectories.utils import Acquisition
+from pygrog.calib import GrogInterpolator
+from pygrog.gadgets import OffResonanceCorrection, SubspaceProjection, SubspaceSparseFFT
+from pygrog.operator import SparseFFT
+
 # %%
-# Shared helpers
-# ==============
+# Shared setup
+# ============
 
 
-def _phantom(shape):
-    """Tiny 2-D Shepp-Logan phantom."""
+def _synthetic_smaps(shape, n_coils=4):
     ny, nx = shape
     yy, xx = np.mgrid[-1 : 1 : ny * 1j, -1 : 1 : nx * 1j]
-    img = np.zeros(shape, dtype=np.float32)
-    img += 1.0 * ((xx / 0.9) ** 2 + (yy / 0.9) ** 2 < 1)
-    img += 0.4 * ((xx / 0.6) ** 2 + ((yy - 0.1) / 0.7) ** 2 < 1)
-    img -= 0.6 * ((xx / 0.15) ** 2 + ((yy + 0.2) / 0.2) ** 2 < 1)
-    return img.clip(0, 1)
+    smaps = []
+    for angle in np.linspace(0.0, 2.0 * np.pi, n_coils, endpoint=False):
+        cx, cy = np.cos(angle), np.sin(angle)
+        gauss = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2.0 * 0.45**2))
+        phase = np.exp(1j * (cx * xx + cy * yy))
+        smaps.append(gauss * phase)
+    smaps = np.asarray(smaps, dtype=np.complex128)
+    smaps /= np.sqrt((np.abs(smaps) ** 2).sum(0, keepdims=True)) + 1e-12
+    return smaps
 
 
-def _make_sparse_fft(image_shape, n_samples, *, seed=0):
-    """Create a SparseFFT with random Cartesian sampling."""
-    from pygrog.operator import SparseFFT
+m0, t1, t2 = get_brainweb_map(0)
+m0 = np.flip(m0, axis=(0, 1, 2))[90][::4, ::4].astype(np.float32)
+t1 = np.flip(t1, axis=(0, 1, 2))[90][::4, ::4].astype(np.float32)
+t2 = np.flip(t2, axis=(0, 1, 2))[90][::4, ::4].astype(np.float32)
 
-    rng = np.random.default_rng(seed)
-    grid_shape = tuple(s + s // 4 for s in image_shape)
-    grid_size = int(np.prod(grid_shape))
-    indices = rng.integers(0, grid_size, size=n_samples).astype(np.int64)
-    weights = np.ones(n_samples, dtype=np.float32)
-    return SparseFFT(grid_shape, image_shape, indices, weights)
+m0 /= m0.max() + 1e-8
+shape = m0.shape
+n_coils = 4
 
+samples = initialize_2D_radial(Nc=24, Ns=256)
+density = voronoi(samples)
 
-image_shape = (48, 48)
-n_samples = 512
-rng = np.random.default_rng(0)
+# Simulate one multi-coil acquisition with ground-truth smaps.
+smaps_true = _synthetic_smaps(shape, n_coils=n_coils)
+nufft_sim = get_operator("finufft")(
+    samples=samples,
+    shape=shape,
+    n_coils=n_coils,
+    smaps=smaps_true,
+    density=density,
+    squeeze_dims=True,
+)
+kspace_single = nufft_sim.op(m0.astype(np.complex128))
 
-base_op = _make_sparse_fft(image_shape, n_samples)
-phantom = _phantom(image_shape)
+# GROG plan and SparseFFT base operator for PyGROG gadgets.
+coords = (samples * np.asarray(shape, dtype=np.float32)).astype(np.float32)
+coil_calib = smaps_true * m0[None, ...]
+calib_cart = np.fft.fftshift(
+    np.fft.fftn(np.fft.ifftshift(coil_calib, axes=(-2, -1)), axes=(-2, -1)),
+    axes=(-2, -1),
+).astype(np.complex64)
 
-# %%
-# Gadget 1 — Subspace Projection
-# ================================
-#
-# Dynamic MRI acquires one k-space frame per TR.  Rather than reconstruct
-# each frame independently (computationally expensive), we project the
-# temporal signal onto a low-dimensional subspace spanned by ``K``
-# basis vectors.
-#
-# :class:`~pygrog.gadgets.SubspaceProjection` fits the basis from any
-# representative time-series data via ``fit()``, then provides
-# ``forward()`` (frames → coefficients) and ``adjoint()`` (coefficients →
-# frames).
+grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=2, image_shape=shape)
+grog.calc_interp_table(calib_cart, lamda=0.01, precision=1)
 
-from pygrog.gadgets import SubspaceProjection, SubspaceSparseFFT
-
-# Simulate a 2-D time-series: T monoexponential decays on top of the phantom
-T = 16  # number of temporal frames
-K = 4  # subspace rank
-
-# Exponential decay fingerprint: (T, n_spatial) where n_spatial = prod(image_shape)
-t = torch.linspace(0.0, 1.0, T)
-decay_constants = torch.tensor([0.5, 1.0, 2.0, 4.0])
-# shape: (T, n_decay_curves) — columns are exponential decays with different rates
-fingerprints = torch.exp(-t.unsqueeze(1) * decay_constants.unsqueeze(0))
-# shape: (T, n_spatial) — assign random decay constants to spatial positions
-torch.manual_seed(0)
-assign = torch.randint(0, len(decay_constants), (int(np.prod(image_shape)),))
-calib_ts = fingerprints[:, assign]  # (T, n_spatial)
-
-# Fit subspace basis
-proj = SubspaceProjection(n_components=K)
-proj.fit(calib_ts)
-
-print(f"Basis shape: {proj.basis.shape}")  # (K, T)
-
-# %%
-# Build a multi-frame image: phantom scaled by each temporal frame's first
-# basis function (a simple proxy for dynamic content).
-
-frames = torch.stack(
-    [
-        torch.as_tensor(phantom * proj.basis[0, t].real.item()).to(torch.complex64)
-        for t in range(T)
-    ]
-)  # (T, *image_shape)
-
-# Project T frames → K subspace coefficients
-coeffs = proj.forward(frames)  # (K, *image_shape)
-print(f"Frame stack shape    : {frames.shape}")
-print(f"Coefficients shape   : {coeffs.shape}")
-
-# Expand back: K coefficients → T frames (lossy if K < T)
-frames_recon = proj.adjoint(coeffs)  # (T, *image_shape)
-
-# %%
-
-fig, axes = plt.subplots(2, 4, figsize=(11, 5.5))
-for t_idx, ax in zip(range(4), axes[0], strict=False):
-    ax.imshow(frames[t_idx].abs().numpy(), cmap="gray", origin="lower", vmin=0, vmax=1)
-    ax.set_title(f"Frame {t_idx}")
-    ax.axis("off")
-for k_idx, ax in zip(range(4), axes[1], strict=False):
-    ax.imshow(coeffs[k_idx].abs().numpy(), cmap="magma", origin="lower", vmin=0, vmax=1)
-    ax.set_title(f"Coeff {k_idx}")
-    ax.axis("off")
-axes[0][0].set_ylabel("Frames (4 of 16)")
-axes[1][0].set_ylabel("Subspace coefficients")
-plt.suptitle(f"SubspaceProjection: T={T} frames → K={K} coefficients")
-plt.tight_layout()
-plt.show()
-
-# %%
-# SubspaceSparseFFT: fused subspace + k-space encoding
-# ----------------------------------------------------
-#
-# :class:`~pygrog.gadgets.SubspaceSparseFFT` decorates a
-# :class:`~pygrog.operator.SparseFFT` with the subspace basis, providing a
-# single operator that maps subspace coefficients ``(K, *image_shape)``
-# directly to multi-frame k-space ``(T, n_coils, n_samples)``.
-
-sub_op = SubspaceSparseFFT(base_op, proj.basis)
-
-# Forward: subspace coefficients → multi-frame k-space
-kspace_sub = sub_op.adjoint(coeffs)  # (T, 1, n_samples) — 1 coil, no smaps
-print(f"\nSubspaceSparseFFT adjoint shape: {kspace_sub.shape}")
-
-# Adjoint: multi-frame k-space → subspace coefficients
-coeffs_recon = sub_op.forward(kspace_sub)  # (K, *image_shape)
-print(f"SubspaceSparseFFT forward shape: {coeffs_recon.shape}")
-
-# %%
-# Gadget 2 — Off-Resonance Correction
-# =====================================
-#
-# B0 field inhomogeneities cause a spatially varying phase accumulation
-# ``exp(i 2pi df(r) t)`` during the readout.  This blurs the image when
-# ignored.
-#
-# :class:`~pygrog.gadgets.OffResonanceCorrection` factorises the phase
-# modulation into ``L`` temporal and spatial components via SVD/MFI/MTI
-# (Mann et al.\ 1997, Sutton et al.\ 2003) and accumulates the correction
-# over each component.
-
-from pygrog.gadgets import OffResonanceCorrection
-
-# Synthetic B0 field map: quadratic bowl in Hz
-ny, nx = image_shape
-yy, xx = np.mgrid[-1 : 1 : ny * 1j, -1 : 1 : nx * 1j]
-b0_hz = (50.0 * (xx**2 + yy**2)).astype(np.float32)  # -50 .. +50 Hz
-
-# Readout timeline: n_samples points spanning 2 ms
-readout_time = np.linspace(0.0, 2e-3, n_samples, dtype=np.float32)
-
-# Build operator (SVD factorisation, auto-select L)
-orc_op = OffResonanceCorrection(
-    base_op,
-    field_map=b0_hz,
-    readout_time=readout_time,
-    n_components=-1,
-    method="svd",
+base_op = SparseFFT(
+    plan=grog.plan, smaps=torch.as_tensor(smaps_true.astype(np.complex64))
 )
 
-print(f"\nORC number of components: {orc_op.n_components}")
-
 # %%
+# Gadget 1: SubspaceProjection / SubspaceSparseFFT
+# =================================================
 
-# Simulate: noiseless k-space from the phantom image
-image_t = torch.as_tensor(phantom[np.newaxis]).to(torch.complex64)  # (1, ny, nx)
+etl = 8
+te = np.arange(etl, dtype=np.float32) * 8.0
+tr = 3000.0
 
-kspace_norc = base_op.adjoint(image_t)  # without ORC
-kspace_orc = orc_op.forward(image_t)  # with ORC (off-resonance encoded)
+frames = fse_simulation(m0, t1, t2, te, tr).astype(np.float32)
+frames = np.ascontiguousarray(frames)  # (T, ny, nx)
 
-# Reconstruct ignoring off-resonance (direct adjoint)
-image_no_corr = base_op.forward(kspace_orc)  # ignoring phase: blurry
+# Simulate non-Cartesian k-space per frame using mri-nufft.
+kspace_frames = np.stack(
+    [nufft_sim.op(frames[t].astype(np.complex128)) for t in range(etl)],
+    axis=0,
+)  # (T, n_coils, n_samples)
 
-# Reconstruct with off-resonance correction (ORC adjoint)
-image_corr = orc_op.adjoint(kspace_orc)  # corrected: (1, ny, nx)
+# mri-nufft adjoint reference per frame.
+nufft_ref = get_operator("finufft")(
+    samples=samples,
+    shape=shape,
+    n_coils=n_coils,
+    smaps=smaps_true,
+    density=density,
+    squeeze_dims=True,
+)
+frames_ref = np.stack([nufft_ref.adj_op(kspace_frames[t]) for t in range(etl)], axis=0)
 
-# %%
 
-fig, axes = plt.subplots(1, 3, figsize=(11, 3.5))
+# Learn subspace basis from signal dictionary sampled from BrainWeb ranges.
+def _estimate_basis(train_data, rank):
+    _, _, vh = np.linalg.svd(train_data, full_matrices=False)
+    return vh[:rank]
 
-axes[0].imshow(b0_hz, cmap="bwr", origin="lower")
-axes[0].set_title("B0 field map [Hz]")
+
+t1_vals = np.linspace(float(t1[t1 > 0].min()) + 1.0, float(t1.max()), 60)
+t2_vals = np.linspace(float(t2[t2 > 0].min()) + 1.0, float(t2.max()), 60)
+t1_grid, t2_grid = np.meshgrid(t1_vals, t2_vals)
+train = fse_simulation(1.0, t1_grid.ravel(), t2_grid.ravel(), te, tr).astype(np.float32)
+rank = 4
+basis = _estimate_basis(train.T, rank)
+
+# mri-nufft subspace reference (projected NUFFT).
+subspace_nufft = MRISubspace(nufft_ref, subspace_basis=basis)
+coeff_ref_nufft = subspace_nufft.adj_op(kspace_frames)
+
+# PyGROG subspace path: non-Cartesian -> sparse Cartesian -> SparseFFT + subspace.
+kspace_sparse = []
+for t in range(etl):
+    kspace_t = (
+        kspace_frames[t].astype(np.complex64).reshape(n_coils, *samples.shape[:2])
+    )
+    sparse_t = grog.interpolate(kspace_t, ret_image=False)
+    kspace_sparse.append(sparse_t)
+kspace_sparse = torch.as_tensor(np.stack(kspace_sparse, axis=0), dtype=torch.complex64)
+
+proj = SubspaceProjection(n_components=rank)
+proj.fit(torch.as_tensor(train.T, dtype=torch.float32))
+sub_op = SubspaceSparseFFT(base_op, proj.basis.to(torch.complex64))
+coeff_pygrog = sub_op.forward(kspace_sparse).detach().cpu().numpy()
+
+# Display first coefficient comparison.
+c_ref = np.abs(coeff_ref_nufft[0])
+c_ref /= c_ref.max() + 1e-12
+c_grog = np.abs(coeff_pygrog[0])
+c_grog /= c_grog.max() + 1e-12
+
+fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+axes[0].imshow(c_ref, cmap="gray", origin="lower")
+axes[0].set_title("mri-nufft subspace coeff #1")
 axes[0].axis("off")
-
-axes[1].imshow(image_no_corr.abs().numpy(), cmap="gray", origin="lower")
-axes[1].set_title("No correction (blurred)")
+axes[1].imshow(c_grog, cmap="gray", origin="lower")
+axes[1].set_title("PyGROG subspace coeff #1")
 axes[1].axis("off")
-
-axes[2].imshow(image_corr.abs().numpy(), cmap="gray", origin="lower")
-axes[2].set_title("ORC adjoint (corrected)")
+axes[2].imshow(c_grog - c_ref, cmap="bwr", origin="lower", vmin=-0.2, vmax=0.2)
+axes[2].set_title("Difference")
 axes[2].axis("off")
-
-plt.suptitle("OffResonanceCorrection (SVD factorisation)")
 plt.tight_layout()
 plt.show()
 
 # %%
-# .. note::
-#    For real acquisitions the B0 map is obtained from a field-mapping
-#    sequence.  The ``readout_time`` must match the actual per-sample
-#    dwell time of the trajectory, and the ``field_map`` must be in Hz
-#    (not rad/s).
+# Gadget 2: OffResonanceCorrection
+# ================================
 
+brain_mask = m0 > 0.1 * m0.max()
+b0_map, _ = make_b0map(shape, b0range=(-120, 120), mask=brain_mask)
+readout_time = (
+    np.arange(samples.shape[1], dtype=np.float32) * Acquisition.default.raster_time
+)
+readout_time = np.repeat(readout_time[None, :], samples.shape[0], axis=0)
+
+orc_nufft = MRIFourierCorrected(
+    nufft_ref,
+    b0_map=b0_map,
+    readout_time=readout_time,
+    mask=brain_mask,
+)
+
+kspace_off = orc_nufft.op(m0.astype(np.complex128))
+image_ref_orc = np.abs(orc_nufft.adj_op(kspace_off))
+
+# PyGROG ORC: sparse interpolation, then apply ORC-corrected SparseFFT.
+sparse_off = grog.interpolate(
+    kspace_off.astype(np.complex64).reshape(n_coils, *samples.shape[:2]),
+    ret_image=False,
+)
+sparse_off = torch.as_tensor(sparse_off, dtype=torch.complex64)
+
+orc_pygrog = OffResonanceCorrection(
+    base_op,
+    field_map=b0_map.astype(np.float32),
+    readout_time=readout_time.ravel().astype(np.float32),
+    mask=brain_mask,
+    n_components=8,
+    method="svd",
+)
+image_pygrog_orc = np.abs(orc_pygrog.adjoint(sparse_off).detach().cpu().numpy())
+
+image_ref_orc /= image_ref_orc.max() + 1e-12
+image_pygrog_orc /= image_pygrog_orc.max() + 1e-12
+
+fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+axes[0].imshow(image_ref_orc, cmap="gray", origin="lower")
+axes[0].set_title("mri-nufft ORC adjoint")
+axes[0].axis("off")
+axes[1].imshow(image_pygrog_orc, cmap="gray", origin="lower")
+axes[1].set_title("PyGROG ORC adjoint")
+axes[1].axis("off")
+axes[2].imshow(
+    image_pygrog_orc - image_ref_orc,
+    cmap="bwr",
+    origin="lower",
+    vmin=-0.2,
+    vmax=0.2,
+)
+axes[2].set_title("Difference")
+axes[2].axis("off")
+plt.tight_layout()
 plt.show()

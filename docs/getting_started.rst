@@ -39,7 +39,10 @@ The shortest path from raw non-Cartesian k-space to an image is:
     # 2. Fit GRAPPA kernels from the auto-calibration region
     grog.calc_interp_table(acr_data)
 
-    # 3. Grid + reconstruct in one call
+    # 3a. Sparse Cartesian neighbour-expanded samples
+    kspace_sparse = grog.interpolate(kspace_nc, ret_image=False)
+
+    # 3b. Convenience reconstruction (SparseFFT.forward + RSS)
     image = grog.interpolate(kspace_nc, ret_image=True)
 
 For more detail see the :ref:`general_examples` gallery.
