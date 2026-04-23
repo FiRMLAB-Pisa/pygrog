@@ -70,6 +70,15 @@ This runner uses the real legacy MRF benchmark data from `benchmark/data`.
 By default it uses all available frames and full basis rank from the dataset.
 Use `--max-frames` and `--max-coeff` only if you want to cap problem size.
 
+For preprocessing and linop scaling figures, synthetic sizes are generated from
+`--scaling-ratios` and then the final two points are always:
+1) synthetic case matched to MRF samples/frame, and
+2) real MRF case.
+
+Default synthetic ratios are:
+`0.01,0.02,0.05,0.1,0.2,0.4,0.7`
+(plus the auto-appended `Synth-MRF-size` and `MRF-real` points).
+
 ## Full Pipeline (Single Script)
 
 From repository root, run download-if-needed + benchmark + plotting in one command:
@@ -105,9 +114,10 @@ python benchmark/plot_benchmarks.py \
 
 Generated files:
 
-- `benchmark/results/figure_subspace_coeffs.png`
-- `benchmark/results/figure_runtime_cpu_gpu.png`
-- `benchmark/results/figure_memory_profile.png`
+- `benchmark/results/figure_preprocessing.png`
+- `benchmark/results/figure_linop.png`
+- `benchmark/results/figure_coeffs.png`
+- `benchmark/results/figure_grog_views.png`
 
 ## Notes for A40 Server Runs
 

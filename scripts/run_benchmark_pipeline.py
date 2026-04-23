@@ -45,6 +45,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--gpu-device", type=int, default=0)
     parser.add_argument(
+        "--scaling-ratios",
+        type=str,
+        default="0.125,0.25,0.5,0.75",
+        help="Comma-separated synthetic size ratios for preprocessing/linop scaling plots.",
+    )
+    parser.add_argument(
         "--require-cufinufft",
         action="store_true",
         help="Fail if CUFINUFFT GPU NUFFT benchmark cannot run.",
@@ -115,6 +121,8 @@ def main() -> None:
         str(args.warmup),
         "--gpu-device",
         str(args.gpu_device),
+        "--scaling-ratios",
+        args.scaling_ratios,
     ]
     if args.require_cufinufft:
         benchmark_cmd.append("--require-cufinufft")

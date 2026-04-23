@@ -35,17 +35,19 @@ classifiers = [  # Optional
 ]
 
 dependencies = [
-    "numpy",
+    "numpy>=2.0",
     "scipy",
     "torch>=2.0",
+    "h5py",
+    "mri-nufft",
+    "finufft",
+    "pytorch-finufft",
 ]
 
 [project.optional-dependencies]
 gpu = [
     "cupy-cuda12x",
-]
-io = [
-    "h5py",
+    "cufinufft; platform_system == 'Linux'",
 ]
 dev = [
     # style / linting
@@ -68,9 +70,6 @@ dev = [
     "myst-parser",
     "matplotlib",
     # examples / non-cartesian references
-    "mri-nufft",
-    "finufft",
-    "cufinufft; platform_system == 'Linux'",
     "zenodo-get",
     "psutil",
     "pynvml",

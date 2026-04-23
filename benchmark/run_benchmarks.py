@@ -10,10 +10,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import traceback
+import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+# Suppress mrinufft's noisy trajectory-rescaling UserWarning.
+warnings.filterwarnings(
+    "ignore",
+    message=".*[Ss]amples will be rescaled.*",
+    category=UserWarning,
+)
 
 import numpy as np
 import torch
@@ -34,6 +43,9 @@ DATASET_FILES = {
     "dcf": "dcf.npy",
 }
 
+# Default synthetic size sweep from very small to near-MRF scale.
+DEFAULT_SCALING_RATIOS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.4, 0.7]
+
 
 @dataclass
 class BenchmarkConfig:
@@ -48,6 +60,7 @@ class BenchmarkConfig:
     gpu_device: int
     require_cufinufft: bool
     data_dir: str
+    scaling_ratios: list[float]
 
 
 @dataclass
@@ -307,6 +320,352 @@ def _serialize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _extract_vram_gb(metrics: dict[str, Any]) -> float:
+    return float(
+        metrics.get("peak_gpu_mem_gb_nvml")
+        or metrics.get("peak_gpu_mem_gb_torch")
+        or metrics.get("peak_gpu_mem_gb_cupy")
+        or 0.0
+    )
+
+
+def _combine_preprocess(
+    plan_m: dict[str, Any],
+    interp_m: dict[str, Any],
+    *,
+    include_vram: bool,
+) -> dict[str, Any]:
+    plan = {
+        "runtime_sec": float(plan_m["runtime_mean_sec"]),
+        "ram_gb": float(plan_m.get("peak_ram_gb", 0.0)),
+        "vram_gb": float(_extract_vram_gb(plan_m)) if include_vram else 0.0,
+    }
+    interp = {
+        "runtime_sec": float(interp_m["runtime_mean_sec"]),
+        "ram_gb": float(interp_m.get("peak_ram_gb", 0.0)),
+        "vram_gb": float(_extract_vram_gb(interp_m)) if include_vram else 0.0,
+    }
+    return {
+        "planning": plan,
+        "interpolation": interp,
+        "runtime_sec": float(plan["runtime_sec"] + interp["runtime_sec"]),
+        "ram_gb": float(max(plan["ram_gb"], interp["ram_gb"])),
+        "vram_gb": float(max(plan["vram_gb"], interp["vram_gb"])),
+    }
+
+
+def _make_synthetic_case(
+    *,
+    samples_per_frame: int,
+    shape: tuple[int, ...],
+    n_coils: int,
+    n_frames: int,
+    n_readout: int,
+    ndim: int,
+    rng: np.random.Generator,
+) -> dict[str, Any]:
+    samples_per_frame = max(1, int(samples_per_frame))
+    n_readout = max(8, int(n_readout))
+    n_spokes = int(math.ceil(samples_per_frame / n_readout))
+
+    # Build a structured radial-like trajectory so synthetic scaling resembles
+    # real non-Cartesian workloads better than fully i.i.d. random points.
+    radii = np.linspace(-0.5, 0.5, n_readout, dtype=np.float32)
+    directions = rng.standard_normal(size=(n_spokes, ndim)).astype(np.float32)
+    directions /= np.linalg.norm(directions, axis=1, keepdims=True) + 1e-8
+    trajectory = directions[:, None, :] * radii[None, :, None]
+    trajectory = trajectory.astype(np.float32)
+    dcf = np.ones((n_spokes, n_readout), dtype=np.float32)
+
+    kspace = (
+        rng.standard_normal(size=(n_frames, n_coils, n_spokes, n_readout)).astype(np.float32)
+        + 1j
+        * rng.standard_normal(size=(n_frames, n_coils, n_spokes, n_readout)).astype(np.float32)
+    ).astype(np.complex64)
+    smaps = (
+        rng.standard_normal(size=(n_coils, *shape)).astype(np.float32)
+        + 1j * rng.standard_normal(size=(n_coils, *shape)).astype(np.float32)
+    ).astype(np.complex64)
+    smaps /= np.sqrt(np.sum(np.abs(smaps) ** 2, axis=0, keepdims=True) + 1e-6)
+
+    return {
+        "shape": shape,
+        "smaps": smaps,
+        "samples": trajectory,
+        "density": dcf.reshape(-1),
+        "kspace": kspace,
+        "calib_image": np.ones(shape, dtype=np.float32),
+        "samples_per_frame": int(n_spokes * n_readout),
+    }
+
+
+def _benchmark_scaling_case(
+    *,
+    label: str,
+    kind: str,
+    case: dict[str, Any],
+    cfg: BenchmarkConfig,
+    cufinufft_ok: bool,
+) -> dict[str, Any]:
+    shape = tuple(int(x) for x in case["shape"])
+    smaps = np.asarray(case["smaps"], dtype=np.complex64)
+    samples = np.asarray(case["samples"], dtype=np.float32)
+    density = np.asarray(case["density"], dtype=np.float32)
+    kspace_tcns = np.asarray(case["kspace"], dtype=np.complex64)
+    calib_image = np.asarray(case["calib_image"], dtype=np.float32)
+
+    nufft_finufft = _make_nufft_operator("finufft", samples, shape, smaps, density)
+
+    _, plan_cpu_m = profile(
+        _make_grog,
+        shape,
+        samples,
+        smaps,
+        calib_image,
+        warmup=0,
+        repeat=max(1, cfg.repeats),
+        gpu_device=None,
+    )
+    grog, sparse_fft_cpu, grog_aux = _make_grog(shape, samples, smaps, calib_image)
+
+    sparse_tcns_cpu, interp_cpu_m = profile(
+        _grog_interpolate_all,
+        grog,
+        kspace_tcns,
+        grog_aux["sqrt_weights"],
+        warmup=cfg.warmup,
+        repeat=cfg.repeats,
+        gpu_device=None,
+    )
+
+    prep_cpu = _combine_preprocess(plan_cpu_m, interp_cpu_m, include_vram=False)
+
+    prep_gpu = None
+    if torch.cuda.is_available():
+        _, plan_gpu_m = profile(
+            _make_grog,
+            shape,
+            samples,
+            smaps,
+            calib_image,
+            warmup=0,
+            repeat=max(1, cfg.repeats),
+            gpu_device=cfg.gpu_device,
+        )
+        _, interp_gpu_m = profile(
+            _grog_interpolate_all,
+            grog,
+            kspace_tcns,
+            grog_aux["sqrt_weights"],
+            warmup=cfg.warmup,
+            repeat=cfg.repeats,
+            gpu_device=cfg.gpu_device,
+        )
+        prep_gpu = _combine_preprocess(plan_gpu_m, interp_gpu_m, include_vram=True)
+
+    nufft_adj_cpu, nufft_adj_cpu_m = profile(
+        _nufft_adjoint_all,
+        nufft_finufft,
+        kspace_tcns,
+        warmup=cfg.warmup,
+        repeat=cfg.repeats,
+        gpu_device=None,
+    )
+    _, nufft_fwd_cpu_m = profile(
+        _nufft_forward_all,
+        nufft_finufft,
+        np.asarray(nufft_adj_cpu),
+        samples.shape[:-1],
+        warmup=cfg.warmup,
+        repeat=cfg.repeats,
+        gpu_device=None,
+    )
+    _, grog_adj_cpu_m = profile(
+        _grog_adjoint_from_sparse,
+        sparse_tcns_cpu,
+        sparse_fft_cpu,
+        "cpu",
+        cfg.gpu_device,
+        warmup=cfg.warmup,
+        repeat=cfg.repeats,
+        gpu_device=None,
+    )
+    _, grog_fwd_cpu_m = profile(
+        _grog_forward_from_images,
+        np.asarray(nufft_adj_cpu),
+        sparse_fft_cpu,
+        "cpu",
+        cfg.gpu_device,
+        warmup=cfg.warmup,
+        repeat=cfg.repeats,
+        gpu_device=None,
+    )
+
+    nufft_adj_gpu_m = None
+    nufft_fwd_gpu_m = None
+    grog_adj_gpu_m = None
+    grog_fwd_gpu_m = None
+    if torch.cuda.is_available() and cufinufft_ok:
+        nufft_cuf = _make_nufft_operator("cufinufft", samples, shape, smaps, density)
+        _, nufft_adj_gpu_m = profile(
+            _nufft_adjoint_all,
+            nufft_cuf,
+            kspace_tcns,
+            warmup=cfg.warmup,
+            repeat=cfg.repeats,
+            gpu_device=cfg.gpu_device,
+        )
+        _, nufft_fwd_gpu_m = profile(
+            _nufft_forward_all,
+            nufft_cuf,
+            np.asarray(nufft_adj_cpu),
+            samples.shape[:-1],
+            warmup=cfg.warmup,
+            repeat=cfg.repeats,
+            gpu_device=cfg.gpu_device,
+        )
+
+        sparse_fft_gpu = SparseFFT(
+            plan=grog.fft_plan(image_shape=shape),
+            smaps=torch.as_tensor(smaps).to(f"cuda:{cfg.gpu_device}"),
+            device=f"cuda:{cfg.gpu_device}",
+        )
+        _, grog_adj_gpu_m = profile(
+            _grog_adjoint_from_sparse,
+            sparse_tcns_cpu,
+            sparse_fft_gpu,
+            "gpu-full",
+            cfg.gpu_device,
+            warmup=cfg.warmup,
+            repeat=cfg.repeats,
+            gpu_device=cfg.gpu_device,
+        )
+        _, grog_fwd_gpu_m = profile(
+            _grog_forward_from_images,
+            np.asarray(nufft_adj_cpu),
+            sparse_fft_gpu,
+            "gpu-full",
+            cfg.gpu_device,
+            warmup=cfg.warmup,
+            repeat=cfg.repeats,
+            gpu_device=cfg.gpu_device,
+        )
+
+    def _pack(metrics: dict[str, Any] | None, *, is_gpu: bool) -> dict[str, float | None]:
+        if metrics is None:
+            return {"runtime_sec": None, "ram_gb": None, "vram_gb": None}
+        return {
+            "runtime_sec": float(metrics["runtime_mean_sec"]),
+            "ram_gb": float(metrics.get("peak_ram_gb", 0.0)),
+            "vram_gb": float(_extract_vram_gb(metrics)) if is_gpu else 0.0,
+        }
+
+    return {
+        "label": label,
+        "kind": kind,
+        "samples_per_frame": int(case["samples_per_frame"]),
+        "shape": list(shape),
+        "n_coils": int(smaps.shape[0]),
+        "preprocessing": {
+            "cpu": prep_cpu,
+            "gpu": prep_gpu,
+        },
+        "linop": {
+            "forward": {
+                "finufft_cpu": _pack(nufft_fwd_cpu_m, is_gpu=False),
+                "grog_cpu": _pack(grog_fwd_cpu_m, is_gpu=False),
+                "cufinufft_gpu": _pack(nufft_fwd_gpu_m, is_gpu=True),
+                "grog_gpu": _pack(grog_fwd_gpu_m, is_gpu=True),
+            },
+            "adjoint": {
+                "finufft_cpu": _pack(nufft_adj_cpu_m, is_gpu=False),
+                "grog_cpu": _pack(grog_adj_cpu_m, is_gpu=False),
+                "cufinufft_gpu": _pack(nufft_adj_gpu_m, is_gpu=True),
+                "grog_gpu": _pack(grog_adj_gpu_m, is_gpu=True),
+            },
+        },
+    }
+
+
+def _build_scaling_suite(
+    cfg: BenchmarkConfig,
+    inputs: BenchmarkInputs,
+    cufinufft_ok: bool,
+) -> dict[str, Any]:
+    rng = np.random.default_rng(12345)
+
+    real_samples_per_frame = int(np.prod(inputs.samples.shape[:-1]))
+    ndim_synth = len(inputs.shape)
+    n_frames_synth = max(1, min(2, int(inputs.kspace_tcns.shape[0])))
+
+    cases = []
+    for ratio in sorted({float(r) for r in cfg.scaling_ratios if float(r) > 0.0}):
+        target_samples = int(max(64, round(real_samples_per_frame * ratio)))
+        synth_case = _make_synthetic_case(
+            samples_per_frame=target_samples,
+            shape=tuple(inputs.shape),
+            n_coils=int(inputs.smaps.shape[0]),
+            n_frames=n_frames_synth,
+            n_readout=int(cfg.n_readout),
+            ndim=ndim_synth,
+            rng=rng,
+        )
+        cases.append(
+            _benchmark_scaling_case(
+                label=f"Synth-{target_samples // 1000}k",
+                kind="synthetic",
+                case=synth_case,
+                cfg=cfg,
+                cufinufft_ok=cufinufft_ok,
+            )
+        )
+
+    synth_match_case = _make_synthetic_case(
+        samples_per_frame=real_samples_per_frame,
+        shape=tuple(inputs.shape),
+        n_coils=int(inputs.smaps.shape[0]),
+        n_frames=n_frames_synth,
+        n_readout=int(cfg.n_readout),
+        ndim=ndim_synth,
+        rng=rng,
+    )
+    cases.append(
+        _benchmark_scaling_case(
+            label="Synth-MRF-size",
+            kind="synthetic_mrf_match",
+            case=synth_match_case,
+            cfg=cfg,
+            cufinufft_ok=cufinufft_ok,
+        )
+    )
+
+    real_case = {
+        "shape": inputs.shape,
+        "smaps": inputs.smaps,
+        "samples": inputs.samples,
+        "density": inputs.density,
+        "kspace": inputs.kspace_tcns[:n_frames_synth],
+        "calib_image": inputs.calib_image,
+        "samples_per_frame": real_samples_per_frame,
+    }
+    cases.append(
+        _benchmark_scaling_case(
+            label="MRF-real",
+            kind="real_mrf",
+            case=real_case,
+            cfg=cfg,
+            cufinufft_ok=cufinufft_ok,
+        )
+    )
+
+    return {
+        "ratios": [float(r) for r in cfg.scaling_ratios],
+        "real_samples_per_frame": real_samples_per_frame,
+        "scaling_frames": n_frames_synth,
+        "cases": cases,
+    }
+
+
 def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     inputs = _prepare_real_inputs(cfg, Path(cfg.data_dir))
@@ -333,6 +692,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
     finufft_ok, finufft_err = _safe_backend_available("finufft")
     if not finufft_ok:
         raise RuntimeError(f"FINUFFT backend is required for this benchmark: {finufft_err}")
+    cufinufft_ok, cufinufft_err = _safe_backend_available("cufinufft")
 
     nufft_sim = _make_nufft_operator(
         "finufft", inputs.samples, inputs.shape, inputs.smaps, inputs.density
@@ -524,7 +884,6 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         except Exception as exc:
             gpu_results["grog_gpu_skipped"] = {"reason": str(exc)}
 
-    cufinufft_ok, cufinufft_err = _safe_backend_available("cufinufft")
     if torch.cuda.is_available() and cufinufft_ok:
         try:
             nufft_gpu = _make_nufft_operator(
@@ -582,6 +941,8 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
 
     results["steps"]["runtime_gpu"] = gpu_results
 
+    results["scaling"] = _build_scaling_suite(cfg, inputs, cufinufft_ok)
+
     return results
 
 
@@ -613,11 +974,35 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Fail if CUFINUFFT GPU NUFFT benchmark cannot run.",
     )
+    parser.add_argument(
+        "--scaling-ratios",
+        type=str,
+        default=",".join(str(v) for v in DEFAULT_SCALING_RATIOS),
+        help=(
+            "Comma-separated synthetic problem-size ratios relative to MRF samples/frame. "
+            "A synthetic MRF-sized case and the real MRF case are appended automatically."
+        ),
+    )
     return parser.parse_args()
+
+
+def _parse_scaling_ratios(raw: str) -> list[float]:
+    vals: list[float] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        v = float(token)
+        if v > 0.0:
+            vals.append(v)
+    if not vals:
+        raise ValueError("--scaling-ratios must include at least one positive number")
+    return vals
 
 
 def main() -> None:
     args = parse_args()
+    scaling_ratios = _parse_scaling_ratios(args.scaling_ratios)
     cfg = BenchmarkConfig(
         shape=tuple(args.shape),
         n_coils=args.n_coils,
@@ -630,6 +1015,7 @@ def main() -> None:
         gpu_device=args.gpu_device,
         require_cufinufft=args.require_cufinufft,
         data_dir=str(args.data_dir),
+        scaling_ratios=scaling_ratios,
     )
 
     output_dir = args.output_dir
