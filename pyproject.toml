@@ -38,18 +38,16 @@ dependencies = [
     "numpy>=2.0",
     "scipy",
     "torch>=2.0",
-    "h5py",
     "mri-nufft",
     "finufft",
     "pytorch-finufft",
 ]
 
 [project.optional-dependencies]
-gpu = [
-    "cupy-cuda12x",
+cuda = [
     "cufinufft; platform_system == 'Linux'",
 ]
-dev = [
+dev-cpu = [
     # style / linting
     "black",
     "isort",
@@ -75,6 +73,16 @@ dev = [
     "pynvml",
     "brainweb-dl",
     "scikit-image",
+    # interop
+    "mrpro",
+]
+dev-cu12 = [
+    "pygrog[dev-cpu,cuda]",
+    "cupy-cuda12x",
+]
+dev-cu13 = [
+    "pygrog[dev-cpu,cuda]",
+    "cupy-cuda13x",
 ]
 
 # List URLs that are relevant to your project
@@ -163,7 +171,6 @@ convention = "numpy"
 minversion = "6.0"
 pythonpath  = ["tests"]
 testpaths=["tests"]
-norecursedirs = ["tests/train"]
 addopts = [
     "--import-mode=importlib",
     "--cov=pygrog",

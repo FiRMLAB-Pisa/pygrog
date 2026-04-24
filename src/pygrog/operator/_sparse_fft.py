@@ -27,6 +27,7 @@ import pathlib
 
 import numpy as np
 import torch
+from mrinufft._array_compat import with_torch
 
 from .._base._fftc import fft, ifft
 
@@ -303,6 +304,7 @@ class SparseFFT:
     # ------------------------------------------------------------------
     # Forward: sparse k-space -> image  (adjoint NUFFT direction)
     # ------------------------------------------------------------------
+    @with_torch
     def forward(self, sparse_kspace: torch.Tensor) -> torch.Tensor:
         """Sparse k-space to image.
 
@@ -364,6 +366,7 @@ class SparseFFT:
     # ------------------------------------------------------------------
     # Adjoint: image -> sparse k-space  (forward NUFFT direction)
     # ------------------------------------------------------------------
+    @with_torch
     def adjoint(self, image: torch.Tensor) -> torch.Tensor:
         """Image to sparse k-space.
 

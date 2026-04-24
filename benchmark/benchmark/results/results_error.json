@@ -1,0 +1,30 @@
+{
+  "error": "Missing benchmark dataset files in benchmark/data: benchmark/data/kspace.npy, benchmark/data/smaps.npy, benchmark/data/basis.npy, benchmark/data/trajectory.npy, benchmark/data/dcf.npy",
+  "traceback": "Traceback (most recent call last):\n  File \"/home/mcencini/pygrog-project/pygrog/benchmark/run_benchmarks.py\", line 1072, in main\n    results = run(cfg, output_dir)\n  File \"/home/mcencini/pygrog-project/pygrog/benchmark/run_benchmarks.py\", line 674, in run\n    inputs = _prepare_real_inputs(cfg, Path(cfg.data_dir))\n  File \"/home/mcencini/pygrog-project/pygrog/benchmark/run_benchmarks.py\", line 92, in _prepare_real_inputs\n    raise FileNotFoundError(\n        \"Missing benchmark dataset files in benchmark/data: \" + \", \".join(missing)\n    )\nFileNotFoundError: Missing benchmark dataset files in benchmark/data: benchmark/data/kspace.npy, benchmark/data/smaps.npy, benchmark/data/basis.npy, benchmark/data/trajectory.npy, benchmark/data/dcf.npy\n",
+  "config": {
+    "shape": [
+      160,
+      160
+    ],
+    "n_coils": 8,
+    "max_frames": 1,
+    "max_coeff": null,
+    "n_spokes": 48,
+    "n_readout": 512,
+    "repeats": 1,
+    "warmup": 0,
+    "gpu_device": 0,
+    "require_cufinufft": false,
+    "data_dir": "benchmark/data",
+    "scaling_ratios": [
+      0.01,
+      0.02,
+      0.05,
+      0.1,
+      0.2,
+      0.4,
+      0.7
+    ],
+    "no_gpu": true
+  }
+}

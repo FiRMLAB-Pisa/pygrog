@@ -5,16 +5,21 @@ Wraps :class:`~pygrog.operator.SparseFFT` (or any pygrog operator with
 so it plugs into mrpro reconstruction pipelines and algorithms
 (conjugate gradient, PDHG, etc.) without modification.
 
-mrpro ``LinearOperator`` contract:
-  - Subclass ``mrpro.operators.LinearOperator``
-  - Implement ``forward(self, x) -> tuple[Tensor]``
-  - Implement ``adjoint(self, x) -> tuple[Tensor]``
-  - Both directions are automatically wrapped for autograd by the base class.
+Gradients are computed via :mod:`pygrog.interop._torch` — explicit
+``torch.autograd.Function`` subclasses whose backward is the adjoint of the
+measurement operator — rather than relying on ``adjoint_as_backward=True``
+or automatic differentiation through the GROG kernels.
+
+mrpro ``LinearOperator`` contract (this adapter's convention):
+  - ``forward(kspace)``  → image   (backprojection, A^H)
+  - ``adjoint(image)``   → kspace  (measurement, A)
 """
 
 __all__ = ["GrogLinearOp"]
 
 import torch
+
+from ._torch import grog_backproject, grog_measure
 
 
 class GrogLinearOp:
@@ -70,42 +75,24 @@ class GrogLinearOp:
                 "Install it with: pip install mrpro"
             ) from exc
 
-        class _GrogLinearOpImpl(LinearOperator, adjoint_as_backward=True):
-            """mrpro LinearOperator wrapping a pygrog SparseFFT-like operator."""
+        class _GrogLinearOpImpl(LinearOperator):
+            """mrpro LinearOperator wrapping a pygrog SparseFFT-like operator.
+
+            Gradients are provided by explicit autograd Functions in
+            ``pygrog.interop._torch``; ``adjoint_as_backward`` is intentionally
+            *not* used to avoid double-wrapping the backward pass.
+            """
 
             def __init__(self, op):
                 super().__init__()
                 self._op = op
 
-            def forward(self, x: torch.Tensor) -> tuple[torch.Tensor]:
-                """Apply operator forward: k-space → image.
+            def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+                """Backprojection: k-space → image (A^H)."""
+                return (grog_backproject(x, self._op),)
 
-                Parameters
-                ----------
-                x
-                    K-space tensor ``(n_coils, n_samples)`` complex.
-
-                Returns
-                -------
-                tuple[torch.Tensor]
-                    Single-element tuple containing the image tensor.
-                """
-                return (self._op.forward(x),)
-
-            def adjoint(self, x: torch.Tensor) -> tuple[torch.Tensor]:
-                """Apply operator adjoint: image → k-space.
-
-                Parameters
-                ----------
-                x
-                    Image tensor ``(*image_shape,)`` or ``(n_coils, *image_shape)``
-                    complex.
-
-                Returns
-                -------
-                tuple[torch.Tensor]
-                    Single-element tuple containing the k-space tensor.
-                """
-                return (self._op.adjoint(x),)
+            def adjoint(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+                """Measurement: image → k-space (A)."""
+                return (grog_measure(x, self._op),)
 
         return _GrogLinearOpImpl

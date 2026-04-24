@@ -15,7 +15,6 @@ import pathlib
 from types import SimpleNamespace
 from numpy.typing import NDArray
 
-import h5py
 import numpy as np
 import torch
 
@@ -196,40 +195,6 @@ class GrogInterpolator:
             _attach_fft_plan(plan, image_shape)
             return plan
         return self.plan
-
-    # ------------------------------------------------------------------
-    # Serialisation
-    # ------------------------------------------------------------------
-    @classmethod
-    def from_file(cls, filepath: str | pathlib.Path) -> "GrogInterpolator":
-        """Load a saved GROG interpolator."""
-        filepath = pathlib.Path(filepath)
-        if not filepath.exists():
-            raise FileNotFoundError(f"Plan file {filepath} not found")
-
-        obj = cls.__new__(cls)
-        if filepath.suffix == ".npy":
-            obj.plan = np.load(filepath, allow_pickle=True).item()
-        elif filepath.suffix in (".mrd", ".h5"):
-            with h5py.File(filepath, "r") as dset:
-                obj.plan = _load_plan_from_mrd(dset)
-        else:
-            raise ValueError(f"Unsupported file extension: {filepath.suffix}")
-        return obj
-
-    def to_file(self, filepath: str | pathlib.Path) -> None:
-        """Save the GROG plan to disk."""
-        filepath = pathlib.Path(filepath)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        if filepath.suffix == ".npy":
-            np.save(filepath, self.plan)
-        elif filepath.suffix in (".mrd", ".h5"):
-            with h5py.File(filepath, "r+") as dset:
-                _store_plan_inside_mrd(dset, self.plan)
-        else:
-            raise ValueError(
-                f"Unsupported extension: {filepath.suffix}. Use .npy, .mrd or .h5"
-            )
 
     # ------------------------------------------------------------------
     # Interpolator setup
@@ -687,54 +652,3 @@ def _rescale_coords(coords, amp):
     if np.isscalar(amp):
         amp = coords.shape[-1] * [amp]
     return 0.5 * np.asarray(amp, dtype=coords.dtype) * coords / cmax
-
-
-# =====================================================================
-# HDF5 serialisation (unchanged API)
-# =====================================================================
-def _store_plan_inside_mrd(dset, plan):
-    dataset_grp = dset.require_group("dataset")
-    grp = dataset_grp.require_group("grog_plan")
-    for key, value in vars(plan).items():
-        if isinstance(value, np.ndarray):
-            if key in grp:
-                del grp[key]
-            grp.create_dataset(key, data=value)
-        elif isinstance(value, (np.integer, np.floating)):
-            grp.attrs[key] = value.item()
-        elif isinstance(value, (int, float)):
-            grp.attrs[key] = value
-        elif isinstance(value, tuple):
-            if key in grp:
-                del grp[key]
-            grp.create_dataset(key, data=np.array(value))
-        elif isinstance(value, list):
-            dtype = h5py.vlen_dtype(value[0].dtype)
-            if key in grp:
-                del grp[key]
-            ds = grp.create_dataset(key, (len(value),), dtype=dtype)
-            for n in range(len(value)):
-                ds[n] = value[n].tolist()
-        elif value is None:
-            grp.attrs[key] = "__NONE__"
-        elif isinstance(value, str):
-            grp.attrs[key] = value
-        else:
-            raise TypeError(f"Unsupported type for key '{key}': {type(value)}")
-
-
-def _load_plan_from_mrd(dset):
-    grp = dset["dataset/grog_plan"]
-    loaded = {}
-    for key in grp:
-        data = grp[key][()]
-        if isinstance(data, np.ndarray) and data.dtype.kind == "O":
-            loaded[key] = [np.array(x) for x in data]
-        else:
-            loaded[key] = data
-    for key, val in grp.attrs.items():
-        if val == "__NONE__":
-            loaded[key] = None
-        else:
-            loaded[key] = val
-    return SimpleNamespace(**loaded)

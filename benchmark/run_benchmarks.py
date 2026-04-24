@@ -61,6 +61,7 @@ class BenchmarkConfig:
     require_cufinufft: bool
     data_dir: str
     scaling_ratios: list[float]
+    no_gpu: bool = False
 
 
 @dataclass
@@ -440,8 +441,10 @@ def _benchmark_scaling_case(
 
     prep_cpu = _combine_preprocess(plan_cpu_m, interp_cpu_m, include_vram=False)
 
+    cuda_available = torch.cuda.is_available() and not cfg.no_gpu
+
     prep_gpu = None
-    if torch.cuda.is_available():
+    if cuda_available:
         _, plan_gpu_m = profile(
             _make_grog,
             shape,
@@ -505,7 +508,7 @@ def _benchmark_scaling_case(
     nufft_fwd_gpu_m = None
     grog_adj_gpu_m = None
     grog_fwd_gpu_m = None
-    if torch.cuda.is_available() and cufinufft_ok:
+    if cuda_available and cufinufft_ok:
         nufft_cuf = _make_nufft_operator("cufinufft", samples, shape, smaps, density)
         _, nufft_adj_gpu_m = profile(
             _nufft_adjoint_all,
@@ -701,6 +704,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
     kspace_tcns = inputs.kspace_tcns.astype(np.complex64)
 
     # GROG plan creation
+    _cuda_available = torch.cuda.is_available() and not cfg.no_gpu
     _, plan_metrics = profile(
         _make_grog,
         inputs.shape,
@@ -709,7 +713,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         inputs.calib_image,
         warmup=0,
         repeat=max(1, cfg.repeats),
-        gpu_device=cfg.gpu_device if torch.cuda.is_available() else None,
+        gpu_device=cfg.gpu_device if _cuda_available else None,
     )
     grog, sparse_fft_cpu, grog_aux = _make_grog(
         inputs.shape,
@@ -728,7 +732,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         grog_aux["sqrt_weights"],
         warmup=cfg.warmup,
         repeat=cfg.repeats,
-        gpu_device=cfg.gpu_device if torch.cuda.is_available() else None,
+        gpu_device=cfg.gpu_device if _cuda_available else None,
     )
     results["steps"]["grog_interpolation"] = _serialize_metrics(interp_metrics)
 
@@ -820,13 +824,16 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
 
     # GPU full and dual-stream modes
     gpu_results: dict[str, Any] = {}
-    if torch.cuda.is_available():
+    _gpu_sparse_fft: SparseFFT | None = None
+    _gpu_nufft = None
+    if _cuda_available:
         try:
             sparse_fft_gpu_full = SparseFFT(
                 plan=grog.fft_plan(image_shape=inputs.shape),
                 smaps=torch.as_tensor(inputs.smaps).to(f"cuda:{cfg.gpu_device}"),
                 device=f"cuda:{cfg.gpu_device}",
             )
+            _gpu_sparse_fft = sparse_fft_gpu_full
             _, grog_adj_gpu_full_m = profile(
                 _grog_adjoint_from_sparse,
                 sparse_tcns,
@@ -884,11 +891,12 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         except Exception as exc:
             gpu_results["grog_gpu_skipped"] = {"reason": str(exc)}
 
-    if torch.cuda.is_available() and cufinufft_ok:
+    if _cuda_available and cufinufft_ok:
         try:
             nufft_gpu = _make_nufft_operator(
                 "cufinufft", inputs.samples, inputs.shape, inputs.smaps, inputs.density
             )
+            _gpu_nufft = nufft_gpu
             _, nufft_adj_gpu_m = profile(
                 _nufft_adjoint_all,
                 nufft_gpu,
@@ -918,7 +926,12 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 ) from exc
             gpu_results["nufft_cufinufft_gpu_skipped"] = {"reason": str(exc)}
     else:
-        reason = "CUDA not available" if not torch.cuda.is_available() else cufinufft_err
+        if cfg.no_gpu:
+            reason = "GPU skipped (--no-gpu)"
+        elif not torch.cuda.is_available():
+            reason = "CUDA not available"
+        else:
+            reason = cufinufft_err
         if cfg.require_cufinufft:
             raise RuntimeError(
                 "CUFINUFFT benchmark is required but unavailable: "
@@ -941,6 +954,33 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
 
     results["steps"]["runtime_gpu"] = gpu_results
 
+    # CUDA subspace coefficient comparison (only when GPU NUFFT + GROG both available)
+    if _gpu_sparse_fft is not None and _gpu_nufft is not None:
+        try:
+            imgs_nufft_cuda = _nufft_adjoint_all(_gpu_nufft, kspace_tcns)
+            imgs_grog_cuda = _grog_adjoint_from_sparse(
+                np.asarray(sparse_tcns), _gpu_sparse_fft, "gpu-full", cfg.gpu_device
+            )
+            coeff_nufft_cuda = _coeff_from_frames(np.asarray(imgs_nufft_cuda), basis_kt)
+            coeff_grog_cuda = _coeff_from_frames(np.asarray(imgs_grog_cuda), basis_kt)
+            np.save(output_dir / "coeff_nufft_cuda.npy", coeff_nufft_cuda)
+            np.save(output_dir / "coeff_grog_cuda.npy", coeff_grog_cuda)
+            coeff_cuda_rel = float(
+                np.linalg.norm(coeff_nufft_cuda - coeff_grog_cuda)
+                / (np.linalg.norm(coeff_nufft_cuda) + 1e-8)
+            )
+            coeff_cuda_corr = float(
+                np.corrcoef(
+                    np.abs(coeff_nufft_cuda).ravel(), np.abs(coeff_grog_cuda).ravel()
+                )[0, 1]
+            )
+            results["steps"]["subspace_comparison"]["cuda"] = {
+                "rel_l2_error": coeff_cuda_rel,
+                "abs_corrcoef": coeff_cuda_corr,
+            }
+        except Exception as exc:
+            results["steps"]["subspace_comparison"]["cuda_skipped"] = {"reason": str(exc)}
+
     results["scaling"] = _build_scaling_suite(cfg, inputs, cufinufft_ok)
 
     return results
@@ -953,10 +993,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--shape", type=int, nargs="+", default=(160, 160))
     parser.add_argument("--n-coils", type=int, default=8)
     parser.add_argument(
-        "--max-frames",
-        type=int,
-        default=None,
-        help="Optional cap on number of frames to use. Default: use all frames from data.",
+        "--smoke",
+        action="store_true",
+        default=False,
+        help="Smoke-test mode: use only 1 frame to verify the pipeline runs on this machine.",
     )
     parser.add_argument(
         "--max-coeff",
@@ -969,6 +1009,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--gpu-device", type=int, default=0)
+    parser.add_argument(
+        "--no-gpu",
+        action="store_true",
+        default=False,
+        help="Skip all GPU benchmarks even when CUDA is available.",
+    )
     parser.add_argument(
         "--require-cufinufft",
         action="store_true",
@@ -1006,7 +1052,7 @@ def main() -> None:
     cfg = BenchmarkConfig(
         shape=tuple(args.shape),
         n_coils=args.n_coils,
-        max_frames=args.max_frames,
+        max_frames=1 if args.smoke else None,
         max_coeff=args.max_coeff,
         n_spokes=args.n_spokes,
         n_readout=args.n_readout,
@@ -1016,6 +1062,7 @@ def main() -> None:
         require_cufinufft=args.require_cufinufft,
         data_dir=str(args.data_dir),
         scaling_ratios=scaling_ratios,
+        no_gpu=args.no_gpu,
     )
 
     output_dir = args.output_dir

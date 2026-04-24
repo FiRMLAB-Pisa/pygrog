@@ -175,12 +175,13 @@ print(f"Undersampled k-space shape: {kspace_us.shape}")
 # %%
 
 # NLINV calibration (Cartesian, pass mask and ndim)
-smaps_nlinv, image_nlinv = nlinv_calib(
+smaps_nlinv, _, image_nlinv = nlinv_calib(
     kspace_us,
     ndim=2,
     mask=mask,
     max_iter=8,
     cg_iter=5,
+    ret_cal=True,
     ret_image=True,
 )
 
@@ -226,5 +227,69 @@ plt.show()
 #    regulariser (``sobolev_width``, ``sobolev_deg``) enforces smooth
 #    sensitivity maps — increase ``sobolev_deg`` for smoother maps at the
 #    cost of accuracy near the FOV boundary.
+
+# %%
+# Synthetic calibration k-space from NLINV
+# =========================================
+#
+# By default (``ret_cal=True``) :func:`~pygrog.utils.nlinv_calib` also returns
+# a **synthesized calibration k-space** (``grappa_train``) — a fully-sampled
+# Cartesian calibration region reconstructed from the NLINV image and
+# sensitivity estimates.  This is exactly the input expected by GRAPPA/GROG
+# calibration kernels, making it easy to plug NLINV into non-Cartesian
+# pipelines where no explicit calibration scan is available.
+
+smaps_nlinv2, grappa_train, image_nlinv2 = nlinv_calib(
+    kspace_us,
+    ndim=2,
+    mask=mask,
+    max_iter=8,
+    cg_iter=5,
+    ret_cal=True,   # default — return synthetic calibration k-space
+    ret_image=True,
+)
+
+grappa_train_np = (
+    grappa_train.numpy() if isinstance(grappa_train, torch.Tensor) else grappa_train
+)
+
+print(f"\nSynthetic calibration k-space shape: {grappa_train_np.shape}")
+print(f"  coils x cal_height x cal_width : {grappa_train_np.shape}")
+
+# %%
+
+cal_height, cal_width = grappa_train_np.shape[-2], grappa_train_np.shape[-1]
+ncols = min(n_coils // 2, 4)
+
+fig, axes = plt.subplots(2, ncols, figsize=(3 * ncols, 5.5))
+for i in range(ncols):
+    # top row: log-magnitude of calibration k-space
+    axes[0, i].imshow(
+        np.log1p(np.abs(grappa_train_np[i])), cmap="inferno", origin="lower"
+    )
+    axes[0, i].set_title(f"Calib k-space (log) — coil {i + 1}")
+    axes[0, i].axis("off")
+    # bottom row: IFFT of calibration region (coil PSF)
+    cal_img = np.fft.fftshift(
+        np.fft.ifft2(np.fft.ifftshift(grappa_train_np[i], axes=(-2, -1))),
+        axes=(-2, -1),
+    )
+    axes[1, i].imshow(np.abs(cal_img), cmap="gray", origin="lower")
+    axes[1, i].set_title(f"Cal image — coil {i + 1}")
+    axes[1, i].axis("off")
+
+plt.suptitle(
+    f"NLINV synthetic calibration k-space  ({cal_height}x{cal_width} centre region)"
+)
+plt.tight_layout()
+plt.show()
+
+# %%
+# .. note::
+#    The synthetic calibration region is computed from the NLINV image and
+#    sensitivity estimates as ``FFT(image x smap)`` for each coil, cropped to
+#    the central ``cal_width x cal_width`` lines.  Its quality therefore
+#    depends on the NLINV reconstruction quality — more iterations give a more
+#    faithful calibration dataset.
 
 plt.show()

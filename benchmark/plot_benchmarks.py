@@ -198,7 +198,7 @@ def _normalize_unit(arr: np.ndarray) -> np.ndarray:
     return out / maxv
 
 
-def plot_subspace(coeff_nufft: np.ndarray, coeff_grog: np.ndarray, out: Path) -> None:
+def plot_subspace(coeff_nufft: np.ndarray, coeff_grog: np.ndarray, out: Path, label: str = "CPU") -> None:
     """Three-row coefficient comparison figure.
 
     Row 1: NUFFT reference magnitudes (gray)
@@ -291,11 +291,12 @@ def plot_subspace(coeff_nufft: np.ndarray, coeff_grog: np.ndarray, out: Path) ->
     cbar = fig.colorbar(im, ax=ax_mape, orientation="vertical", fraction=0.015, pad=0.01)
     cbar.set_label("MAPE (%)", fontsize=9)
 
+    fig.suptitle(label, fontsize=14, fontweight="bold")
     fig.savefig(out, dpi=200, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
 
-def plot_grog_views(coeff_grog: np.ndarray, out: Path) -> None:
+def plot_grog_views(coeff_grog: np.ndarray, out: Path, label: str = "CPU") -> None:
     """GROG-only panel: 3 orthogonal views × k coefficients.
 
     Rows:  axial / coronal / sagittal
@@ -355,7 +356,7 @@ def plot_grog_views(coeff_grog: np.ndarray, out: Path) -> None:
     ax.imshow(canvas, cmap="gray", origin="upper", vmin=0.0, vmax=1.0)
 
     ax.set_xticks(col_centers)
-        ax.set_xticklabels([rf"$\phi_{{{i}}}$" for i in range(k)], fontsize=10)
+    ax.set_xticklabels([rf"$\phi_{{{i}}}$" for i in range(k)], fontsize=10)
     ax.set_yticks(row_centers)
     ax.set_yticklabels(view_names, fontsize=10)
     ax.tick_params(length=0)
@@ -377,6 +378,7 @@ def plot_grog_views(coeff_grog: np.ndarray, out: Path) -> None:
         ax.axhline(ry - 0.5, color="#555555", linewidth=0.5, linestyle="--")
 
     fig.tight_layout(pad=0.3)
+    fig.suptitle(label, fontsize=14, fontweight="bold")
     fig.savefig(out, dpi=200, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
@@ -492,8 +494,25 @@ def main() -> None:
 
     plot_preprocessing(results, args.output_dir / "figure_preprocessing.png")
     plot_linop(results, args.output_dir / "figure_linop.png")
-    plot_subspace(coeff_nufft, coeff_grog, args.output_dir / "figure_coeffs.png")
-    plot_grog_views(coeff_grog, args.output_dir / "figure_grog_views.png")
+    plot_subspace(coeff_nufft, coeff_grog, args.output_dir / "figure_coeffs_cpu.png", label="CPU")
+    plot_grog_views(coeff_grog, args.output_dir / "figure_grog_views_cpu.png", label="CPU")
+
+    cuda_nufft_path = args.output_dir / "coeff_nufft_cuda.npy"
+    cuda_grog_path = args.output_dir / "coeff_grog_cuda.npy"
+    if cuda_nufft_path.exists() and cuda_grog_path.exists():
+        coeff_nufft_cuda = np.load(cuda_nufft_path)
+        coeff_grog_cuda = np.load(cuda_grog_path)
+        plot_subspace(
+            coeff_nufft_cuda,
+            coeff_grog_cuda,
+            args.output_dir / "figure_coeffs_cuda.png",
+            label="CUDA",
+        )
+        plot_grog_views(
+            coeff_grog_cuda,
+            args.output_dir / "figure_grog_views_cuda.png",
+            label="CUDA",
+        )
 
     print(f"Saved figures in {args.output_dir}")
 

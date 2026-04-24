@@ -10,16 +10,14 @@ sigpy ``Linop`` contract:
   - Implement ``_adjoint_linop(self)`` → returns a ``Linop`` for the adjoint
   - Inputs/outputs are numpy (CPU) or cupy (GPU) arrays
 
-Array dispatch is handled by :func:`mrinufft._array_compat.with_torch`,
-which converts numpy/cupy inputs **to torch** before the call and converts
-the torch output **back** to the original array module (numpy or cupy) after.
-This matches the sigpy contract (numpy/cupy on the wire) while letting
-pygrog operators work purely in torch internally.
+Array conversion (numpy/cupy ↔ torch) is handled transparently by
+:class:`~pygrog.operator.SparseFFT`, which is decorated with
+:func:`mrinufft._array_compat.with_torch` on its ``forward`` and ``adjoint``
+methods.  The sigpy ``_apply`` method therefore passes arrays directly to
+the operator and receives numpy/cupy back.
 """
 
 __all__ = ["GrogLinop"]
-
-from mrinufft._array_compat import with_torch
 
 
 class GrogLinop:
@@ -102,12 +100,9 @@ class GrogLinop:
                 else:
                     super().__init__(ksp_shape, img_shape)
 
-            @with_torch
             def _apply(self, input):  # noqa: A002
-                # with_torch already converted input to a torch tensor;
-                # call the pygrog op (which also works in torch) and return
-                # a torch tensor — the decorator converts it back to the
-                # original array module (numpy / cupy) for sigpy.
+                # SparseFFT.forward / .adjoint are decorated with with_torch,
+                # so they accept numpy/cupy arrays and return the same type.
                 if self._is_adjoint:
                     return self._op.adjoint(input)
                 return self._op.forward(input)

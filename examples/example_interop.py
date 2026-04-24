@@ -3,21 +3,22 @@
 Interoperability with mrpro, sigpy and deepinverse
 ==================================================
 
-PyGROG ships four thin adapter layers so that
+PyGROG ships three thin adapter layers so that
 :class:`~pygrog.operator.SparseFFT` (and any gadget stacked on top of it)
 can be used directly inside third-party reconstruction frameworks:
 
 * **mrpro** — :class:`~pygrog.interop.GrogLinearOp` wraps SparseFFT as an
-  ``mrpro.operators.LinearOperator`` with autograd support.
+  ``mrpro.operators.LinearOperator`` with explicit autograd support.
 * **sigpy** — :class:`~pygrog.interop.GrogLinop` wraps SparseFFT as a
   ``sigpy.linop.Linop`` with a working ``.H`` adjoint property.
-* **mri-nufft** — :class:`~pygrog.interop.GrogFourierOp` exposes the
-  ``op`` / ``adj_op`` interface expected by mri-nufft reconstruction
-  pipelines.
-* **deepinverse** — :func:`~pygrog.interop.sparse_fft_forward` and
-  :func:`~pygrog.interop.sparse_fft_adjoint` are autograd-compatible
-  wrappers for gradient-based reconstruction (e.g. with deepinverse or
-  plain PyTorch).
+* **deepinverse** — :class:`~pygrog.interop.GrogLinearPhysics` subclasses
+  ``deepinv.physics.LinearPhysics``, enabling all deepinv algorithms
+  (unrolled networks, PnP, RED, …) to be used directly.
+
+For differentiable use in plain PyTorch (without deepinv) the lower-level
+:func:`~pygrog.interop.grog_measure` and
+:func:`~pygrog.interop.grog_backproject` autograd functions are also
+available.
 
 Each adapter is imported lazily so that missing optional dependencies raise
 an informative error only when the adapter is actually instantiated.
@@ -60,7 +61,9 @@ def _phantom(shape):
 
 
 image_ref = torch.as_tensor(_phantom(image_shape)).to(torch.complex64)
-kspace_ref = op.adjoint(image_ref)  # (1, n_samples)
+# Add coil dimension: operator expects (n_coils, *image_shape) when smaps are absent
+image_1coil = image_ref.unsqueeze(0)  # (1, 32, 32)
+kspace_ref = op.adjoint(image_1coil)  # (1, n_samples)
 
 print(
     f"Operator   : grid={op.grid_shape}, image={op.image_shape}, n={op.indices.shape[0]}"
@@ -68,65 +71,57 @@ print(
 print(f"K-space    : {kspace_ref.shape}")
 
 # %%
-# mri-nufft adapter — GrogFourierOp
-# ===================================
+# deepinverse adapter — GrogLinearPhysics
+# ========================================
 #
-# :class:`~pygrog.interop.GrogFourierOp` exposes the ``op`` / ``adj_op``
-# interface expected by mri-nufft density-compensated reconstructors and
-# trajectory-display utilities.
+# :class:`~pygrog.interop.GrogLinearPhysics` subclasses
+# ``deepinv.physics.LinearPhysics`` so that SparseFFT slots into any deepinv
+# reconstruction algorithm (unrolled networks, PnP, RED, …).  Gradients are
+# provided by explicit :class:`torch.autograd.Function` subclasses — not by
+# automatic differentiation through the GROG kernels.
+#
+# .. note::
+#    ``deepinv`` must be installed separately (``pip install deepinv``).
+#    When not available the lazy class factory raises an informative
+#    ``ImportError``.
 
-from pygrog.interop import GrogFourierOp
+from pygrog.interop import GrogLinearPhysics
 
-mrinufft_op = GrogFourierOp(op)
+try:
+    physics = GrogLinearPhysics(op)
 
-# Forward: image (numpy) -> k-space (numpy)
-ksp_np = mrinufft_op.op(image_ref.numpy())
-print(f"\nGrogFourierOp.op   output shape: {ksp_np.shape}")
+    # Forward measurement: image → k-space
+    ksp_deepinv = physics.A(image_1coil)      # grad provided by _torch.py autograd fn
+    print(f"\nGrogLinearPhysics.A   output shape: {ksp_deepinv.shape}")
 
-# Adjoint: k-space (numpy) -> image (numpy)
-img_np = mrinufft_op.adj_op(ksp_np)
-print(f"GrogFourierOp.adj_op output shape: {img_np.shape}")
+    # Adjoint: k-space → image
+    img_deepinv = physics.A_adjoint(ksp_deepinv)
+    print(f"GrogLinearPhysics.A_adjoint output: {img_deepinv.shape}")
+
+    # Gradient flows through A
+    ksp_grad = kspace_ref.clone().requires_grad_(True)
+    img_out = physics.A_adjoint(ksp_grad)
+    img_out.abs().sum().backward()
+    print(f"Gradient populated on ksp_grad     : {ksp_grad.grad is not None}")
+
+except ImportError as exc:
+    print(f"\ndeepinv not available — skipping GrogLinearPhysics demo: {exc}")
 
 # %%
-
-fig, axes = plt.subplots(1, 2, figsize=(8, 3.5))
-axes[0].imshow(np.abs(image_ref.numpy()), cmap="gray", origin="lower")
-axes[0].set_title("Reference")
-axes[0].axis("off")
-axes[1].imshow(np.abs(img_np), cmap="gray", origin="lower")
-axes[1].set_title("GrogFourierOp round-trip")
-axes[1].axis("off")
-plt.tight_layout()
-plt.show()
-
-# %%
-# deepinverse adapter — autograd wrappers
-# =======================================
+# Plain-PyTorch autograd functions
+# ---------------------------------
 #
-# :func:`~pygrog.interop.sparse_fft_forward` and
-# :func:`~pygrog.interop.sparse_fft_adjoint` wrap SparseFFT as
-# ``torch.autograd.Function`` objects, enabling gradient flow for
-# gradient-based reconstruction (e.g. unrolled networks, deepinverse).
+# For use without deepinv, :func:`~pygrog.interop.grog_measure` (image → k-space)
+# and :func:`~pygrog.interop.grog_backproject` (k-space → image) are the
+# underlying autograd functions.
 
-from pygrog.interop import sparse_fft_forward, sparse_fft_adjoint
+from pygrog.interop import grog_measure
 
-# Forward with gradient tracking
-ksp_grad = kspace_ref.clone().requires_grad_(True)
-img_out = sparse_fft_forward(ksp_grad, op)  # (image_shape,)
-loss = img_out.abs().sum()
-loss.backward()
-
-print(f"\nsparse_fft_forward output shape : {img_out.shape}")
-print(f"Gradient populated on ksp_grad  : {ksp_grad.grad is not None}")
-print(f"Gradient shape                   : {ksp_grad.grad.shape}")
-
-# Adjoint with gradient tracking
-img_grad = image_ref.clone().requires_grad_(True)
-ksp_out = sparse_fft_adjoint(img_grad, op)
+img_grad = image_1coil.clone().requires_grad_(True)
+ksp_out = grog_measure(img_grad, op)
 ksp_out.abs().sum().backward()
-
-print(f"\nsparse_fft_adjoint output shape : {ksp_out.shape}")
-print(f"Gradient populated on img_grad  : {img_grad.grad is not None}")
+print(f"\ngrog_measure output shape : {ksp_out.shape}")
+print(f"Gradient on img_grad      : {img_grad.grad is not None}")
 
 # %%
 # sigpy adapter — GrogLinop
@@ -166,15 +161,10 @@ except ImportError as exc:
 # =============================
 #
 # :class:`~pygrog.interop.GrogLinearOp` returns an
-# ``mrpro.operators.LinearOperator`` with autograd support via mrpro's base
-# class.  It participates in mrpro operator algebra (``@``, ``+``, adjoint
-# via ``.H``) and can be passed directly to mrpro solvers (e.g.
-# ``ConjugateGradient``).
-#
-# .. note::
-#    ``mrpro`` must be installed separately (``pip install mrpro``).  When
-#    mrpro is not available this block prints an informative message and
-#    continues.
+# ``mrpro.operators.LinearOperator`` with autograd support via explicit
+# :class:`torch.autograd.Function` wrappers (no ``adjoint_as_backward``).
+# It participates in mrpro operator algebra (``@``, ``+``, adjoint via ``.H``)
+# and can be passed directly to mrpro solvers (e.g. ``ConjugateGradient``).
 
 from pygrog.interop import GrogLinearOp
 
@@ -182,16 +172,15 @@ try:
     mrpro_op = GrogLinearOp(op)
     print(f"\nGrogLinearOp ready: {type(mrpro_op).__mro__[1].__name__}")
 
-    # Forward (adjoint NUFFT direction): k-space -> image
-    # mrpro operators return tuples
+    # Forward (backprojection): k-space -> image
     (img_mrpro,) = mrpro_op.forward(kspace_ref)
     print(f"mrpro forward output shape: {img_mrpro.shape}")
 
-    # Adjoint: image -> k-space
+    # Adjoint (measurement): image -> k-space
     (ksp_mrpro,) = mrpro_op.adjoint(img_mrpro)
     print(f"mrpro adjoint output shape: {ksp_mrpro.shape}")
 
-    # Compose: normal operator A^H A (mrpro uses .H for adjoint)
+    # Normal operator A^H A
     AHA = mrpro_op.H @ mrpro_op
     (img_aha,) = AHA.forward(kspace_ref)
     print(f"Normal operator (A^H A) output shape: {img_aha.shape}")
@@ -205,16 +194,17 @@ except ImportError as exc:
 #
 # The table below summarises which adapter to choose:
 #
-# +-----------------+----------------------------+-------------------------------+
-# | Adapter         | Interface                  | Use case                      |
-# +=================+============================+===============================+
-# | GrogFourierOp   | ``op`` / ``adj_op``        | mri-nufft pipelines           |
-# +-----------------+----------------------------+-------------------------------+
-# | sparse_fft_*    | ``torch.autograd.Function``| PyTorch / deepinverse          |
-# +-----------------+----------------------------+-------------------------------+
-# | GrogLinop       | ``sigpy.linop.Linop``      | sigpy CG / PDHG solvers       |
-# +-----------------+----------------------------+-------------------------------+
-# | GrogLinearOp    | ``mrpro.LinearOperator``   | mrpro CG / PDHG solvers       |
-# +-----------------+----------------------------+-------------------------------+
+# +---------------------+--------------------------------+-------------------------------+
+# | Adapter             | Interface                      | Use case                      |
+# +=====================+================================+===============================+
+# | GrogLinearPhysics   | ``deepinv.physics.LinearPhysics``  | deepinv algorithms (PnP, …)  |
+# +---------------------+--------------------------------+-------------------------------+
+# | grog_measure /      | ``torch.autograd.Function``    | plain PyTorch gradient recon  |
+# | grog_backproject    |                                |                               |
+# +---------------------+--------------------------------+-------------------------------+
+# | GrogLinop           | ``sigpy.linop.Linop``          | sigpy CG / PDHG solvers       |
+# +---------------------+--------------------------------+-------------------------------+
+# | GrogLinearOp        | ``mrpro.operators.LinearOperator`` | mrpro CG / PDHG solvers   |
+# +---------------------+--------------------------------+-------------------------------+
 
 plt.show()

@@ -1,7 +1,7 @@
 """Tests for interop modules (autograd wrappers).
 
 Exercises the autograd-compatible forward and adjoint wrappers from
-``pygrog.interop._deepinverse``.  Tests parametrized on ``device`` run on
+``pygrog.interop._torch``.  Tests parametrized on ``device`` run on
 CPU always; CUDA is skipped when no GPU is available.
 """
 
@@ -9,7 +9,8 @@ import torch
 import numpy as np
 
 from pygrog.operator._sparse_fft import SparseFFT
-from pygrog.interop._deepinverse import sparse_fft_forward, sparse_fft_adjoint
+from pygrog.interop._torch import grog_backproject as sparse_fft_forward
+from pygrog.interop._torch import grog_measure as sparse_fft_adjoint
 
 
 def _make_op(n_samples=64, seed=0):

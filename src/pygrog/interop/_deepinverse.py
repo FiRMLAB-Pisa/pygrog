@@ -1,44 +1,91 @@
-"""Torch autograd wrapper for SparseFFT — enables gradient-based recon."""
+"""deepinv LinearPhysics adapter for SparseFFT.
 
-__all__ = ["SparseFFTFunction", "sparse_fft_adjoint", "sparse_fft_forward"]
+Wraps :class:`~pygrog.operator.SparseFFT` as a
+``deepinv.physics.LinearPhysics`` so it plugs into deepinv reconstruction
+algorithms (unrolled networks, PnP, RED, …) without modification.
+
+Gradients are computed via :mod:`pygrog.interop._torch` — explicit
+``torch.autograd.Function`` subclasses whose backward is the adjoint of the
+measurement operator — rather than relying on automatic differentiation
+through the GROG kernels.
+
+deepinv ``LinearPhysics`` contract:
+  - Subclass ``deepinv.physics.LinearPhysics``
+  - Implement ``A(x)``         : image  → k-space  (measurement)
+  - Implement ``A_adjoint(y)`` : k-space → image   (backprojection)
+  - ``A_dagger`` (pseudoinverse) is then provided by the base class.
+"""
+
+__all__ = ["GrogLinearPhysics"]
 
 import torch
-from torch.autograd import Function
 
-from ..operator._sparse_fft import SparseFFT
+from ._torch import grog_backproject, grog_measure
 
 
-class SparseFFTFunction(Function):
-    """Autograd function wrapping SparseFFT adjoint (k-space -> image)."""
+class GrogLinearPhysics:
+    """Wrap a pygrog operator as a ``deepinv.physics.LinearPhysics``.
+
+    Because deepinv is an optional dependency, the concrete subclass is
+    built lazily on first instantiation.
+
+    Parameters
+    ----------
+    op : SparseFFT-like
+        Any operator with ``forward(kspace) -> image`` and
+        ``adjoint(image) -> kspace`` methods.
+    noise_model : deepinv.physics.NoiseModel or None, optional
+        Noise model to attach.  Defaults to ``deepinv.physics.ZeroNoise()``.
+
+    Raises
+    ------
+    ImportError
+        If ``deepinv`` is not installed.
+
+    Examples
+    --------
+    ::
+
+        from pygrog.operator import SparseFFT
+        from pygrog.interop import GrogLinearPhysics
+
+        op = SparseFFT(plan=grog.plan, smaps=smaps)
+        physics = GrogLinearPhysics(op)
+
+        y = physics(x)               # noisy measurement
+        x_hat = physics.A_dagger(y)  # pseudoinverse
+    """
+
+    _deepinv_class = None  # cached at class level
+
+    def __new__(cls, op, noise_model=None):
+        if cls._deepinv_class is None:
+            cls._deepinv_class = cls._build_class()
+        return cls._deepinv_class(op, noise_model=noise_model)
 
     @staticmethod
-    def forward(ctx, kspace: torch.Tensor, op: SparseFFT) -> torch.Tensor:
-        ctx.op = op
-        return op.forward(kspace)
+    def _build_class():
+        try:
+            from deepinv.physics import LinearPhysics, ZeroNoise
+        except ImportError as exc:
+            raise ImportError(
+                "deepinv is required for GrogLinearPhysics.  "
+                "Install it with: pip install deepinv"
+            ) from exc
 
-    @staticmethod
-    def backward(ctx, grad_output: torch.Tensor):
-        return ctx.op.adjoint(grad_output), None
+        class _GrogLinearPhysicsImpl(LinearPhysics):
+            """deepinv LinearPhysics wrapping a pygrog SparseFFT-like operator."""
 
+            def __init__(self, op, noise_model=None):
+                super().__init__(noise_model=noise_model or ZeroNoise())
+                self._op = op
 
-def sparse_fft_forward(kspace: torch.Tensor, op: SparseFFT) -> torch.Tensor:
-    """Differentiable sparse k-space -> image."""
-    return SparseFFTFunction.apply(kspace, op)
+            def A(self, x: torch.Tensor, **kwargs) -> torch.Tensor:  # noqa: ARG002
+                """Forward measurement: image → k-space."""
+                return grog_measure(x, self._op)
 
+            def A_adjoint(self, y: torch.Tensor, **kwargs) -> torch.Tensor:  # noqa: ARG002
+                """Backprojection: k-space → image."""
+                return grog_backproject(y, self._op)
 
-class _SparseFFTAdjFunction(Function):
-    """Autograd function wrapping SparseFFT forward (image -> k-space)."""
-
-    @staticmethod
-    def forward(ctx, image: torch.Tensor, op: SparseFFT) -> torch.Tensor:
-        ctx.op = op
-        return op.adjoint(image)
-
-    @staticmethod
-    def backward(ctx, grad_output: torch.Tensor):
-        return ctx.op.forward(grad_output), None
-
-
-def sparse_fft_adjoint(image: torch.Tensor, op: SparseFFT) -> torch.Tensor:
-    """Differentiable image -> sparse k-space."""
-    return _SparseFFTAdjFunction.apply(image, op)
+        return _GrogLinearPhysicsImpl

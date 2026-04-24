@@ -18,7 +18,6 @@ import torch
 from mrinufft import get_operator, initialize_2D_radial
 from mrinufft.density import voronoi
 from mrinufft.extras import fse_simulation, get_brainweb_map, make_b0map
-from mrinufft.operators import MRISubspace
 from mrinufft.operators.off_resonance import MRIFourierCorrected
 from mrinufft.trajectories.utils import Acquisition
 from pygrog.calib import GrogInterpolator
@@ -125,9 +124,18 @@ train = fse_simulation(1.0, t1_grid.ravel(), t2_grid.ravel(), te, tr).astype(np.
 rank = 4
 basis = _estimate_basis(train.T, rank)
 
-# mri-nufft subspace reference (projected NUFFT).
-subspace_nufft = MRISubspace(nufft_ref, subspace_basis=basis)
-coeff_ref_nufft = subspace_nufft.adj_op(kspace_frames)
+# mri-nufft subspace reference: manual adjoint (∑_t conj(φ_r(t)) * NUFFT^H y_t)
+# This avoids depending on MRISubspace's internal batching convention.
+coeff_ref_nufft = np.stack(
+    [
+        sum(
+            np.conj(basis[r, t]) * nufft_ref.adj_op(kspace_frames[t])
+            for t in range(etl)
+        )
+        for r in range(rank)
+    ],
+    axis=0,
+)
 
 # PyGROG subspace path: non-Cartesian -> sparse Cartesian -> SparseFFT + subspace.
 kspace_sparse = []
@@ -140,7 +148,7 @@ for t in range(etl):
 kspace_sparse = torch.as_tensor(np.stack(kspace_sparse, axis=0), dtype=torch.complex64)
 
 proj = SubspaceProjection(n_components=rank)
-proj.fit(torch.as_tensor(train.T, dtype=torch.float32))
+proj.fit(torch.as_tensor(train, dtype=torch.float32))
 sub_op = SubspaceSparseFFT(base_op, proj.basis.to(torch.complex64))
 coeff_pygrog = sub_op.forward(kspace_sparse).detach().cpu().numpy()
 
@@ -185,21 +193,37 @@ kspace_off = orc_nufft.op(m0.astype(np.complex128))
 image_ref_orc = np.abs(orc_nufft.adj_op(kspace_off))
 
 # PyGROG ORC: sparse interpolation, then apply ORC-corrected SparseFFT.
+# OffResonanceCorrection.adjoint expects (n_coils, n_samples) -> (n_coils, *image)
+# so we use a no-smaps operator and combine coils manually afterwards.
+base_op_orc = SparseFFT(plan=grog.plan)  # no smaps
 sparse_off = grog.interpolate(
     kspace_off.astype(np.complex64).reshape(n_coils, *samples.shape[:2]),
     ret_image=False,
 )
 sparse_off = torch.as_tensor(sparse_off, dtype=torch.complex64)
 
+# Derive per-sparse-sample readout times: each original non-Cartesian sample
+# maps to up to kw Cartesian neighbours, so expand readout_time accordingly
+# and filter to the valid (non-sentinel) neighbour entries that match
+# what grog.interpolate() returns.
+_kw = grog.plan.target_idx.shape[-1]
+_valid_np = grog.plan.valid_mask.numpy()
+readout_time_sparse = np.repeat(readout_time.ravel(), _kw)[_valid_np].astype(
+    np.float32
+)
+
 orc_pygrog = OffResonanceCorrection(
-    base_op,
+    base_op_orc,
     field_map=b0_map.astype(np.float32),
-    readout_time=readout_time.ravel().astype(np.float32),
+    readout_time=readout_time_sparse,
     mask=brain_mask,
     n_components=8,
     method="svd",
 )
-image_pygrog_orc = np.abs(orc_pygrog.adjoint(sparse_off).detach().cpu().numpy())
+# Adjoint returns (n_coils, *image_shape) — combine with smaps
+smaps_t = torch.as_tensor(smaps_true.astype(np.complex64))
+result_orc = orc_pygrog.adjoint(sparse_off)  # (n_coils, *image_shape)
+image_pygrog_orc = np.abs((result_orc * smaps_t.conj()).sum(0).detach().cpu().numpy())
 
 image_ref_orc /= image_ref_orc.max() + 1e-12
 image_pygrog_orc /= image_pygrog_orc.max() + 1e-12
