@@ -70,11 +70,12 @@ dev-cpu = [
     # examples / non-cartesian references
     "zenodo-get",
     "psutil",
-    "pynvml",
     "brainweb-dl",
     "scikit-image",
     # interop
     "mrpro",
+    "sigpy",
+    "deepinv",
 ]
 dev-cu12 = [
     "pygrog[dev-cpu,cuda]",
