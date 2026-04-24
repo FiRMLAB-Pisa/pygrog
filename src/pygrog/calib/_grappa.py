@@ -102,11 +102,18 @@ def KernelTable(
     """
     grappa_kernels = train_grappa(train_data, lamda)
 
-    # Calculate displacements steps
-    nsteps = 2 * radius / 10 ** (-precision) + 1
-    nsteps = int(nsteps)
+    # Calculate displacements steps.
+    # stepsize is the quantisation step in standard k-space units.
+    # nsteps covers the full range [-radius, +radius] with step stepsize,
+    # so nsteps - 1 = 2 * radius / stepsize.
+    # delta[i] must equal the actual shift d such that
+    #   interp_idx = (radius + d) / stepsize → d = (i - (nsteps-1)/2) * stepsize.
+    # Dividing by (nsteps-1) instead (old code) gave delta = d/(2*radius),
+    # which is correct only for radius=0.5 (kernel_width=1).
+    stepsize = 10 ** (-precision)
+    nsteps = int(2 * radius / stepsize + 1)
     deltas = torch.arange(nsteps).float()
-    deltas = (deltas - (nsteps - 1) // 2) / (nsteps - 1)
+    deltas = (deltas - (nsteps - 1) / 2) * stepsize
 
     # Pre-compute partial operators
     Gx = grappa_power(grappa_kernels.x, deltas)  # (nsteps, nc, nc)

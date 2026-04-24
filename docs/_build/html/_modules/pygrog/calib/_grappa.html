@@ -463,11 +463,18 @@
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">grappa_kernels</span> <span class="o">=</span> <span class="n">train_grappa</span><span class="p">(</span><span class="n">train_data</span><span class="p">,</span> <span class="n">lamda</span><span class="p">)</span>
 
-    <span class="c1"># Calculate displacements steps</span>
-    <span class="n">nsteps</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">radius</span> <span class="o">/</span> <span class="mi">10</span> <span class="o">**</span> <span class="p">(</span><span class="o">-</span><span class="n">precision</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
-    <span class="n">nsteps</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">nsteps</span><span class="p">)</span>
+    <span class="c1"># Calculate displacements steps.</span>
+    <span class="c1"># stepsize is the quantisation step in standard k-space units.</span>
+    <span class="c1"># nsteps covers the full range [-radius, +radius] with step stepsize,</span>
+    <span class="c1"># so nsteps - 1 = 2 * radius / stepsize.</span>
+    <span class="c1"># delta[i] must equal the actual shift d such that</span>
+    <span class="c1">#   interp_idx = (radius + d) / stepsize → d = (i - (nsteps-1)/2) * stepsize.</span>
+    <span class="c1"># Dividing by (nsteps-1) instead (old code) gave delta = d/(2*radius),</span>
+    <span class="c1"># which is correct only for radius=0.5 (kernel_width=1).</span>
+    <span class="n">stepsize</span> <span class="o">=</span> <span class="mi">10</span> <span class="o">**</span> <span class="p">(</span><span class="o">-</span><span class="n">precision</span><span class="p">)</span>
+    <span class="n">nsteps</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">radius</span> <span class="o">/</span> <span class="n">stepsize</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
     <span class="n">deltas</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">nsteps</span><span class="p">)</span><span class="o">.</span><span class="n">float</span><span class="p">()</span>
-    <span class="n">deltas</span> <span class="o">=</span> <span class="p">(</span><span class="n">deltas</span> <span class="o">-</span> <span class="p">(</span><span class="n">nsteps</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">//</span> <span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">nsteps</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">deltas</span> <span class="o">=</span> <span class="p">(</span><span class="n">deltas</span> <span class="o">-</span> <span class="p">(</span><span class="n">nsteps</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span> <span class="o">*</span> <span class="n">stepsize</span>
 
     <span class="c1"># Pre-compute partial operators</span>
     <span class="n">Gx</span> <span class="o">=</span> <span class="n">grappa_power</span><span class="p">(</span><span class="n">grappa_kernels</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="n">deltas</span><span class="p">)</span>  <span class="c1"># (nsteps, nc, nc)</span>

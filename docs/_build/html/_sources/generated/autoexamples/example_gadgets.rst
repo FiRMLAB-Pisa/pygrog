@@ -389,7 +389,7 @@ Gadget 2: OffResonanceCorrection
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 42.557 seconds)
+   **Total running time of the script:** (0 minutes 44.958 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_gadgets.py:

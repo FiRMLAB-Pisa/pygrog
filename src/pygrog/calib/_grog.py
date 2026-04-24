@@ -251,18 +251,16 @@ class GrogInterpolator:
         pfac = 10.0**precision
         stepsize = 10 ** (-precision)
 
-        # Quantise distances → kernel table index
-        interp_idx = (self.plan.radius + np.round(distances * pfac) / pfac) / stepsize
-        interp_idx = np.round(interp_idx).astype(np.float32)
-        strides = np.array([nsteps**k for k in range(ndim)], dtype=np.float32)
-        interp_idx = np.round(interp_idx * strides).astype(np.int32).sum(axis=-1)
-        interp_idx = np.clip(interp_idx, 0, interp_kernel.shape[0] - 1)
+        # Quantise distances → kernel table index (all torch)
+        interp_idx = (self.plan.radius + torch.round(distances * pfac) / pfac) / stepsize
+        interp_idx = torch.round(interp_idx)
+        strides = torch.tensor([nsteps**k for k in range(ndim)], dtype=torch.float32)
+        interp_idx = torch.round(interp_idx * strides).to(torch.int32).sum(dim=-1)
+        interp_idx = interp_idx.clamp(0, interp_kernel.shape[0] - 1)
 
         self.plan.distances = None  # free memory
         self._interp_kernel = torch.as_tensor(interp_kernel)  # (K, C, C)
-        self._interp_idx = torch.as_tensor(
-            interp_idx.astype(np.int64)
-        )  # (..., npts, kw)
+        self._interp_idx = interp_idx.to(torch.int64)  # (..., npts, kw)
         self._interpolator_set = True
 
     # ------------------------------------------------------------------
@@ -518,71 +516,91 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map):
     # Rescale coords so that FOV spans [-shape/2, shape/2-1]
     coords_scaled = _rescale_coords(coords, shape[-ndim:])
 
-    # --- enumerate kernel offsets ------------------------------------------
+    # --- enumerate kernel offsets (numpy, simple integer table) -----------
     offsets = _kernel_offsets(ndim, kernel_width, kernel_shape)  # (kw_eff, ndim)
     radius = 0.5 * kernel_width  # used for KernelTable later
 
-    # --- for each source, compute target grid indices ----------------------
-    # Round source to nearest grid point, then add offsets
-    # Grid spans [-shape[d]//2 .. shape[d]//2-1] with grid_shape[d] points
-    # Convert coords_scaled to grid indices
-    origins = np.array([-(s // 2) for s in shape], dtype=np.float32)  # (ndim,)
-    grid_steps = np.array(
+    # --- convert to torch for all tensor computations ---------------------
+    coords_t = torch.from_numpy(coords_scaled)  # (..., npts, ndim) float32
+    offsets_t = torch.from_numpy(offsets.astype(np.int32))  # (kw_eff, ndim)
+
+    origins = torch.tensor(
+        [-(s // 2) for s in shape], dtype=torch.float32
+    )  # (ndim,)
+    grid_steps = torch.tensor(
         [
             (s - 1) / (gs - 1) if gs > 1 else 1.0
             for s, gs in zip(shape, grid_shape, strict=False)
         ],
-        dtype=np.float32,
-    )  # spacing between grid points in coord units
+        dtype=torch.float32,
+    )  # spacing between grid points in coord units, (ndim,)
 
     # Source position → fractional grid index
-    frac_idx = (coords_scaled - origins) / grid_steps  # (..., npts, ndim)
+    frac_idx = (coords_t - origins) / grid_steps  # (..., npts, ndim)
 
     # Nearest grid index
-    nearest = np.round(frac_idx).astype(np.int32)  # (..., npts, ndim)
+    nearest = torch.round(frac_idx).to(torch.int32)  # (..., npts, ndim)
 
     # Target grid indices = nearest + offsets  → (..., npts, kw_eff, ndim)
-    target_nd = (
-        nearest[..., np.newaxis, :] + offsets[np.newaxis, :]
-    )  # (..., npts, kw_eff, ndim)
+    target_nd = nearest.unsqueeze(-2) + offsets_t  # (..., npts, kw_eff, ndim)
 
     # Compute distances in coordinate space: target_coord - source_coord
-    target_coords_space = origins + target_nd.astype(np.float32) * grid_steps
-    distances = (
-        target_coords_space - coords_scaled[..., np.newaxis, :]
-    )  # (..., npts, kw_eff, ndim)
+    target_coords_space = origins + target_nd.float() * grid_steps  # (..., npts, kw_eff, ndim)
+    distances = target_coords_space - coords_t.unsqueeze(-2)  # (..., npts, kw_eff, ndim)
 
-    # Clip out-of-bounds → mark as -1
-    in_bounds = np.ones(target_nd.shape[:-1], dtype=bool)  # (..., npts, kw_eff)
-    for d in range(ndim):
-        in_bounds &= (target_nd[..., d] >= 0) & (target_nd[..., d] < grid_shape[d])
+    # In-bounds mask
+    grid_shape_t = torch.tensor(list(grid_shape), dtype=torch.int32)
+    in_bounds = ((target_nd >= 0) & (target_nd < grid_shape_t)).all(dim=-1)  # (..., npts, kw_eff)
 
-    # Compute flat index: sum_d( idx_d * stride_d )
-    strides = np.array(
-        [int(np.prod(grid_shape[d + 1 :])) for d in range(ndim)], dtype=np.int64
+    # Flat index: sum_d( idx_d * stride_d )
+    strides = torch.tensor(
+        [int(np.prod(grid_shape[d + 1 :])) for d in range(ndim)], dtype=torch.int64
     )
-    target_flat = (target_nd.astype(np.int64) * strides).sum(
-        axis=-1
-    )  # (..., npts, kw_eff)
-    target_flat[~in_bounds] = -1  # sentinel for out-of-bounds
+    target_flat = (target_nd.to(torch.int64) * strides).sum(dim=-1)  # (..., npts, kw_eff)
+    target_flat.masked_fill_(~in_bounds, -1)  # sentinel for out-of-bounds
 
-    # --- density compensation (1/count) ------------------------------------
-    # Count how many source replicas land on each grid point
+    # --- EGROG distance-based density compensation -------------------------
+    # For each (source i, target t) pair compute a Gaussian kernel value
+    #   G(d) = exp(-||d_grid||^2 / 2),   d_grid in oversampled-grid units.
+    # Then normalise per target so that sum_{i → t} w_it = 1:
+    #   w_it = G(d_it) / sum_{j → t} G(d_jt)
+    # For kernel_width=1 every source has exactly one target, so w=1 always
+    # (identical to original GROG).  For kernel_width>1 this gives higher
+    # weight to sources that are closer to the target, suppressing the radial
+    # intensity modulation that arises from a uniform (box) average.
     grid_size = int(np.prod(grid_shape))
-    valid_targets = target_flat[target_flat >= 0]
-    counts = np.bincount(valid_targets.ravel(), minlength=grid_size)
-
-    # Weight per (source, neighbour) pair = 1 / count[target]
-    weights = np.zeros_like(target_flat, dtype=np.float32)
     valid_mask = target_flat >= 0
-    weights[valid_mask] = 1.0 / np.maximum(counts[target_flat[valid_mask]], 1).astype(
-        np.float32
+
+    # Euclidean distance in oversampled-grid units: (..., npts, kw_eff)
+    dist_grid = distances / grid_steps  # grid_steps broadcasts over last dim
+    dist_sq = (dist_grid**2).sum(dim=-1)  # (..., npts, kw_eff)
+    gauss_vals = torch.exp(-0.5 * dist_sq)
+    gauss_vals.masked_fill_(~valid_mask, 0.0)
+
+    # Per-target Gaussian sum via scatter_add (torch equivalent of np.add.at)
+    flat_targets = target_flat.reshape(-1)
+    flat_gauss = gauss_vals.reshape(-1)
+    flat_valid = flat_targets >= 0
+    gauss_sum = torch.zeros(grid_size, dtype=torch.float64)
+    gauss_sum.scatter_add_(
+        0, flat_targets[flat_valid], flat_gauss[flat_valid].double()
+    )
+
+    # Normalised per-pair weights
+    weights = torch.zeros_like(gauss_vals)
+    weights[valid_mask] = (
+        gauss_vals[valid_mask]
+        / gauss_sum[target_flat[valid_mask]].clamp(min=1e-12).float()
     )
 
     # --- time map replication ----------------------------------------------
     if time_map is not None:
-        time_map = np.asarray(time_map, dtype=np.float32)
-        time_map = np.broadcast_to(time_map[..., np.newaxis], target_flat.shape).copy()
+        time_map = (
+            torch.as_tensor(np.asarray(time_map, dtype=np.float32))
+            .unsqueeze(-1)
+            .expand(target_flat.shape)
+            .clone()
+        )
 
     return GrogPlan(
         shape=shape,

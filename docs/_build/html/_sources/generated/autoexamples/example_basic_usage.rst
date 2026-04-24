@@ -225,7 +225,7 @@ adjointness condition throughout.
     # mri-nufft coordinates are in [-0.5, 0.5): scale to PyGROG grid units.
     coords = (samples * np.asarray(shape, dtype=np.float32)).astype(np.float32)
 
-    grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=3, oversamp=1.0, image_shape=shape)
+    grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=3, oversamp=1.5, image_shape=shape)
     grog.calc_interp_table(calib_cart, lamda=0.01, precision=1)
 
     # GrogInterpolator expects (n_coils, n_shots, n_readout).
@@ -258,7 +258,7 @@ adjointness condition throughout.
 
  .. code-block:: none
 
-    PyGROG sparse shape : (16, 259062)
+    PyGROG sparse shape : (16, 259080)
 
 
 
@@ -318,8 +318,8 @@ mri-nufft adjoint reference.
 
  .. code-block:: none
 
-    NMSE shortcut  (ret_image=True)    : 2.129e-01
-    NMSE explicit  (sparse IFFT path)  : 3.668e-01
+    NMSE shortcut  (ret_image=True)    : 5.023e-01
+    NMSE explicit  (sparse IFFT path)  : 8.150e-01
 
 
 
@@ -327,7 +327,7 @@ mri-nufft adjoint reference.
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 2.787 seconds)
+   **Total running time of the script:** (0 minutes 2.322 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_basic_usage.py:
