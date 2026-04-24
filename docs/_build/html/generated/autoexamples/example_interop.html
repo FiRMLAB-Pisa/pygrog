@@ -536,8 +536,10 @@ adjointness condition throughout.</p>
   warnings.warn(
 /home/mcencini/.conda/envs/pygrog/lib/python3.13/site-packages/finufft/_interfaces.py:427: UserWarning: Argument `data` does not satisfy the following requirement: C. Copying array (this may reduce performance)
   warnings.warn(f&quot;Argument `{name}` does not satisfy the following requirement: {prop}. Copying array (this may reduce performance)&quot;)
+/home/mcencini/pygrog-project/pygrog/examples/example_interop.py:79: UserWarning: kernel_width=2 with oversamp=(1.0, 1.0) gives max GROG shift 1.000 &gt; 0.5 for the ±1 neighbours; those will be masked. Effective neighbourhood ~ 3 oversampled-grid points. To use all kw=2 neighbours without masking, use oversamp&gt;=2.
+  grog = GrogInterpolator(
 image shape   : (217, 217)
-sparse k-space: torch.Size([1, 38389])  (pre-weighted)
+sparse k-space: torch.Size([1, 12800])  (pre-weighted)
 grid shape    : (217, 217)
 </pre></div>
 </div>
@@ -579,7 +581,7 @@ When not available the lazy class factory raises an informative
 </pre></div>
 </div>
 <div class="sphx-glr-script-out highlight-none notranslate"><div class="highlight"><pre><span></span>GrogLinearPhysics.A_adjoint output: torch.Size([1, 217, 217])
-GrogLinearPhysics.A   output shape: torch.Size([1, 38389])
+GrogLinearPhysics.A   output shape: torch.Size([1, 12800])
 Gradient populated on ksp_grad     : True
 </pre></div>
 </div>
@@ -598,7 +600,7 @@ underlying autograd functions.</p>
 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Gradient on img_grad      : </span><span class="si">{</span><a href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="torch.Tensor" class="sphx-glr-backref-module-torch sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">img_grad</span><span class="o">.</span><span class="n">grad</span></a><span class="w"> </span><span class="ow">is</span><span class="w"> </span><span class="ow">not</span><span class="w"> </span><span class="kc">None</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </pre></div>
 </div>
-<div class="sphx-glr-script-out highlight-none notranslate"><div class="highlight"><pre><span></span>grog_measure output shape : torch.Size([1, 38389])
+<div class="sphx-glr-script-out highlight-none notranslate"><div class="highlight"><pre><span></span>grog_measure output shape : torch.Size([1, 12800])
 Gradient on img_grad      : True
 </pre></div>
 </div>
@@ -636,10 +638,10 @@ continues.</p>
     <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">sigpy not available — skipping GrogLinop demo: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </pre></div>
 </div>
-<div class="sphx-glr-script-out highlight-none notranslate"><div class="highlight"><pre><span></span>GrogLinop    ishape=[1, 38389], oshape=[1, 217, 217]
-GrogLinop.H  ishape=[1, 217, 217], oshape=[1, 38389]
+<div class="sphx-glr-script-out highlight-none notranslate"><div class="highlight"><pre><span></span>GrogLinop    ishape=[1, 12800], oshape=[1, 217, 217]
+GrogLinop.H  ishape=[1, 217, 217], oshape=[1, 12800]
 linop output shape   : (1, 217, 217)
-linop.H output shape : (1, 38389)
+linop.H output shape : (1, 12800)
 </pre></div>
 </div>
 </section>
@@ -675,8 +677,8 @@ and can be passed directly to mrpro solvers (e.g. <code class="docutils literal 
 </div>
 <div class="sphx-glr-script-out highlight-none notranslate"><div class="highlight"><pre><span></span>GrogLinearOp ready: LinearOperator
 mrpro forward output shape: torch.Size([1, 217, 217])
-mrpro adjoint output shape: torch.Size([1, 38389])
-Normal operator (A^H A) output shape: torch.Size([1, 38389])
+mrpro adjoint output shape: torch.Size([1, 12800])
+Normal operator (A^H A) output shape: torch.Size([1, 12800])
 </pre></div>
 </div>
 </section>
@@ -718,7 +720,7 @@ Normal operator (A^H A) output shape: torch.Size([1, 38389])
 <div class="highlight-Python notranslate"><div class="highlight"><pre><span></span><a href="https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.show.html#matplotlib.pyplot.show" title="matplotlib.pyplot.show" class="sphx-glr-backref-module-matplotlib-pyplot sphx-glr-backref-type-py-function"><span class="n">plt</span><span class="o">.</span><span class="n">show</span></a><span class="p">()</span>
 </pre></div>
 </div>
-<p class="sphx-glr-timing"><strong>Total running time of the script:</strong> (0 minutes 1.371 seconds)</p>
+<p class="sphx-glr-timing"><strong>Total running time of the script:</strong> (0 minutes 1.656 seconds)</p>
 <div class="sphx-glr-footer sphx-glr-footer-example docutils container" id="sphx-glr-download-generated-autoexamples-example-interop-py">
 <div class="sphx-glr-download sphx-glr-download-jupyter docutils container">
 <p><a class="reference download internal" download="" href="../../_downloads/437637a9ad2a090d4361eaad30bb794c/example_interop.ipynb"><code class="xref download docutils literal notranslate"><span class="pre">Download</span> <span class="pre">Jupyter</span> <span class="pre">notebook:</span> <span class="pre">example_interop.ipynb</span></code></a></p>

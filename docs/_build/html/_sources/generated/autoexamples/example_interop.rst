@@ -142,8 +142,10 @@ adjointness condition throughout.
       warnings.warn(
     /home/mcencini/.conda/envs/pygrog/lib/python3.13/site-packages/finufft/_interfaces.py:427: UserWarning: Argument `data` does not satisfy the following requirement: C. Copying array (this may reduce performance)
       warnings.warn(f"Argument `{name}` does not satisfy the following requirement: {prop}. Copying array (this may reduce performance)")
+    /home/mcencini/pygrog-project/pygrog/examples/example_interop.py:79: UserWarning: kernel_width=2 with oversamp=(1.0, 1.0) gives max GROG shift 1.000 > 0.5 for the ±1 neighbours; those will be masked. Effective neighbourhood ~ 3 oversampled-grid points. To use all kw=2 neighbours without masking, use oversamp>=2.
+      grog = GrogInterpolator(
     image shape   : (217, 217)
-    sparse k-space: torch.Size([1, 38389])  (pre-weighted)
+    sparse k-space: torch.Size([1, 12800])  (pre-weighted)
     grid shape    : (217, 217)
 
 
@@ -202,7 +204,7 @@ automatic differentiation through the GROG kernels.
 
 
     GrogLinearPhysics.A_adjoint output: torch.Size([1, 217, 217])
-    GrogLinearPhysics.A   output shape: torch.Size([1, 38389])
+    GrogLinearPhysics.A   output shape: torch.Size([1, 12800])
     Gradient populated on ksp_grad     : True
 
 
@@ -240,7 +242,7 @@ underlying autograd functions.
  .. code-block:: none
 
 
-    grog_measure output shape : torch.Size([1, 38389])
+    grog_measure output shape : torch.Size([1, 12800])
     Gradient on img_grad      : True
 
 
@@ -294,10 +296,10 @@ using ``*``, ``+``, and scalar multiplication.
  .. code-block:: none
 
 
-    GrogLinop    ishape=[1, 38389], oshape=[1, 217, 217]
-    GrogLinop.H  ishape=[1, 217, 217], oshape=[1, 38389]
+    GrogLinop    ishape=[1, 12800], oshape=[1, 217, 217]
+    GrogLinop.H  ishape=[1, 217, 217], oshape=[1, 12800]
     linop output shape   : (1, 217, 217)
-    linop.H output shape : (1, 38389)
+    linop.H output shape : (1, 12800)
 
 
 
@@ -351,8 +353,8 @@ and can be passed directly to mrpro solvers (e.g. ``ConjugateGradient``).
 
     GrogLinearOp ready: LinearOperator
     mrpro forward output shape: torch.Size([1, 217, 217])
-    mrpro adjoint output shape: torch.Size([1, 38389])
-    Normal operator (A^H A) output shape: torch.Size([1, 38389])
+    mrpro adjoint output shape: torch.Size([1, 12800])
+    Normal operator (A^H A) output shape: torch.Size([1, 12800])
 
 
 
@@ -398,7 +400,7 @@ Summary
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 1.371 seconds)
+   **Total running time of the script:** (0 minutes 1.656 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_interop.py:

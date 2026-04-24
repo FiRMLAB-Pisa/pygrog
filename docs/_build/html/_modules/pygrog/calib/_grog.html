@@ -370,6 +370,7 @@
 
 <span class="kn">import</span><span class="w"> </span><span class="nn">gc</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">pathlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">types</span><span class="w"> </span><span class="kn">import</span> <span class="n">SimpleNamespace</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">numpy.typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">NDArray</span>
@@ -902,12 +903,28 @@
         <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">s</span> <span class="o">*</span> <span class="n">o</span><span class="p">))</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">o</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">oversamp</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
     <span class="p">)</span>
 
-    <span class="c1"># Rescale coords so that FOV spans [-shape/2, shape/2-1]</span>
-    <span class="n">coords_scaled</span> <span class="o">=</span> <span class="n">_rescale_coords</span><span class="p">(</span><span class="n">coords</span><span class="p">,</span> <span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="n">ndim</span><span class="p">:])</span>
+    <span class="c1"># Rescale coords so the maximum coordinate falls exactly on the last</span>
+    <span class="c1"># valid grid point in every dimension, for any oversampling factor.</span>
+    <span class="c1">#</span>
+    <span class="c1"># The oversampled grid covers image-grid coordinates</span>
+    <span class="c1">#   [origins_d, origins_d + (gs_d-1)*grid_steps_d]</span>
+    <span class="c1">#   = [-(s_d//2),  s_d - 1 - s_d//2]</span>
+    <span class="c1"># so the correct normalisation target is (s_d - 1 - s_d//2) per axis.</span>
+    <span class="c1"># Using shape/2 instead (the old code) caused edge samples to round to</span>
+    <span class="c1"># grid_shape (out of bounds) when oversamp &gt; 1, silently discarding all</span>
+    <span class="c1"># high-frequency edge samples and producing severely artefacted images</span>
+    <span class="c1"># for any non-unity oversampling factor (e.g. osf=1.5, osf=2, …).</span>
+    <span class="n">amp</span> <span class="o">=</span> <span class="p">[</span><span class="mi">2</span> <span class="o">*</span> <span class="p">(</span><span class="n">s</span> <span class="o">-</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">s</span> <span class="o">//</span> <span class="mi">2</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">shape</span><span class="p">]</span>
+    <span class="n">coords_scaled</span> <span class="o">=</span> <span class="n">_rescale_coords</span><span class="p">(</span><span class="n">coords</span><span class="p">,</span> <span class="n">amp</span><span class="p">)</span>
 
     <span class="c1"># --- enumerate kernel offsets (numpy, simple integer table) -----------</span>
     <span class="n">offsets</span> <span class="o">=</span> <span class="n">_kernel_offsets</span><span class="p">(</span><span class="n">ndim</span><span class="p">,</span> <span class="n">kernel_width</span><span class="p">,</span> <span class="n">kernel_shape</span><span class="p">)</span>  <span class="c1"># (kw_eff, ndim)</span>
-    <span class="n">radius</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">kernel_width</span>  <span class="c1"># used for KernelTable later</span>
+
+    <span class="c1"># GROG validity constraint: G^d is physically meaningful only for</span>
+    <span class="c1"># |d| &lt;= 0.5 original-grid units (half the Cartesian spacing).</span>
+    <span class="c1"># Neighbours exceeding this range are masked automatically below.</span>
+    <span class="c1"># radius is ALWAYS 0.5 so the kernel table only pre-computes valid G^d.</span>
+    <span class="n">radius</span> <span class="o">=</span> <span class="mf">0.5</span>
 
     <span class="c1"># --- convert to torch for all tensor computations ---------------------</span>
     <span class="n">coords_t</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">from_numpy</span><span class="p">(</span><span class="n">coords_scaled</span><span class="p">)</span>  <span class="c1"># (..., npts, ndim) float32</span>
@@ -937,16 +954,39 @@
     <span class="n">target_coords_space</span> <span class="o">=</span> <span class="n">origins</span> <span class="o">+</span> <span class="n">target_nd</span><span class="o">.</span><span class="n">float</span><span class="p">()</span> <span class="o">*</span> <span class="n">grid_steps</span>  <span class="c1"># (..., npts, kw_eff, ndim)</span>
     <span class="n">distances</span> <span class="o">=</span> <span class="n">target_coords_space</span> <span class="o">-</span> <span class="n">coords_t</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">)</span>  <span class="c1"># (..., npts, kw_eff, ndim)</span>
 
-    <span class="c1"># In-bounds mask</span>
+    <span class="c1"># In-bounds mask (grid boundary)</span>
     <span class="n">grid_shape_t</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">grid_shape</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
     <span class="n">in_bounds</span> <span class="o">=</span> <span class="p">((</span><span class="n">target_nd</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">target_nd</span> <span class="o">&lt;</span> <span class="n">grid_shape_t</span><span class="p">))</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># (..., npts, kw_eff)</span>
+
+    <span class="c1"># GROG validity mask: each per-component shift must be within ±0.5</span>
+    <span class="c1"># original-grid units so that G^d stays in the physically trained range.</span>
+    <span class="c1"># This turns kw into a soft parameter — candidates outside the valid</span>
+    <span class="c1"># radius are automatically discarded regardless of how large kw is.</span>
+    <span class="c1"># Consequence: for low osf the effective neighbourhood shrinks (e.g.</span>
+    <span class="c1"># osf=1.25 → only offset-0 survives; osf=2 → offsets ±1 survive ~50%).</span>
+    <span class="n">grog_valid</span> <span class="o">=</span> <span class="p">(</span><span class="n">distances</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span> <span class="o">&lt;=</span> <span class="mf">0.5</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># (..., npts, kw_eff)</span>
+    <span class="n">in_bounds</span> <span class="o">=</span> <span class="n">in_bounds</span> <span class="o">&amp;</span> <span class="n">grog_valid</span>
+
+    <span class="c1"># Warn if the chosen kw enumerates many candidates that will mostly be</span>
+    <span class="c1"># discarded (heuristic: half-width offset * grid_steps &gt; 0.5).</span>
+    <span class="n">max_half_shift</span> <span class="o">=</span> <span class="nb">float</span><span class="p">((</span><span class="n">kernel_width</span> <span class="o">//</span> <span class="mi">2</span><span class="p">)</span> <span class="o">*</span> <span class="n">grid_steps</span><span class="o">.</span><span class="n">max</span><span class="p">())</span>
+    <span class="k">if</span> <span class="n">kernel_width</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">max_half_shift</span> <span class="o">&gt;</span> <span class="mf">0.5</span> <span class="o">+</span> <span class="mf">1e-4</span><span class="p">:</span>
+        <span class="n">eff_kw</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="mf">0.5</span> <span class="o">/</span> <span class="nb">float</span><span class="p">(</span><span class="n">grid_steps</span><span class="o">.</span><span class="n">max</span><span class="p">())))</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;kernel_width=</span><span class="si">{</span><span class="n">kernel_width</span><span class="si">}</span><span class="s2"> with oversamp=</span><span class="si">{</span><span class="n">oversamp</span><span class="si">}</span><span class="s2"> gives max GROG shift &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">max_half_shift</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> &gt; 0.5 for the ±1 neighbours; those will be masked. &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;Effective neighbourhood ~ </span><span class="si">{</span><span class="mi">2</span><span class="o">*</span><span class="n">eff_kw</span><span class="o">+</span><span class="mi">1</span><span class="si">}</span><span class="s2"> oversampled-grid points. &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;To use all kw=</span><span class="si">{</span><span class="n">kernel_width</span><span class="si">}</span><span class="s2"> neighbours without masking, use &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;oversamp&gt;=</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="mi">2</span><span class="o">*</span><span class="p">(</span><span class="n">kernel_width</span><span class="o">//</span><span class="mi">2</span><span class="p">)))</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">,</span>
+            <span class="n">stacklevel</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+        <span class="p">)</span>
 
     <span class="c1"># Flat index: sum_d( idx_d * stride_d )</span>
     <span class="n">strides</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
         <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">grid_shape</span><span class="p">[</span><span class="n">d</span> <span class="o">+</span> <span class="mi">1</span> <span class="p">:]))</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">ndim</span><span class="p">)],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span>
     <span class="p">)</span>
     <span class="n">target_flat</span> <span class="o">=</span> <span class="p">(</span><span class="n">target_nd</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span> <span class="o">*</span> <span class="n">strides</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># (..., npts, kw_eff)</span>
-    <span class="n">target_flat</span><span class="o">.</span><span class="n">masked_fill_</span><span class="p">(</span><span class="o">~</span><span class="n">in_bounds</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># sentinel for out-of-bounds</span>
+    <span class="n">target_flat</span><span class="o">.</span><span class="n">masked_fill_</span><span class="p">(</span><span class="o">~</span><span class="n">in_bounds</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># sentinel for out-of-bounds / GROG-invalid</span>
 
     <span class="c1"># --- EGROG distance-based density compensation -------------------------</span>
     <span class="c1"># For each (source i, target t) pair compute a Gaussian kernel value</span>

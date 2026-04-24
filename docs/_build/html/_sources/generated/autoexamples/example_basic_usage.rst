@@ -225,7 +225,7 @@ adjointness condition throughout.
     # mri-nufft coordinates are in [-0.5, 0.5): scale to PyGROG grid units.
     coords = (samples * np.asarray(shape, dtype=np.float32)).astype(np.float32)
 
-    grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=3, oversamp=1.5, image_shape=shape)
+    grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=2, oversamp=1.25, image_shape=shape)
     grog.calc_interp_table(calib_cart, lamda=0.01, precision=1)
 
     # GrogInterpolator expects (n_coils, n_shots, n_readout).
@@ -258,7 +258,9 @@ adjointness condition throughout.
 
  .. code-block:: none
 
-    PyGROG sparse shape : (16, 259080)
+    /home/mcencini/pygrog-project/pygrog/examples/example_basic_usage.py:135: UserWarning: kernel_width=2 with oversamp=(1.25, 1.25) gives max GROG shift 0.797 > 0.5 for the ±1 neighbours; those will be masked. Effective neighbourhood ~ 3 oversampled-grid points. To use all kw=2 neighbours without masking, use oversamp>=2.
+      grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=2, oversamp=1.25, image_shape=shape)
+    PyGROG sparse shape : (16, 36101)
 
 
 
@@ -318,8 +320,8 @@ mri-nufft adjoint reference.
 
  .. code-block:: none
 
-    NMSE shortcut  (ret_image=True)    : 5.023e-01
-    NMSE explicit  (sparse IFFT path)  : 8.150e-01
+    NMSE shortcut  (ret_image=True)    : 2.161e-02
+    NMSE explicit  (sparse IFFT path)  : 1.917e-02
 
 
 
@@ -327,7 +329,7 @@ mri-nufft adjoint reference.
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 2.322 seconds)
+   **Total running time of the script:** (0 minutes 2.705 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_basic_usage.py:

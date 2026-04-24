@@ -132,7 +132,7 @@ calib_cart = calib_cart_full[
 # mri-nufft coordinates are in [-0.5, 0.5): scale to PyGROG grid units.
 coords = (samples * np.asarray(shape, dtype=np.float32)).astype(np.float32)
 
-grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=3, oversamp=1.5, image_shape=shape)
+grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=2, oversamp=1.25, image_shape=shape)
 grog.calc_interp_table(calib_cart, lamda=0.01, precision=1)
 
 # GrogInterpolator expects (n_coils, n_shots, n_readout).

@@ -11,6 +11,7 @@ __all__ = ["GrogInterpolator", "GrogPlan"]
 
 import gc
 import pathlib
+import warnings
 
 from types import SimpleNamespace
 from numpy.typing import NDArray
@@ -513,12 +514,28 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map):
         int(np.ceil(s * o)) for s, o in zip(shape, oversamp, strict=False)
     )
 
-    # Rescale coords so that FOV spans [-shape/2, shape/2-1]
-    coords_scaled = _rescale_coords(coords, shape[-ndim:])
+    # Rescale coords so the maximum coordinate falls exactly on the last
+    # valid grid point in every dimension, for any oversampling factor.
+    #
+    # The oversampled grid covers image-grid coordinates
+    #   [origins_d, origins_d + (gs_d-1)*grid_steps_d]
+    #   = [-(s_d//2),  s_d - 1 - s_d//2]
+    # so the correct normalisation target is (s_d - 1 - s_d//2) per axis.
+    # Using shape/2 instead (the old code) caused edge samples to round to
+    # grid_shape (out of bounds) when oversamp > 1, silently discarding all
+    # high-frequency edge samples and producing severely artefacted images
+    # for any non-unity oversampling factor (e.g. osf=1.5, osf=2, …).
+    amp = [2 * (s - 1 - s // 2) for s in shape]
+    coords_scaled = _rescale_coords(coords, amp)
 
     # --- enumerate kernel offsets (numpy, simple integer table) -----------
     offsets = _kernel_offsets(ndim, kernel_width, kernel_shape)  # (kw_eff, ndim)
-    radius = 0.5 * kernel_width  # used for KernelTable later
+
+    # GROG validity constraint: G^d is physically meaningful only for
+    # |d| <= 0.5 original-grid units (half the Cartesian spacing).
+    # Neighbours exceeding this range are masked automatically below.
+    # radius is ALWAYS 0.5 so the kernel table only pre-computes valid G^d.
+    radius = 0.5
 
     # --- convert to torch for all tensor computations ---------------------
     coords_t = torch.from_numpy(coords_scaled)  # (..., npts, ndim) float32
@@ -548,16 +565,39 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map):
     target_coords_space = origins + target_nd.float() * grid_steps  # (..., npts, kw_eff, ndim)
     distances = target_coords_space - coords_t.unsqueeze(-2)  # (..., npts, kw_eff, ndim)
 
-    # In-bounds mask
+    # In-bounds mask (grid boundary)
     grid_shape_t = torch.tensor(list(grid_shape), dtype=torch.int32)
     in_bounds = ((target_nd >= 0) & (target_nd < grid_shape_t)).all(dim=-1)  # (..., npts, kw_eff)
+
+    # GROG validity mask: each per-component shift must be within ±0.5
+    # original-grid units so that G^d stays in the physically trained range.
+    # This turns kw into a soft parameter — candidates outside the valid
+    # radius are automatically discarded regardless of how large kw is.
+    # Consequence: for low osf the effective neighbourhood shrinks (e.g.
+    # osf=1.25 → only offset-0 survives; osf=2 → offsets ±1 survive ~50%).
+    grog_valid = (distances.abs() <= 0.5).all(dim=-1)  # (..., npts, kw_eff)
+    in_bounds = in_bounds & grog_valid
+
+    # Warn if the chosen kw enumerates many candidates that will mostly be
+    # discarded (heuristic: half-width offset * grid_steps > 0.5).
+    max_half_shift = float((kernel_width // 2) * grid_steps.max())
+    if kernel_width > 1 and max_half_shift > 0.5 + 1e-4:
+        eff_kw = max(1, int(0.5 / float(grid_steps.max())))
+        warnings.warn(
+            f"kernel_width={kernel_width} with oversamp={oversamp} gives max GROG shift "
+            f"{max_half_shift:.3f} > 0.5 for the ±1 neighbours; those will be masked. "
+            f"Effective neighbourhood ~ {2*eff_kw+1} oversampled-grid points. "
+            f"To use all kw={kernel_width} neighbours without masking, use "
+            f"oversamp>={int(np.ceil(2*(kernel_width//2)))}.",
+            stacklevel=3,
+        )
 
     # Flat index: sum_d( idx_d * stride_d )
     strides = torch.tensor(
         [int(np.prod(grid_shape[d + 1 :])) for d in range(ndim)], dtype=torch.int64
     )
     target_flat = (target_nd.to(torch.int64) * strides).sum(dim=-1)  # (..., npts, kw_eff)
-    target_flat.masked_fill_(~in_bounds, -1)  # sentinel for out-of-bounds
+    target_flat.masked_fill_(~in_bounds, -1)  # sentinel for out-of-bounds / GROG-invalid
 
     # --- EGROG distance-based density compensation -------------------------
     # For each (source i, target t) pair compute a Gaussian kernel value
