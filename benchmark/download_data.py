@@ -94,7 +94,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="zenodo_benchmark_") as tmp:
         tmp_path = Path(tmp)
         cmd = [*_zenodo_command(), str(identifier), "-o", str(tmp_path)]
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True)  # noqa: S603
 
         found = 0
         for src in tmp_path.rglob("*"):

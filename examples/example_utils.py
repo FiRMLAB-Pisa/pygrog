@@ -245,7 +245,7 @@ smaps_nlinv2, grappa_train, image_nlinv2 = nlinv_calib(
     mask=mask,
     max_iter=8,
     cg_iter=5,
-    ret_cal=True,   # default — return synthetic calibration k-space
+    ret_cal=True,  # default — return synthetic calibration k-space
     ret_image=True,
 )
 

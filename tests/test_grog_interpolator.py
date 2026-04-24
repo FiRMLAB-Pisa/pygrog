@@ -6,27 +6,32 @@ import torch
 from pygrog.operator import SparseFFT
 from pygrog.calib import GrogInterpolator
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_grog(rng, shape, n_coils, n_views, n_readout, image_shape=None, **kw):
     """Create and fully initialise a GrogInterpolator."""
     if image_shape is None:
         image_shape = shape
     coords = rng.standard_normal((n_views, n_readout, 2)).astype(np.float32)
-    grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=2,
-                            image_shape=image_shape, **kw)
-    calib = (rng.standard_normal((n_coils, *shape))
-             + 1j * rng.standard_normal((n_coils, *shape))).astype(np.complex64)
+    grog = GrogInterpolator(
+        shape=shape, coords=coords, kernel_width=2, image_shape=image_shape, **kw
+    )
+    calib = (
+        rng.standard_normal((n_coils, *shape))
+        + 1j * rng.standard_normal((n_coils, *shape))
+    ).astype(np.complex64)
     grog.calc_interp_table(calib, lamda=0.01, precision=1)
     return grog, coords
 
 
 def _random_kspace(rng, n_coils, n_views, n_readout):
-    return (rng.standard_normal((n_coils, n_views, n_readout))
-            + 1j * rng.standard_normal((n_coils, n_views, n_readout))).astype(np.complex64)
+    return (
+        rng.standard_normal((n_coils, n_views, n_readout))
+        + 1j * rng.standard_normal((n_coils, n_views, n_readout))
+    ).astype(np.complex64)
 
 
 def test_ret_image_matches_sparsefft_forward_rss():
@@ -122,6 +127,7 @@ def test_interpolate_returns_sparse_neighbor_expansion_not_dense_grid():
 # Error handling: interpolate before calc_interp_table
 # ---------------------------------------------------------------------------
 
+
 def test_interpolate_raises_before_calc_interp_table():
     """interpolate() must raise RuntimeError if calc_interp_table() was never called."""
     rng = np.random.default_rng(7)
@@ -142,6 +148,7 @@ def test_interpolate_raises_before_calc_interp_table():
 # ---------------------------------------------------------------------------
 # Shot-by-shot gridding
 # ---------------------------------------------------------------------------
+
 
 def test_shot_by_shot_returns_correct_grid_shape():
     """collect_shots() must return a tensor of shape (n_coils, *grid_shape)."""
@@ -174,4 +181,3 @@ def test_collect_shots_raises_before_any_shots():
 
     with pytest.raises(RuntimeError, match="No shots accumulated"):
         grog.collect_shots()
-

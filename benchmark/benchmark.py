@@ -4,6 +4,7 @@ from __future__ import annotations
 
 __all__ = ["profile"]
 
+import contextlib
 import statistics
 import threading
 import time
@@ -45,10 +46,8 @@ def _sync_cuda() -> None:
     if torch is not None and torch.cuda.is_available():
         torch.cuda.synchronize()
     if cp is not None:
-        try:
+        with contextlib.suppress(Exception):
             cp.cuda.runtime.deviceSynchronize()
-        except Exception:
-            pass
 
 
 def _monitor_resources(
@@ -75,19 +74,15 @@ def _monitor_resources(
         peaks.ram_bytes = max(peaks.ram_bytes, rss)
 
         if nvml_handle is not None:
-            try:
+            with contextlib.suppress(Exception):
                 mem = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle)
                 peaks.gpu_mem_bytes = max(peaks.gpu_mem_bytes, mem.used)
-            except Exception:
-                pass
 
         time.sleep(sample_interval_sec)
 
     if nvml_handle is not None:
-        try:
+        with contextlib.suppress(Exception):
             pynvml.nvmlShutdown()
-        except Exception:
-            pass
 
 
 def profile(
@@ -135,17 +130,13 @@ def profile(
             _sync_cuda()
 
     if torch is not None and torch.cuda.is_available():
-        try:
+        with contextlib.suppress(Exception):
             torch.cuda.reset_peak_memory_stats()
-        except Exception:
-            pass
 
     peaks = _Peaks()
     # Seed RAM peak so very short calls still report non-zero process memory.
-    try:
+    with contextlib.suppress(Exception):
         peaks.ram_bytes = max(peaks.ram_bytes, psutil.Process().memory_info().rss)
-    except Exception:
-        pass
 
     stop_event = threading.Event()
     thread = threading.Thread(
@@ -192,11 +183,8 @@ def profile(
             # Linux reports ru_maxrss in KiB, macOS in bytes.
             maxrss = int(getattr(usage, "ru_maxrss", 0))
             if maxrss > 0:
-                if maxrss < (1 << 30):
-                    ram_bytes = maxrss * 1024
-                else:
-                    ram_bytes = maxrss
-        except Exception:
+                ram_bytes = maxrss * 1024 if maxrss < (1 << 30) else maxrss
+        except Exception:  # noqa: S110
             pass
 
     metrics = {
@@ -204,11 +192,21 @@ def profile(
         "warmup": warmup,
         "runtimes_sec": runtimes,
         "runtime_mean_sec": float(statistics.mean(runtimes)),
-        "runtime_std_sec": float(statistics.pstdev(runtimes) if len(runtimes) > 1 else 0.0),
+        "runtime_std_sec": float(
+            statistics.pstdev(runtimes) if len(runtimes) > 1 else 0.0
+        ),
         "peak_cpu_percent": float(peaks.cpu_percent),
         "peak_ram_gb": float(ram_bytes / (1024**3)),
-        "peak_gpu_mem_gb_nvml": float(peaks.gpu_mem_bytes / (1024**3)) if peaks.gpu_mem_bytes else None,
-        "peak_gpu_mem_gb_torch": float(torch_peak_bytes / (1024**3)) if torch_peak_bytes is not None else None,
-        "peak_gpu_mem_gb_cupy": float(cupy_peak_bytes / (1024**3)) if cupy_peak_bytes is not None else None,
+        "peak_gpu_mem_gb_nvml": (
+            float(peaks.gpu_mem_bytes / (1024**3)) if peaks.gpu_mem_bytes else None
+        ),
+        "peak_gpu_mem_gb_torch": (
+            float(torch_peak_bytes / (1024**3))
+            if torch_peak_bytes is not None
+            else None
+        ),
+        "peak_gpu_mem_gb_cupy": (
+            float(cupy_peak_bytes / (1024**3)) if cupy_peak_bytes is not None else None
+        ),
     }
     return output, metrics

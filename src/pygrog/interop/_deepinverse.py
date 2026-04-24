@@ -84,7 +84,9 @@ class GrogLinearPhysics:
                 """Forward measurement: image → k-space."""
                 return grog_measure(x, self._op)
 
-            def A_adjoint(self, y: torch.Tensor, **kwargs) -> torch.Tensor:  # noqa: ARG002
+            def A_adjoint(
+                self, y: torch.Tensor, **kwargs  # noqa: ARG002
+            ) -> torch.Tensor:
                 """Backprojection: k-space → image."""
                 return grog_backproject(y, self._op)
 

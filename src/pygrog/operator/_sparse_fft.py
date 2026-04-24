@@ -5,6 +5,7 @@ Provides forward (sparse-to-dense / adjoint NUFFT) and adjoint (dense-to-sparse
 weights, grid/image shapes).
 
 Coil combination is performed inside the operator:
+
 - If sensitivity maps are provided, SENSE-style combination (forward) or
   expansion (adjoint) is used.
 - Otherwise, root-sum-of-squares combination is applied (forward only;

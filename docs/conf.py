@@ -5,11 +5,11 @@ Full list of options:
 https://www.sphinx-doc.org/en/master/usage/configuration.html
 """
 
-import os
 import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.abspath("."))
-sys.path.insert(0, os.path.abspath("../src"))
+sys.path.insert(0, str(Path().resolve()))
+sys.path.insert(0, str(Path("../src").resolve()))
 
 # -- Project information -----------------------------------------------------
 
@@ -33,7 +33,9 @@ extensions = [
 ]
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "api/index.rst", "build.md", "installation_guide.md"]
+
+suppress_warnings = ["myst.xref_missing"]
 
 # MyST (Markdown) settings
 myst_enable_extensions = ["colon_fence", "deflist", "dollarmath", "amsmath"]
@@ -66,6 +68,7 @@ sphinx_gallery_conf = {
     "nested_sections": True,
     "within_subsection_order": "FileNameSortKey",
     "first_notebook_cell": "!pip install pygrog[dev]",
+    "abort_on_example_error": False,
 }
 
 # -- Intersphinx -------------------------------------------------------------

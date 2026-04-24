@@ -34,7 +34,6 @@ from mrinufft import get_operator
 from pygrog.calib import GrogInterpolator
 from pygrog.operator import SparseFFT
 
-
 DATASET_FILES = {
     "kspace": "kspace.npy",
     "smaps": "smaps.npy",
@@ -75,6 +74,8 @@ class BenchmarkInputs:
     calib_image: np.ndarray
     source: str
     metadata: dict[str, Any]
+
+
 def _coeff_from_frames(images_tyx: np.ndarray, basis_kt: np.ndarray) -> np.ndarray:
     flat = images_tyx.reshape(images_tyx.shape[0], -1)
     coeff = basis_kt @ flat
@@ -83,10 +84,10 @@ def _coeff_from_frames(images_tyx: np.ndarray, basis_kt: np.ndarray) -> np.ndarr
 
 def _rss(images_cyx: np.ndarray) -> np.ndarray:
     return np.sqrt((np.abs(images_cyx) ** 2).sum(axis=0))
+
+
 def _prepare_real_inputs(cfg: BenchmarkConfig, data_dir: Path) -> BenchmarkInputs:
-    required = {
-        key: data_dir / filename for key, filename in DATASET_FILES.items()
-    }
+    required = {key: data_dir / filename for key, filename in DATASET_FILES.items()}
     missing = [str(p) for p in required.values() if not p.exists()]
     if missing:
         raise FileNotFoundError(
@@ -100,14 +101,21 @@ def _prepare_real_inputs(cfg: BenchmarkConfig, data_dir: Path) -> BenchmarkInput
     shape = tuple(int(x) for x in smaps.shape[1:])
 
     if kspace_tcns.ndim != 4:
-        raise ValueError(f"Expected kspace.npy to have shape (T, C, spokes, readout); got {kspace_tcns.shape}")
+        raise ValueError(
+            f"Expected kspace.npy to have shape (T, C, spokes, readout); got {kspace_tcns.shape}"
+        )
     if trajectory.ndim != 4 or trajectory.shape[-1] != len(shape):
         raise ValueError(
             f"Expected trajectory.npy to have shape (T, spokes, readout, {len(shape)}); got {trajectory.shape}"
         )
     if dcf.ndim != 3:
-        raise ValueError(f"Expected dcf.npy to have shape (T, spokes, readout); got {dcf.shape}")
-    if kspace_tcns.shape[0] != trajectory.shape[0] or kspace_tcns.shape[0] != dcf.shape[0]:
+        raise ValueError(
+            f"Expected dcf.npy to have shape (T, spokes, readout); got {dcf.shape}"
+        )
+    if (
+        kspace_tcns.shape[0] != trajectory.shape[0]
+        or kspace_tcns.shape[0] != dcf.shape[0]
+    ):
         raise ValueError(
             "kspace, trajectory, and dcf frame counts do not match: "
             f"{kspace_tcns.shape[0]}, {trajectory.shape[0]}, {dcf.shape[0]}"
@@ -367,7 +375,7 @@ def _make_synthetic_case(
 ) -> dict[str, Any]:
     samples_per_frame = max(1, int(samples_per_frame))
     n_readout = max(8, int(n_readout))
-    n_spokes = int(math.ceil(samples_per_frame / n_readout))
+    n_spokes = math.ceil(samples_per_frame / n_readout)
 
     # Build a structured radial-like trajectory so synthetic scaling resembles
     # real non-Cartesian workloads better than fully i.i.d. random points.
@@ -379,9 +387,13 @@ def _make_synthetic_case(
     dcf = np.ones((n_spokes, n_readout), dtype=np.float32)
 
     kspace = (
-        rng.standard_normal(size=(n_frames, n_coils, n_spokes, n_readout)).astype(np.float32)
+        rng.standard_normal(size=(n_frames, n_coils, n_spokes, n_readout)).astype(
+            np.float32
+        )
         + 1j
-        * rng.standard_normal(size=(n_frames, n_coils, n_spokes, n_readout)).astype(np.float32)
+        * rng.standard_normal(size=(n_frames, n_coils, n_spokes, n_readout)).astype(
+            np.float32
+        )
     ).astype(np.complex64)
     smaps = (
         rng.standard_normal(size=(n_coils, *shape)).astype(np.float32)
@@ -554,7 +566,9 @@ def _benchmark_scaling_case(
             gpu_device=cfg.gpu_device,
         )
 
-    def _pack(metrics: dict[str, Any] | None, *, is_gpu: bool) -> dict[str, float | None]:
+    def _pack(
+        metrics: dict[str, Any] | None, *, is_gpu: bool
+    ) -> dict[str, float | None]:
         if metrics is None:
             return {"runtime_sec": None, "ram_gb": None, "vram_gb": None}
         return {
@@ -685,16 +699,18 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         },
         "environment": {
             "torch_cuda_available": bool(torch.cuda.is_available()),
-            "torch_cuda_device_count": int(torch.cuda.device_count())
-            if torch.cuda.is_available()
-            else 0,
+            "torch_cuda_device_count": (
+                int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
+            ),
         },
         "steps": {},
     }
 
     finufft_ok, finufft_err = _safe_backend_available("finufft")
     if not finufft_ok:
-        raise RuntimeError(f"FINUFFT backend is required for this benchmark: {finufft_err}")
+        raise RuntimeError(
+            f"FINUFFT backend is required for this benchmark: {finufft_err}"
+        )
     cufinufft_ok, cufinufft_err = _safe_backend_available("cufinufft")
 
     nufft_sim = _make_nufft_operator(
@@ -760,8 +776,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
     coeff_grog = _coeff_from_frames(np.asarray(imgs_grog_cpu), basis_kt)
 
     coeff_rel = float(
-        np.linalg.norm(coeff_nufft - coeff_grog)
-        / (np.linalg.norm(coeff_nufft) + 1e-8)
+        np.linalg.norm(coeff_nufft - coeff_grog) / (np.linalg.norm(coeff_nufft) + 1e-8)
     )
     coeff_corr = float(
         np.corrcoef(np.abs(coeff_nufft).ravel(), np.abs(coeff_grog).ravel())[0, 1]
@@ -921,8 +936,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         except Exception as exc:
             if cfg.require_cufinufft:
                 raise RuntimeError(
-                    "CUFINUFFT benchmark is required but failed to run: "
-                    f"{exc}"
+                    "CUFINUFFT benchmark is required but failed to run: " f"{exc}"
                 ) from exc
             gpu_results["nufft_cufinufft_gpu_skipped"] = {"reason": str(exc)}
     else:
@@ -934,23 +948,23 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
             reason = cufinufft_err
         if cfg.require_cufinufft:
             raise RuntimeError(
-                "CUFINUFFT benchmark is required but unavailable: "
-                f"{reason}"
+                "CUFINUFFT benchmark is required but unavailable: " f"{reason}"
             )
         gpu_results["nufft_cufinufft_gpu_skipped"] = {"reason": reason}
 
     # Keep GPU comparisons fair: only report GPU GROG if GPU NUFFT is available.
-    if "nufft_cufinufft_gpu" not in gpu_results:
-        if "grog_full_gpu" in gpu_results or "grog_dual_stream_gpu" in gpu_results:
-            grog_full = gpu_results.pop("grog_full_gpu", None)
-            grog_dual = gpu_results.pop("grog_dual_stream_gpu", None)
-            gpu_results["grog_gpu_skipped"] = {
-                "reason": (
-                    "Skipped for parity because CUFINUFFT GPU results are unavailable."
-                ),
-                "suppressed_grog_full_gpu": bool(grog_full is not None),
-                "suppressed_grog_dual_stream_gpu": bool(grog_dual is not None),
-            }
+    if "nufft_cufinufft_gpu" not in gpu_results and (
+        "grog_full_gpu" in gpu_results or "grog_dual_stream_gpu" in gpu_results
+    ):
+        grog_full = gpu_results.pop("grog_full_gpu", None)
+        grog_dual = gpu_results.pop("grog_dual_stream_gpu", None)
+        gpu_results["grog_gpu_skipped"] = {
+            "reason": (
+                "Skipped for parity because CUFINUFFT GPU results are unavailable."
+            ),
+            "suppressed_grog_full_gpu": bool(grog_full is not None),
+            "suppressed_grog_dual_stream_gpu": bool(grog_dual is not None),
+        }
 
     results["steps"]["runtime_gpu"] = gpu_results
 
@@ -979,7 +993,9 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 "abs_corrcoef": coeff_cuda_corr,
             }
         except Exception as exc:
-            results["steps"]["subspace_comparison"]["cuda_skipped"] = {"reason": str(exc)}
+            results["steps"]["subspace_comparison"]["cuda_skipped"] = {
+                "reason": str(exc)
+            }
 
     results["scaling"] = _build_scaling_suite(cfg, inputs, cufinufft_ok)
 

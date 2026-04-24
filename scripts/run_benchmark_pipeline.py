@@ -22,7 +22,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", type=Path, default=Path("benchmark/data"))
     parser.add_argument("--output-dir", type=Path, default=Path("benchmark/results"))
 
-    parser.add_argument("--record", type=str, help="Zenodo record ID for data download.")
+    parser.add_argument(
+        "--record", type=str, help="Zenodo record ID for data download."
+    )
     parser.add_argument("--doi", type=str, help="Zenodo DOI for data download.")
 
     parser.add_argument("--shape", type=int, nargs="+", default=[160, 160])
@@ -60,19 +62,27 @@ def parse_args() -> argparse.Namespace:
 
 
 def _missing_data_files(data_dir: Path) -> list[Path]:
-    return [data_dir / name for name in REQUIRED_DATA_FILES if not (data_dir / name).exists()]
+    return [
+        data_dir / name
+        for name in REQUIRED_DATA_FILES
+        if not (data_dir / name).exists()
+    ]
 
 
 def _run(cmd: list[str]) -> None:
     print("$", " ".join(str(x) for x in cmd))
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True)  # noqa: S603
 
 
 def main() -> None:
     args = parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
-    data_dir = (repo_root / args.data_dir).resolve() if not args.data_dir.is_absolute() else args.data_dir
+    data_dir = (
+        (repo_root / args.data_dir).resolve()
+        if not args.data_dir.is_absolute()
+        else args.data_dir
+    )
     output_dir = (
         (repo_root / args.output_dir).resolve()
         if not args.output_dir.is_absolute()

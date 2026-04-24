@@ -32,12 +32,12 @@ def _format_memory(value_gb: float) -> str:
 
 
 def _annotate_bars(ax, bars, formatter, x_shift: float = 0.0, stagger: bool = True):
-    vals = [float(getattr(bar, "get_height")()) for bar in bars]
+    vals = [float(bar.get_height()) for bar in bars]
     ymax = max(vals) if vals else 0.0
     offset = max(0.01 * ymax, 0.003)
     n = len(vals)
     fontsize = 8 if n <= 8 else 7
-    for i, (bar, val) in enumerate(zip(bars, vals)):
+    for i, (bar, val) in enumerate(zip(bars, vals, strict=False)):
         x = bar.get_x() + bar.get_width() / 2.0 + x_shift
         y = val + offset
         if stagger and i % 2 == 1:
@@ -68,7 +68,9 @@ def _scaling_cases(results: dict) -> list[dict]:
     scaling = results.get("scaling", {})
     cases = scaling.get("cases", [])
     if not cases:
-        raise ValueError("results.json does not include scaling cases. Re-run run_benchmarks.py.")
+        raise ValueError(
+            "results.json does not include scaling cases. Re-run run_benchmarks.py."
+        )
     return cases
 
 
@@ -90,7 +92,9 @@ def plot_preprocessing(results: dict, out: Path) -> None:
     stages = [("planning", "Planning"), ("interpolation", "Interpolation")]
 
     def _stage_val(case: dict, device: str, stage: str, metric: str):
-        val = _extract_case_value(case, ("preprocessing", device, stage, metric), np.nan)
+        val = _extract_case_value(
+            case, ("preprocessing", device, stage, metric), np.nan
+        )
         # Backward compatibility with older results.json that stored only combined preprocessing.
         if np.isnan(val) and stage == "interpolation":
             return _extract_case_value(case, ("preprocessing", device, metric), np.nan)
@@ -104,10 +108,18 @@ def plot_preprocessing(results: dict, out: Path) -> None:
         ax_rt = axes[0, col]
         ax_mem = axes[1, col]
 
-        runtime_cpu = [_stage_val(case, "cpu", stage_key, "runtime_sec") for case in cases]
-        runtime_gpu = [_stage_val(case, "gpu", stage_key, "runtime_sec") for case in cases]
-        bars_cpu = ax_rt.bar(x - width / 2, runtime_cpu, width, color="#4E79A7", label="CPU")
-        bars_gpu = ax_rt.bar(x + width / 2, runtime_gpu, width, color="#E15759", label="GPU")
+        runtime_cpu = [
+            _stage_val(case, "cpu", stage_key, "runtime_sec") for case in cases
+        ]
+        runtime_gpu = [
+            _stage_val(case, "gpu", stage_key, "runtime_sec") for case in cases
+        ]
+        bars_cpu = ax_rt.bar(
+            x - width / 2, runtime_cpu, width, color="#4E79A7", label="CPU"
+        )
+        bars_gpu = ax_rt.bar(
+            x + width / 2, runtime_gpu, width, color="#E15759", label="GPU"
+        )
         _annotate_bars(ax_rt, bars_cpu, _format_runtime, x_shift=-0.04, stagger=False)
         _annotate_bars(ax_rt, bars_gpu, _format_runtime, x_shift=0.04, stagger=False)
 
@@ -129,12 +141,20 @@ def plot_preprocessing(results: dict, out: Path) -> None:
             label="GPU VRAM",
         )
 
-        total_cpu = np.asarray(mem_cpu_ram, dtype=float) + np.asarray(mem_cpu_vram, dtype=float)
-        total_gpu = np.asarray(mem_gpu_ram, dtype=float) + np.nan_to_num(np.asarray(mem_gpu_vram, dtype=float), nan=0.0)
+        total_cpu = np.asarray(mem_cpu_ram, dtype=float) + np.asarray(
+            mem_cpu_vram, dtype=float
+        )
+        total_gpu = np.asarray(mem_gpu_ram, dtype=float) + np.nan_to_num(
+            np.asarray(mem_gpu_vram, dtype=float), nan=0.0
+        )
         bars_mem_cpu = ax_mem.bar(x - width / 2, total_cpu, width, alpha=0.0)
         bars_mem_gpu = ax_mem.bar(x + width / 2, total_gpu, width, alpha=0.0)
-        _annotate_bars(ax_mem, bars_mem_cpu, _format_memory, x_shift=-0.04, stagger=False)
-        _annotate_bars(ax_mem, bars_mem_gpu, _format_memory, x_shift=0.04, stagger=False)
+        _annotate_bars(
+            ax_mem, bars_mem_cpu, _format_memory, x_shift=-0.04, stagger=False
+        )
+        _annotate_bars(
+            ax_mem, bars_mem_gpu, _format_memory, x_shift=0.04, stagger=False
+        )
 
         ax_rt.set_title(f"{stage_name} Runtime")
         ax_mem.set_title(f"{stage_name} Memory")
@@ -198,7 +218,9 @@ def _normalize_unit(arr: np.ndarray) -> np.ndarray:
     return out / maxv
 
 
-def plot_subspace(coeff_nufft: np.ndarray, coeff_grog: np.ndarray, out: Path, label: str = "CPU") -> None:
+def plot_subspace(
+    coeff_nufft: np.ndarray, coeff_grog: np.ndarray, out: Path, label: str = "CPU"
+) -> None:
     """Three-row coefficient comparison figure.
 
     Row 1: NUFFT reference magnitudes (gray)
@@ -209,21 +231,21 @@ def plot_subspace(coeff_nufft: np.ndarray, coeff_grog: np.ndarray, out: Path, la
     """
     k = min(coeff_nufft.shape[0], coeff_grog.shape[0])
 
-    top_tiles = []    # NUFFT
-    mid_tiles = []    # GROG
-    mape_tiles = []   # MAPE
+    top_tiles = []  # NUFFT
+    mid_tiles = []  # GROG
+    mape_tiles = []  # MAPE
 
     eps = 1e-8
     for i in range(k):
         nufft_2d = np.abs(_to_2d_slice(coeff_nufft[i]))
-        grog_2d  = np.abs(_to_2d_slice(coeff_grog[i]))
+        grog_2d = np.abs(_to_2d_slice(coeff_grog[i]))
         top_tiles.append(_normalize_unit(nufft_2d))
         mid_tiles.append(_normalize_unit(grog_2d))
         mape = np.abs(nufft_2d - grog_2d) / (nufft_2d + eps) * 100.0
         mape_tiles.append(mape.astype(np.float32))
 
-    top_row  = np.concatenate(top_tiles,  axis=1)
-    mid_row  = np.concatenate(mid_tiles,  axis=1)
+    top_row = np.concatenate(top_tiles, axis=1)
+    mid_row = np.concatenate(mid_tiles, axis=1)
     mape_row = np.concatenate(mape_tiles, axis=1)
 
     avg_mape = float(np.mean(mape_row))
@@ -231,7 +253,8 @@ def plot_subspace(coeff_nufft: np.ndarray, coeff_grog: np.ndarray, out: Path, la
 
     # Two axes: grayscale canvas (NUFFT + GROG) and MAPE canvas.
     fig, (ax_gray, ax_mape) = plt.subplots(
-        2, 1,
+        2,
+        1,
         figsize=(3.2 * k, 9.6),
         gridspec_kw={"height_ratios": [2, 1], "hspace": 0.06},
     )
@@ -260,8 +283,12 @@ def plot_subspace(coeff_nufft: np.ndarray, coeff_grog: np.ndarray, out: Path, la
     cursor = 0
     for w in tile_widths[:-1]:
         cursor += w
-        ax_gray.axvline(cursor - 0.5, color="#666666", linewidth=0.5, linestyle="--", alpha=0.6)
-        ax_mape.axvline(cursor - 0.5, color="#666666", linewidth=0.5, linestyle="--", alpha=0.6)
+        ax_gray.axvline(
+            cursor - 0.5, color="#666666", linewidth=0.5, linestyle="--", alpha=0.6
+        )
+        ax_mape.axvline(
+            cursor - 0.5, color="#666666", linewidth=0.5, linestyle="--", alpha=0.6
+        )
 
     for spine in ["top", "right", "bottom", "left"]:
         ax_gray.spines[spine].set_visible(False)
@@ -279,16 +306,21 @@ def plot_subspace(coeff_nufft: np.ndarray, coeff_grog: np.ndarray, out: Path, la
 
     # Annotate average MAPE in the bottom-right corner of the MAPE panel.
     ax_mape.text(
-        0.98, 0.05,
+        0.98,
+        0.05,
         f"avg MAPE = {avg_mape:.1f}%",
         transform=ax_mape.transAxes,
-        ha="right", va="bottom",
-        fontsize=10, color="white",
-        bbox=dict(boxstyle="round,pad=0.2", facecolor="black", alpha=0.5),
+        ha="right",
+        va="bottom",
+        fontsize=10,
+        color="white",
+        bbox={"boxstyle": "round,pad=0.2", "facecolor": "black", "alpha": 0.5},
     )
 
     # Shared colourbar for MAPE.
-    cbar = fig.colorbar(im, ax=ax_mape, orientation="vertical", fraction=0.015, pad=0.01)
+    cbar = fig.colorbar(
+        im, ax=ax_mape, orientation="vertical", fraction=0.015, pad=0.01
+    )
     cbar.set_label("MAPE (%)", fontsize=9)
 
     fig.suptitle(label, fontsize=14, fontweight="bold")
@@ -297,7 +329,7 @@ def plot_subspace(coeff_nufft: np.ndarray, coeff_grog: np.ndarray, out: Path, la
 
 
 def plot_grog_views(coeff_grog: np.ndarray, out: Path, label: str = "CPU") -> None:
-    """GROG-only panel: 3 orthogonal views × k coefficients.
+    """GROG-only panel: 3 orthogonal views x k coefficients.
 
     Rows:  axial / coronal / sagittal
     Cols:  each subspace coefficient
@@ -314,7 +346,7 @@ def plot_grog_views(coeff_grog: np.ndarray, out: Path, label: str = "CPU") -> No
         vmax = float(vol.max())
         scale = vmax if vmax > 0.0 else 1.0
         ax_sl, cor_sl, sag_sl = _three_views(vol)
-        tiles[0].append((ax_sl  / scale).astype(np.float32))
+        tiles[0].append((ax_sl / scale).astype(np.float32))
         tiles[1].append((cor_sl / scale).astype(np.float32))
         tiles[2].append((sag_sl / scale).astype(np.float32))
 
@@ -366,13 +398,11 @@ def plot_grog_views(coeff_grog: np.ndarray, out: Path, label: str = "CPU") -> No
 
     # Draw faint dividers between columns.
     cx = 0
-    total_h = canvas.shape[0]
     for w in tile_widths[:-1]:
         cx += w
         ax.axvline(cx - 0.5, color="#555555", linewidth=0.5, linestyle="--")
     # Draw faint dividers between rows.
     ry = 0
-    total_w = canvas.shape[1]
     for h in row_heights[:-1]:
         ry += h
         ax.axhline(ry - 0.5, color="#555555", linewidth=0.5, linestyle="--")
@@ -390,10 +420,26 @@ def plot_linop(results: dict, out: Path) -> None:
     x = np.arange(n)
 
     column_specs = [
-        ("forward", "CPU", [("finufft_cpu", "NUFFT", "#4E79A7"), ("grog_cpu", "GROG", "#F28E2B")]),
-        ("forward", "GPU", [("cufinufft_gpu", "NUFFT", "#59A14F"), ("grog_gpu", "GROG", "#E15759")]),
-        ("adjoint", "CPU", [("finufft_cpu", "NUFFT", "#4E79A7"), ("grog_cpu", "GROG", "#F28E2B")]),
-        ("adjoint", "GPU", [("cufinufft_gpu", "NUFFT", "#59A14F"), ("grog_gpu", "GROG", "#E15759")]),
+        (
+            "forward",
+            "CPU",
+            [("finufft_cpu", "NUFFT", "#4E79A7"), ("grog_cpu", "GROG", "#F28E2B")],
+        ),
+        (
+            "forward",
+            "GPU",
+            [("cufinufft_gpu", "NUFFT", "#59A14F"), ("grog_gpu", "GROG", "#E15759")],
+        ),
+        (
+            "adjoint",
+            "CPU",
+            [("finufft_cpu", "NUFFT", "#4E79A7"), ("grog_cpu", "GROG", "#F28E2B")],
+        ),
+        (
+            "adjoint",
+            "GPU",
+            [("cufinufft_gpu", "NUFFT", "#59A14F"), ("grog_gpu", "GROG", "#E15759")],
+        ),
     ]
     width = 0.35
     offsets = [-0.5 * width, 0.5 * width]
@@ -404,17 +450,23 @@ def plot_linop(results: dict, out: Path) -> None:
         ax_rt = axes[0, col]
         ax_mem = axes[1, col]
 
-        for (method_key, method_name, color), off in zip(methods, offsets):
+        for (method_key, method_name, color), off in zip(
+            methods, offsets, strict=False
+        ):
             runtime_vals = np.array(
                 [
-                    _extract_case_value(case, ("linop", op_name, method_key, "runtime_sec"), np.nan)
+                    _extract_case_value(
+                        case, ("linop", op_name, method_key, "runtime_sec"), np.nan
+                    )
                     for case in cases
                 ],
                 dtype=float,
             )
             ram_vals = np.array(
                 [
-                    _extract_case_value(case, ("linop", op_name, method_key, "ram_gb"), np.nan)
+                    _extract_case_value(
+                        case, ("linop", op_name, method_key, "ram_gb"), np.nan
+                    )
                     for case in cases
                 ],
                 dtype=float,
@@ -424,14 +476,22 @@ def plot_linop(results: dict, out: Path) -> None:
             else:
                 vram_vals = np.array(
                     [
-                        _extract_case_value(case, ("linop", op_name, method_key, "vram_gb"), np.nan)
+                        _extract_case_value(
+                            case, ("linop", op_name, method_key, "vram_gb"), np.nan
+                        )
                         for case in cases
                     ],
                     dtype=float,
                 )
 
-            bars_rt = ax_rt.bar(x + off, runtime_vals, width=width, color=color, label=f"{device_name} {method_name}")
-            bars_mem_ram = ax_mem.bar(x + off, ram_vals, width=width, color=color)
+            bars_rt = ax_rt.bar(
+                x + off,
+                runtime_vals,
+                width=width,
+                color=color,
+                label=f"{device_name} {method_name}",
+            )
+            ax_mem.bar(x + off, ram_vals, width=width, color=color)
             ax_mem.bar(
                 x + off,
                 vram_vals,
@@ -442,10 +502,22 @@ def plot_linop(results: dict, out: Path) -> None:
                 alpha=0.9,
             )
 
-            total_mem = np.where(np.isfinite(ram_vals), ram_vals + np.nan_to_num(vram_vals, nan=0.0), np.nan)
+            total_mem = np.where(
+                np.isfinite(ram_vals),
+                ram_vals + np.nan_to_num(vram_vals, nan=0.0),
+                np.nan,
+            )
             bars_mem_total = ax_mem.bar(x + off, total_mem, width=width, alpha=0.0)
-            _annotate_bars(ax_rt, bars_rt, _format_runtime, x_shift=off * 0.35, stagger=False)
-            _annotate_bars(ax_mem, bars_mem_total, _format_memory, x_shift=off * 0.35, stagger=False)
+            _annotate_bars(
+                ax_rt, bars_rt, _format_runtime, x_shift=off * 0.35, stagger=False
+            )
+            _annotate_bars(
+                ax_mem,
+                bars_mem_total,
+                _format_memory,
+                x_shift=off * 0.35,
+                stagger=False,
+            )
 
         ax_rt.set_title(f"{op_name.capitalize()} ({device_name})")
         if col == 0:
@@ -494,8 +566,12 @@ def main() -> None:
 
     plot_preprocessing(results, args.output_dir / "figure_preprocessing.png")
     plot_linop(results, args.output_dir / "figure_linop.png")
-    plot_subspace(coeff_nufft, coeff_grog, args.output_dir / "figure_coeffs_cpu.png", label="CPU")
-    plot_grog_views(coeff_grog, args.output_dir / "figure_grog_views_cpu.png", label="CPU")
+    plot_subspace(
+        coeff_nufft, coeff_grog, args.output_dir / "figure_coeffs_cpu.png", label="CPU"
+    )
+    plot_grog_views(
+        coeff_grog, args.output_dir / "figure_grog_views_cpu.png", label="CPU"
+    )
 
     cuda_nufft_path = args.output_dir / "coeff_nufft_cuda.npy"
     cuda_grog_path = args.output_dir / "coeff_grog_cuda.npy"
