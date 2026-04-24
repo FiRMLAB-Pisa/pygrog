@@ -11,7 +11,6 @@ __all__ = ["GrogInterpolator", "GrogPlan"]
 
 import gc
 import pathlib
-import warnings
 
 from types import SimpleNamespace
 from numpy.typing import NDArray
@@ -147,7 +146,10 @@ class GrogInterpolator:
     oversamp : float | list[float] | tuple[float] | None
         Grid oversampling factor.
     kernel_width : int
-        Side-length of the interpolation kernel in grid units.  Default ``2``.
+        Side-length of the interpolation kernel in **oversampled**-grid units.
+        Default ``2``.  Candidates whose GROG shift exceeds ±0.5 original-grid
+        units in any dimension are automatically discarded, so this is a soft
+        upper bound: effective neighbourhood shrinks for low *oversamp* values.
     kernel_shape : str
         ``'circle'`` (2D) / ``'sphere'`` (3D), ``'square'`` / ``'cube'``,
         or ``'cross'``.  Default ``'circle'`` / ``'sphere'``.
@@ -577,20 +579,6 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map):
     # osf=1.25 → only offset-0 survives; osf=2 → offsets ±1 survive ~50%).
     grog_valid = (distances.abs() <= 0.5).all(dim=-1)  # (..., npts, kw_eff)
     in_bounds = in_bounds & grog_valid
-
-    # Warn if the chosen kw enumerates many candidates that will mostly be
-    # discarded (heuristic: half-width offset * grid_steps > 0.5).
-    max_half_shift = float((kernel_width // 2) * grid_steps.max())
-    if kernel_width > 1 and max_half_shift > 0.5 + 1e-4:
-        eff_kw = max(1, int(0.5 / float(grid_steps.max())))
-        warnings.warn(
-            f"kernel_width={kernel_width} with oversamp={oversamp} gives max GROG shift "
-            f"{max_half_shift:.3f} > 0.5 for the ±1 neighbours; those will be masked. "
-            f"Effective neighbourhood ~ {2*eff_kw+1} oversampled-grid points. "
-            f"To use all kw={kernel_width} neighbours without masking, use "
-            f"oversamp>={int(np.ceil(2*(kernel_width//2)))}.",
-            stacklevel=3,
-        )
 
     # Flat index: sum_d( idx_d * stride_d )
     strides = torch.tensor(
