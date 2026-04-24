@@ -64,7 +64,7 @@ sphinx_gallery_conf = {
     "examples_dirs": ["../examples/"],
     "gallery_dirs": ["generated/autoexamples"],
     "filename_pattern": "/example_",
-    "ignore_pattern": r"(__init__|conftest|utils|fast_binning)\.py",
+    "ignore_pattern": r"(__init__|conftest|fast_binning)\.py",
     "nested_sections": True,
     "within_subsection_order": "FileNameSortKey",
     "first_notebook_cell": "!pip install pygrog[dev]",

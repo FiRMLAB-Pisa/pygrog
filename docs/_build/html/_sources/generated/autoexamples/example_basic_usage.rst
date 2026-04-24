@@ -258,8 +258,6 @@ adjointness condition throughout.
 
  .. code-block:: none
 
-    /home/mcencini/pygrog-project/pygrog/examples/example_basic_usage.py:135: UserWarning: kernel_width=2 with oversamp=(1.25, 1.25) gives max GROG shift 0.797 > 0.5 for the ±1 neighbours; those will be masked. Effective neighbourhood ~ 3 oversampled-grid points. To use all kw=2 neighbours without masking, use oversamp>=2.
-      grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=2, oversamp=1.25, image_shape=shape)
     PyGROG sparse shape : (16, 36101)
 
 
@@ -273,7 +271,7 @@ Comparison
 Both PyGROG paths (shortcut and explicit) should match each other and the
 mri-nufft adjoint reference.
 
-.. GENERATED FROM PYTHON SOURCE LINES 166-196
+.. GENERATED FROM PYTHON SOURCE LINES 166-219
 
 .. code-block:: Python
 
@@ -292,26 +290,49 @@ mri-nufft adjoint reference.
     print(f"NMSE shortcut  (ret_image=True)    : {nmse_shortcut:.3e}")
     print(f"NMSE explicit  (sparse IFFT path)  : {nmse_explicit:.3e}")
 
-    fig, axes = plt.subplots(1, 4, figsize=(16, 4))
-    axes[0].imshow(ref_abs, cmap="gray", origin="lower")
-    axes[0].set_title("mri-nufft adjoint (reference)")
-    axes[0].axis("off")
-    axes[1].imshow(grog_abs, cmap="gray", origin="lower")
-    axes[1].set_title("PyGROG shortcut (ret_image=True)")
-    axes[1].axis("off")
-    axes[2].imshow(grog_exp_abs, cmap="gray", origin="lower")
-    axes[2].set_title("PyGROG explicit (sparse IFFT)")
-    axes[2].axis("off")
-    axes[3].imshow(grog_exp_abs - ref_abs, cmap="bwr", origin="lower", vmin=-0.2, vmax=0.2)
-    axes[3].set_title("Explicit - reference")
-    axes[3].axis("off")
+    # Error maps in % of the nufft reference
+    err_rss = 100.0 * (grog_abs - ref_abs) / (ref_abs.max() + 1e-12)
+    err_exp = 100.0 * (grog_exp_abs - ref_abs) / (ref_abs.max() + 1e-12)
+    emax = max(np.abs(err_rss).max(), np.abs(err_exp).max())
+
+    fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+
+    axes[0, 0].imshow(ref_abs, cmap="gray", origin="lower")
+    axes[0, 0].set_xticks([])
+    axes[0, 0].set_yticks([])
+    axes[0, 0].set_title("mri-nufft (reference)")
+
+    axes[0, 1].imshow(grog_abs, cmap="gray", origin="lower")
+    axes[0, 1].set_xticks([])
+    axes[0, 1].set_yticks([])
+    axes[0, 1].set_title("PyGROG RSS (ret_image=True)")
+
+    axes[0, 2].imshow(grog_exp_abs, cmap="gray", origin="lower")
+    axes[0, 2].set_xticks([])
+    axes[0, 2].set_yticks([])
+    axes[0, 2].set_title("PyGROG full (sparse IFFT)")
+
+    axes[1, 0].axis("off")
+
+    im1 = axes[1, 1].imshow(err_rss, cmap="bwr", origin="lower", vmin=-10, vmax=10)
+    axes[1, 1].set_xticks([])
+    axes[1, 1].set_yticks([])
+    axes[1, 1].set_title(f"error RSS [%]  MAE={np.abs(err_rss).mean():.2f}%")
+    fig.colorbar(im1, ax=axes[1, 1], fraction=0.046, pad=0.04)
+
+    im2 = axes[1, 2].imshow(err_exp, cmap="bwr", origin="lower", vmin=-10, vmax=10)
+    axes[1, 2].set_xticks([])
+    axes[1, 2].set_yticks([])
+    axes[1, 2].set_title(f"error full [%]  MAE={np.abs(err_exp).mean():.2f}%")
+    fig.colorbar(im2, ax=axes[1, 2], fraction=0.046, pad=0.04)
+
     plt.tight_layout()
     plt.show()
 
 
 
 .. image-sg:: /generated/autoexamples/images/sphx_glr_example_basic_usage_003.png
-   :alt: mri-nufft adjoint (reference), PyGROG shortcut (ret_image=True), PyGROG explicit (sparse IFFT), Explicit - reference
+   :alt: mri-nufft (reference), PyGROG RSS (ret_image=True), PyGROG full (sparse IFFT), error RSS [%]  MAE=4.14%, error full [%]  MAE=3.28%
    :srcset: /generated/autoexamples/images/sphx_glr_example_basic_usage_003.png
    :class: sphx-glr-single-img
 
@@ -329,7 +350,7 @@ mri-nufft adjoint reference.
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 2.705 seconds)
+   **Total running time of the script:** (0 minutes 3.290 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_basic_usage.py:

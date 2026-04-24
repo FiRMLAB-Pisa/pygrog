@@ -167,6 +167,7 @@
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_interop.html">Interoperability with mrpro, sigpy and deepinverse</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
 </details></li>
 </ul>
@@ -370,7 +371,6 @@
 
 <span class="kn">import</span><span class="w"> </span><span class="nn">gc</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">pathlib</span>
-<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">types</span><span class="w"> </span><span class="kn">import</span> <span class="n">SimpleNamespace</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">numpy.typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">NDArray</span>
@@ -508,7 +508,10 @@
 <span class="sd">    oversamp : float | list[float] | tuple[float] | None</span>
 <span class="sd">        Grid oversampling factor.</span>
 <span class="sd">    kernel_width : int</span>
-<span class="sd">        Side-length of the interpolation kernel in grid units.  Default ``2``.</span>
+<span class="sd">        Side-length of the interpolation kernel in **oversampled**-grid units.</span>
+<span class="sd">        Default ``2``.  Candidates whose GROG shift exceeds ±0.5 original-grid</span>
+<span class="sd">        units in any dimension are automatically discarded, so this is a soft</span>
+<span class="sd">        upper bound: effective neighbourhood shrinks for low *oversamp* values.</span>
 <span class="sd">    kernel_shape : str</span>
 <span class="sd">        ``&#39;circle&#39;`` (2D) / ``&#39;sphere&#39;`` (3D), ``&#39;square&#39;`` / ``&#39;cube&#39;``,</span>
 <span class="sd">        or ``&#39;cross&#39;``.  Default ``&#39;circle&#39;`` / ``&#39;sphere&#39;``.</span>
@@ -966,20 +969,6 @@
     <span class="c1"># osf=1.25 → only offset-0 survives; osf=2 → offsets ±1 survive ~50%).</span>
     <span class="n">grog_valid</span> <span class="o">=</span> <span class="p">(</span><span class="n">distances</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span> <span class="o">&lt;=</span> <span class="mf">0.5</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># (..., npts, kw_eff)</span>
     <span class="n">in_bounds</span> <span class="o">=</span> <span class="n">in_bounds</span> <span class="o">&amp;</span> <span class="n">grog_valid</span>
-
-    <span class="c1"># Warn if the chosen kw enumerates many candidates that will mostly be</span>
-    <span class="c1"># discarded (heuristic: half-width offset * grid_steps &gt; 0.5).</span>
-    <span class="n">max_half_shift</span> <span class="o">=</span> <span class="nb">float</span><span class="p">((</span><span class="n">kernel_width</span> <span class="o">//</span> <span class="mi">2</span><span class="p">)</span> <span class="o">*</span> <span class="n">grid_steps</span><span class="o">.</span><span class="n">max</span><span class="p">())</span>
-    <span class="k">if</span> <span class="n">kernel_width</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">max_half_shift</span> <span class="o">&gt;</span> <span class="mf">0.5</span> <span class="o">+</span> <span class="mf">1e-4</span><span class="p">:</span>
-        <span class="n">eff_kw</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="mf">0.5</span> <span class="o">/</span> <span class="nb">float</span><span class="p">(</span><span class="n">grid_steps</span><span class="o">.</span><span class="n">max</span><span class="p">())))</span>
-        <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
-            <span class="sa">f</span><span class="s2">&quot;kernel_width=</span><span class="si">{</span><span class="n">kernel_width</span><span class="si">}</span><span class="s2"> with oversamp=</span><span class="si">{</span><span class="n">oversamp</span><span class="si">}</span><span class="s2"> gives max GROG shift &quot;</span>
-            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">max_half_shift</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> &gt; 0.5 for the ±1 neighbours; those will be masked. &quot;</span>
-            <span class="sa">f</span><span class="s2">&quot;Effective neighbourhood ~ </span><span class="si">{</span><span class="mi">2</span><span class="o">*</span><span class="n">eff_kw</span><span class="o">+</span><span class="mi">1</span><span class="si">}</span><span class="s2"> oversampled-grid points. &quot;</span>
-            <span class="sa">f</span><span class="s2">&quot;To use all kw=</span><span class="si">{</span><span class="n">kernel_width</span><span class="si">}</span><span class="s2"> neighbours without masking, use &quot;</span>
-            <span class="sa">f</span><span class="s2">&quot;oversamp&gt;=</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="mi">2</span><span class="o">*</span><span class="p">(</span><span class="n">kernel_width</span><span class="o">//</span><span class="mi">2</span><span class="p">)))</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">,</span>
-            <span class="n">stacklevel</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
-        <span class="p">)</span>
 
     <span class="c1"># Flat index: sum_d( idx_d * stride_d )</span>
     <span class="n">strides</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>

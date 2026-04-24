@@ -30,9 +30,9 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
+from brainweb_dl import get_mri
 from mrinufft import get_operator, initialize_2D_spiral
 from mrinufft.density import voronoi
-from mrinufft.extras import get_brainweb_map
 from pygrog.calib import GrogInterpolator
 from pygrog.operator import SparseFFT
 
@@ -46,13 +46,30 @@ from pygrog.operator import SparseFFT
 # :class:`~pygrog.operator.SparseFFT` ``.forward`` / ``.adjoint`` satisfy the
 # adjointness condition throughout.
 
-m0, _, _ = get_brainweb_map(0)
-image_np = np.flip(m0, axis=(0, 1, 2))[90].astype(np.float32)
+image_np = get_mri(0, "T1")
+image_np = np.flip(image_np, axis=(0, 2))[90].astype(np.float32)
 image_np /= image_np.max() + 1e-8
-image_shape = image_np.shape   # (217, 217)
-n_coils = 1                    # single-coil for conciseness
+image_shape = image_np.shape
+n_coils = 16
 
-samples = initialize_2D_spiral(Nc=32, Ns=400, nb_revolutions=8, tilt="mri-golden").astype(
+
+def _synthetic_smaps(shape, n_coils=4):
+    ny, nx = shape
+    yy, xx = np.mgrid[-1 : 1 : ny * 1j, -1 : 1 : nx * 1j]
+    smaps = []
+    for angle in np.linspace(0.0, 2.0 * np.pi, n_coils, endpoint=False):
+        cx, cy = np.cos(angle), np.sin(angle)
+        gauss = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2.0 * 0.45**2))
+        phase = np.exp(1j * (cx * xx + cy * yy))
+        smaps.append(gauss * phase)
+    smaps = np.asarray(smaps, dtype=np.complex64)
+    smaps /= np.sqrt((np.abs(smaps) ** 2).sum(0, keepdims=True)) + 1e-12
+    return smaps
+
+
+smaps = _synthetic_smaps(image_shape, n_coils=n_coils)
+
+samples = initialize_2D_spiral(Nc=48, Ns=600, nb_revolutions=10).astype(
     np.float32
 )
 density = voronoi(samples)
@@ -61,23 +78,29 @@ nufft = get_operator("finufft")(
     samples=samples,
     shape=image_shape,
     n_coils=n_coils,
+    smaps=smaps,
     density=density,
     squeeze_dims=True,
 )
 # k-space simulated entirely via mri-nufft (never via GrogInterpolator)
-kspace_nufft = nufft.op(image_np.astype(np.complex128))  # (n_coils, n_samples)
+kspace_nufft = nufft.op(image_np.astype(np.complex64))  # (n_coils, n_samples)
 
-# GROG calibration
+# GROG calibration: use 24x24 k-space centre of coil images
 coords = (samples * np.asarray(image_shape, dtype=np.float32)).astype(np.float32)
-calib_cart = np.fft.fftshift(
-    np.fft.fftn(
-        np.fft.ifftshift(image_np[None].astype(np.complex64), axes=(-2, -1)),
-        axes=(-2, -1),
-    ),
+coil_calib = smaps * image_np[None, ...]
+calib_cart_full = np.fft.fftshift(
+    np.fft.fftn(np.fft.ifftshift(coil_calib, axes=(-2, -1)), axes=(-2, -1)),
     axes=(-2, -1),
-)
+).astype(np.complex64)
+calib_size = 24
+cy, cx = image_shape[0] // 2, image_shape[1] // 2
+calib_cart = calib_cart_full[
+    :,
+    cy - calib_size // 2 : cy + calib_size // 2,
+    cx - calib_size // 2 : cx + calib_size // 2,
+]
 grog = GrogInterpolator(
-    shape=image_shape, coords=coords, kernel_width=2, image_shape=image_shape
+    shape=image_shape, coords=coords, kernel_width=2, oversamp=1.25, image_shape=image_shape
 )
 grog.calc_interp_table(calib_cart, lamda=0.01, precision=1)
 
@@ -87,8 +110,8 @@ kspace_sparse_raw = grog.interpolate(kspace_nc_shaped, ret_image=False)
 kspace_sparse = torch.as_tensor(np.asarray(kspace_sparse_raw))
 kspace_sparse = kspace_sparse * grog.plan.pre_weights.to(kspace_sparse.dtype).unsqueeze(0)
 
-# SparseFFT operator wrapping the GROG plan
-op = SparseFFT(plan=grog.plan)
+# SparseFFT operator wrapping the GROG plan (with smaps for coil combination)
+op = SparseFFT(plan=grog.plan, smaps=torch.as_tensor(smaps))
 
 print(f"image shape   : {image_shape}")
 print(f"sparse k-space: {kspace_sparse.shape}  (pre-weighted)")
@@ -141,9 +164,12 @@ except ImportError as exc:
 
 from pygrog.interop import grog_measure
 
+# grog_measure operates on a plain image without coil combination — use a
+# no-smaps operator so that gradient shapes are consistent.
+op_no_smaps = SparseFFT(plan=grog.plan)
 image_t = torch.as_tensor(image_np[None].astype(np.complex64))  # (1, *image_shape)
 img_grad = image_t.clone().requires_grad_(True)
-ksp_out = grog_measure(img_grad, op)
+ksp_out = grog_measure(img_grad, op_no_smaps)
 ksp_out.abs().sum().backward()
 print(f"\ngrog_measure output shape : {ksp_out.shape}")
 print(f"Gradient on img_grad      : {img_grad.grad is not None}")

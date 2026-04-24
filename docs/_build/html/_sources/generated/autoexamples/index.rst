@@ -69,6 +69,23 @@ reconstruction using GROG-accelerated sparse FFT operators.
     </div>
 
 
+.. raw:: html
+
+    <div class="sphx-glr-thumbcontainer" tooltip="This example introduces two utility routines from pygrog.utils:">
+
+.. only:: html
+
+  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example_utils_thumb.png
+    :alt:
+
+  :doc:`/generated/autoexamples/example_utils`
+
+.. raw:: html
+
+      <div class="sphx-glr-thumbnail-title">Utils Tour: Coil Compression and NLINV</div>
+    </div>
+
+
 .. thumbnail-parent-div-close
 
 .. raw:: html
@@ -82,6 +99,7 @@ reconstruction using GROG-accelerated sparse FFT operators.
    /generated/autoexamples/example_basic_usage
    /generated/autoexamples/example_gadgets
    /generated/autoexamples/example_interop
+   /generated/autoexamples/example_utils
 
 
 .. only:: html

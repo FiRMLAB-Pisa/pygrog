@@ -18,7 +18,6 @@ import torch
 from mrinufft import display_2D_trajectory, get_operator, initialize_2D_spiral
 from mrinufft.density import voronoi
 from mrinufft.extras import fse_simulation, get_brainweb_map, make_b0map
-from mrinufft.extras.smaps import coil_compression
 from mrinufft.operators.off_resonance import MRIFourierCorrected
 from mrinufft.trajectories.utils import Acquisition
 from pygrog.calib import GrogInterpolator
@@ -48,13 +47,11 @@ m0, t1, t2 = get_brainweb_map(0)
 m0 = np.flip(m0, axis=(0, 1, 2))[90].astype(np.float32)
 t1 = np.flip(t1, axis=(0, 1, 2))[90].astype(np.float32)
 t2 = np.flip(t2, axis=(0, 1, 2))[90].astype(np.float32)
+image = m0 / (m0.max() + 1e-8)
+shape = image.shape
+n_coils = 16
 
-m0 /= m0.max() + 1e-8
-shape = m0.shape
-n_coils_sim = 32  # coils for simulation
-n_coils_cc = 8    # virtual coils after PCA compression
-
-samples = initialize_2D_spiral(Nc=64, Ns=600, nb_revolutions=10, tilt="mri-golden").astype(
+samples = initialize_2D_spiral(Nc=48, Ns=600, nb_revolutions=10).astype(
     np.float32
 )
 density = voronoi(samples)
@@ -63,28 +60,20 @@ display_2D_trajectory(samples)
 plt.show()
 
 # Simulate one multi-coil acquisition with ground-truth smaps.
-smaps_true = _synthetic_smaps(shape, n_coils=n_coils_sim)
+smaps = _synthetic_smaps(shape, n_coils=n_coils)
 nufft_sim = get_operator("finufft")(
     samples=samples,
     shape=shape,
-    n_coils=n_coils_sim,
-    smaps=smaps_true,
+    n_coils=n_coils,
+    smaps=smaps,
     density=density,
     squeeze_dims=True,
 )
-kspace_single = nufft_sim.op(m0.astype(np.complex64))  # (n_coils_sim, n_samples)
-
-# Coil compression 32 -> 8 virtual coils: better conditioning than raw 8 coils
-kspace_single_cc, cc_matrix = coil_compression(
-    kspace_single, K=n_coils_cc, traj=samples.reshape(-1, 2)
-)
-smaps_cc = (cc_matrix @ smaps_true.reshape(n_coils_sim, -1)).reshape(n_coils_cc, *shape)
-smaps_cc = smaps_cc.astype(np.complex64)
-smaps_cc /= np.sqrt((np.abs(smaps_cc) ** 2).sum(0, keepdims=True)) + 1e-12
+kspace_single = nufft_sim.op(image.astype(np.complex64))  # (n_coils, n_samples)
 
 # GROG plan and SparseFFT base operator for PyGROG gadgets.
 coords = (samples * np.asarray(shape, dtype=np.float32)).astype(np.float32)
-coil_calib = smaps_cc * m0[None, ...]
+coil_calib = smaps * image[None, ...]
 calib_cart_full = np.fft.fftshift(
     np.fft.fftn(np.fft.ifftshift(coil_calib, axes=(-2, -1)), axes=(-2, -1)),
     axes=(-2, -1),
@@ -98,16 +87,17 @@ calib_cart = calib_cart_full[
     cx - calib_size // 2 : cx + calib_size // 2,
 ]
 
-grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=2, oversamp=2.0, image_shape=shape)
+grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=2, oversamp=1.25, image_shape=shape)
 grog.calc_interp_table(calib_cart, lamda=0.01, precision=1)
 
 base_op = SparseFFT(
-    plan=grog.plan, smaps=torch.as_tensor(smaps_cc)
+    plan=grog.plan, smaps=torch.as_tensor(smaps)
 )
 
 # %%
 # Gadget 1: SubspaceProjection / SubspaceSparseFFT
 # =================================================
+# m0, t1, t2 are already loaded in the shared setup above.
 
 etl = 8
 te = np.arange(etl, dtype=np.float32) * 8.0
@@ -120,19 +110,14 @@ frames = np.ascontiguousarray(frames)  # (T, ny, nx)
 kspace_frames = np.stack(
     [nufft_sim.op(frames[t].astype(np.complex64)) for t in range(etl)],
     axis=0,
-)  # (T, n_coils_sim, n_samples)
-# Compress each frame to n_coils_cc virtual coils
-kspace_frames = np.stack(
-    [(cc_matrix @ kspace_frames[t]).astype(np.complex64) for t in range(etl)],
-    axis=0,
-)  # (T, n_coils_cc, n_samples)
+)  # (T, n_coils, n_samples)
 
 # mri-nufft adjoint reference per frame.
 nufft_ref = get_operator("finufft")(
     samples=samples,
     shape=shape,
-    n_coils=n_coils_cc,
-    smaps=smaps_cc,
+    n_coils=n_coils,
+    smaps=smaps,
     density=density,
     squeeze_dims=True,
 )
@@ -172,7 +157,7 @@ sqrt_w = grog.plan.pre_weights
 kspace_sparse = []
 for t in range(etl):
     kspace_t = (
-        kspace_frames[t].astype(np.complex64).reshape(n_coils_cc, *samples.shape[:2])
+        kspace_frames[t].astype(np.complex64).reshape(n_coils, *samples.shape[:2])
     )
     sparse_t = torch.as_tensor(np.asarray(grog.interpolate(kspace_t, ret_image=False)))
     kspace_sparse.append(sparse_t * sqrt_w.to(sparse_t.dtype).unsqueeze(0))
@@ -183,22 +168,33 @@ proj.fit(torch.as_tensor(train, dtype=torch.float32))
 sub_op = SubspaceSparseFFT(base_op, proj.basis.to(torch.complex64))
 coeff_pygrog = sub_op.forward(kspace_sparse).detach().cpu().numpy()
 
-# Display first coefficient comparison.
-c_ref = np.abs(coeff_ref_nufft[0])
-c_ref /= c_ref.max() + 1e-12
-c_grog = np.abs(coeff_pygrog[0])
-c_grog /= c_grog.max() + 1e-12
+# Display all coefficients: rows = mri-nufft / PyGROG / error, cols = coefficients
+fig, axes = plt.subplots(3, rank, figsize=(4 * rank, 10))
+for r in range(rank):
+    c_ref = np.abs(coeff_ref_nufft[r])
+    c_ref /= c_ref.max() + 1e-12
+    c_grog = np.abs(coeff_pygrog[r])
+    c_grog /= c_grog.max() + 1e-12
 
-fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-axes[0].imshow(c_ref, cmap="gray", origin="lower")
-axes[0].set_title("mri-nufft subspace coeff #1")
-axes[0].axis("off")
-axes[1].imshow(c_grog, cmap="gray", origin="lower")
-axes[1].set_title("PyGROG subspace coeff #1")
-axes[1].axis("off")
-axes[2].imshow(c_grog - c_ref, cmap="bwr", origin="lower", vmin=-0.2, vmax=0.2)
-axes[2].set_title("Difference")
-axes[2].axis("off")
+    axes[0, r].imshow(c_ref, cmap="gray", origin="lower")
+    axes[0, r].set_xticks([])
+    axes[0, r].set_yticks([])
+    axes[0, r].set_title(f"coeff #{r + 1}")
+
+    axes[1, r].imshow(c_grog, cmap="gray", origin="lower")
+    axes[1, r].set_xticks([])
+    axes[1, r].set_yticks([])
+
+    err = 100.0 * (c_grog - c_ref) / (c_ref.max() + 1e-12)
+    im = axes[2, r].imshow(err, cmap="bwr", origin="lower", vmin=-10, vmax=10)
+    axes[2, r].set_xticks([])
+    axes[2, r].set_yticks([])
+    axes[2, r].set_title(f"MAE={np.abs(err).mean():.2f}%")
+    fig.colorbar(im, ax=axes[2, r], fraction=0.046, pad=0.04, label="%")
+
+axes[0, 0].set_ylabel("mri-nufft")
+axes[1, 0].set_ylabel("PyGROG")
+axes[2, 0].set_ylabel("error")
 plt.tight_layout()
 plt.show()
 
@@ -206,12 +202,20 @@ plt.show()
 # Gadget 2: OffResonanceCorrection
 # ================================
 
-brain_mask = m0 > 0.1 * m0.max()
+brain_mask = image > 0.1 * image.max()
 b0_map, _ = make_b0map(shape, b0range=(-120, 120), mask=brain_mask)
 readout_time = (
     np.arange(samples.shape[1], dtype=np.float32) * Acquisition.default.raster_time
 )
 readout_time = np.repeat(readout_time[None, :], samples.shape[0], axis=0)
+
+# Single-coil operator for ORC (no smaps needed)
+nufft_orc = get_operator("finufft")(
+    samples=samples,
+    shape=shape,
+    density=density,
+    squeeze_dims=True,
+)
 
 orc_nufft = MRIFourierCorrected(
     nufft_ref,
@@ -220,17 +224,18 @@ orc_nufft = MRIFourierCorrected(
     mask=brain_mask,
 )
 
-kspace_off = orc_nufft.op(m0.astype(np.complex64))
-image_ref_orc = np.abs(orc_nufft.adj_op(kspace_off))
+kspace_off = orc_nufft.op(image.astype(np.complex64))
+image_no_orc = np.squeeze(np.abs(nufft_ref.adj_op(kspace_off)))
+image_ref_orc = np.squeeze(np.abs(orc_nufft.adj_op(kspace_off)))
 
 # PyGROG ORC: sparse interpolation, then apply ORC-corrected SparseFFT.
-# OffResonanceCorrection.adjoint expects (n_coils_cc, n_samples) -> (n_coils_cc, *image)
+# OffResonanceCorrection.adjoint expects (n_coils, n_samples) -> (n_coils, *image)
 # so we use a no-smaps operator and combine coils manually afterwards.
 base_op_orc = SparseFFT(plan=grog.plan)  # no smaps
 sparse_off = torch.as_tensor(
     np.asarray(
         grog.interpolate(
-            kspace_off.astype(np.complex64).reshape(n_coils_cc, *samples.shape[:2]),
+            kspace_off.astype(np.complex64).reshape(n_coils, *samples.shape[:2]),
             ret_image=False,
         )
     ),
@@ -255,29 +260,49 @@ orc_pygrog = OffResonanceCorrection(
     n_components=8,
     method="svd",
 )
-# Adjoint returns (n_coils_cc, *image_shape) — combine with smaps
-smaps_t = torch.as_tensor(smaps_cc)
-result_orc = orc_pygrog.adjoint(sparse_off)  # (n_coils_cc, *image_shape)
+# Adjoint returns (n_coils, *image_shape) — combine with smaps
+smaps_t = torch.as_tensor(smaps)
+result_orc = orc_pygrog.adjoint(sparse_off)  # (n_coils, *image_shape)
 image_pygrog_orc = np.abs((result_orc * smaps_t.conj()).sum(0).detach().cpu().numpy())
 
+image_no_orc /= image_no_orc.max() + 1e-12
 image_ref_orc /= image_ref_orc.max() + 1e-12
 image_pygrog_orc /= image_pygrog_orc.max() + 1e-12
 
-fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-axes[0].imshow(image_ref_orc, cmap="gray", origin="lower")
-axes[0].set_title("mri-nufft ORC adjoint")
-axes[0].axis("off")
-axes[1].imshow(image_pygrog_orc, cmap="gray", origin="lower")
-axes[1].set_title("PyGROG ORC adjoint")
-axes[1].axis("off")
-axes[2].imshow(
-    image_pygrog_orc - image_ref_orc,
+err_orc = 100.0 * (image_pygrog_orc - image_ref_orc) / (image_ref_orc.max() + 1e-12)
+err_orc_mae = np.abs(err_orc).mean()
+
+# Layout: col 0 = mri-nufft w/o and with ORC; col 1 = PyGROG ORC and error
+fig, axes = plt.subplots(2, 2, figsize=(8, 8))
+axes[0, 0].imshow(image_no_orc, cmap="gray", origin="lower")
+axes[0, 0].set_xticks([])
+axes[0, 0].set_yticks([])
+axes[0, 0].set_title("No correction")
+axes[0, 0].set_ylabel("mri-nufft")
+
+axes[1, 0].imshow(image_ref_orc, cmap="gray", origin="lower")
+axes[1, 0].set_xticks([])
+axes[1, 0].set_yticks([])
+axes[1, 0].set_title("ORC")
+axes[1, 0].set_ylabel("mri-nufft")
+
+axes[0, 1].imshow(image_pygrog_orc, cmap="gray", origin="lower")
+axes[0, 1].set_xticks([])
+axes[0, 1].set_yticks([])
+axes[0, 1].set_title("ORC")
+axes[0, 1].set_ylabel("PyGROG")
+
+err_im = axes[1, 1].imshow(
+    err_orc,
     cmap="bwr",
     origin="lower",
-    vmin=-0.2,
-    vmax=0.2,
+    vmin=-10,
+    vmax=10,
 )
-axes[2].set_title("Difference")
-axes[2].axis("off")
+axes[1, 1].set_xticks([])
+axes[1, 1].set_yticks([])
+axes[1, 1].set_title(f"error [%]  MAE={err_orc_mae:.2f}%")
+fig.colorbar(err_im, ax=axes[1, 1], fraction=0.046, pad=0.04, label="%")
+
 plt.tight_layout()
 plt.show()
