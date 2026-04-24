@@ -7,7 +7,7 @@ appropriate precomputed GRAPPA operator is applied to each replica.
 This is a *pure-torch* implementation (scipy is not needed at runtime).
 """
 
-__all__ = ["GrogInterpolator"]
+__all__ = ["GrogInterpolator", "GrogPlan"]
 
 import gc
 import pathlib
@@ -19,6 +19,29 @@ import numpy as np
 import torch
 
 from ._grappa import KernelTable
+
+
+# ---------------------------------------------------------------------------
+# Plan container
+# ---------------------------------------------------------------------------
+class GrogPlan(SimpleNamespace):
+    """Dynamic namespace for GROG/FFT plan fields.
+
+    Behaves exactly like :class:`types.SimpleNamespace` (attributes can be set
+    freely) but exposes :attr:`pre_weights` as a computed ``@property`` so it
+    is always consistent with ``sqrt_weights`` and ``inv_perm``.
+    """
+
+    @property
+    def pre_weights(self) -> "torch.Tensor":
+        """``sqrt_weights`` reordered to match :meth:`~pygrog.calib.GrogInterpolator.interpolate` output.
+
+        Multiply sparse k-space by this factor **once** before an iterative
+        reconstruction loop so that
+        :class:`~pygrog.operator.SparseFFT` ``.forward`` / ``.adjoint`` satisfy
+        the adjointness condition (i.e. cumulative weighting equals 1/count).
+        """
+        return self.sqrt_weights[self.inv_perm]
 
 # ---------------------------------------------------------------------------
 # Torch C++ extension (lazy, cached)
@@ -182,6 +205,7 @@ class GrogInterpolator:
         types.SimpleNamespace
             The plan namespace — has ``grid_shape``, ``image_shape``,
             ``indices``, ``sqrt_weights``, ``sort_perm``, ``inv_perm``,
+            ``pre_weights`` (computed property),
             ``grid_size``, ``n_samples``, plus all original GROG plan
             fields.
         """
@@ -302,7 +326,10 @@ class GrogInterpolator:
             from ..operator._sparse_fft import SparseFFT
 
             op = SparseFFT(plan=self.plan)
-            img_coils = op.forward(sparse)
+            # Pre-multiply by plan.pre_weights so that SparseFFT.forward applies
+            # the second sqrt_w factor → full density compensation w = 1/count.
+            pre_w = self.plan.pre_weights.to(sparse.dtype)
+            img_coils = op.forward(sparse * pre_w.unsqueeze(0))
             image = img_coils.abs().square().sum(0).sqrt()  # RSS: (*image_shape,)
             gc.collect()
             out = image.numpy() if is_numpy else image
@@ -358,7 +385,8 @@ class GrogInterpolator:
         if not valid.any():
             return torch.zeros(ncoils, 0, dtype=data.dtype, device=data.device)
 
-        # Keep duplicated neighbourhood samples (sparse Cartesian representation).
+        # Return raw unweighted sparse samples.  The caller is responsible for
+        # pre-multiplying by sqrt_weights before feeding to SparseFFT.
         return data_interp[valid].T.contiguous()
 
     def _grid_shot(self, data: torch.Tensor, shot_index: tuple) -> torch.Tensor:
@@ -416,6 +444,9 @@ def _attach_fft_plan(plan, image_shape=None):
 
     Adds: ``image_shape``, ``grid_size``, ``n_samples``, ``indices``,
     ``sqrt_weights``, ``sort_perm``, ``inv_perm``.
+
+    ``pre_weights`` is a :class:`GrogPlan` ``@property`` (not stored here)
+    that returns ``sqrt_weights[inv_perm]`` on access.
     """
     grid_shape = tuple(plan.grid_shape)
     if image_shape is None:
@@ -456,6 +487,7 @@ def _attach_fft_plan(plan, image_shape=None):
     plan.sqrt_weights = sorted_w
     plan.sort_perm = sort_perm
     plan.inv_perm = inv_perm
+    # pre_weights is a @property on GrogPlan — no eager assignment needed.
 
 
 # =====================================================================
@@ -552,7 +584,7 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map):
         time_map = np.asarray(time_map, dtype=np.float32)
         time_map = np.broadcast_to(time_map[..., np.newaxis], target_flat.shape).copy()
 
-    return SimpleNamespace(
+    return GrogPlan(
         shape=shape,
         oversamp=oversamp,
         grid_shape=grid_shape,

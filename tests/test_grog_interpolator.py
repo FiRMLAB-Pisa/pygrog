@@ -35,7 +35,7 @@ def _random_kspace(rng, n_coils, n_views, n_readout):
 
 
 def test_ret_image_matches_sparsefft_forward_rss():
-    """ret_image should equal SparseFFT.forward(interpolate(...)) with RSS."""
+    """ret_image should equal SparseFFT.forward(sqrt_w * interpolate(...)) with RSS."""
     rng = np.random.default_rng(123)
 
     shape = (12, 12)
@@ -67,8 +67,13 @@ def test_ret_image_matches_sparsefft_forward_rss():
     sparse = grog.interpolate(data, ret_image=False)
     image = grog.interpolate(data, ret_image=True)
 
+    # Caller must pre-multiply by plan.pre_weights before passing to
+    # SparseFFT.forward — this is what ret_image=True does internally.
     op = SparseFFT(plan=grog.plan)
-    expected = op.forward(torch.as_tensor(np.asarray(sparse)))
+    sqrt_w = grog.plan.pre_weights
+    sparse_t = torch.as_tensor(np.asarray(sparse))
+    sparse_weighted = sparse_t * sqrt_w.to(sparse_t.dtype).unsqueeze(0)
+    expected = op.forward(sparse_weighted)
     expected = expected.abs().square().sum(0).sqrt().cpu().numpy()
 
     np.testing.assert_allclose(image, expected, rtol=1e-5, atol=1e-5)

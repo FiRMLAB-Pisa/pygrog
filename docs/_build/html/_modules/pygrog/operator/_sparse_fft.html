@@ -390,6 +390,7 @@
 <span class="kn">from</span><span class="w"> </span><span class="nn">mrinufft._array_compat</span><span class="w"> </span><span class="kn">import</span> <span class="n">with_torch</span>
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">.._base._fftc</span><span class="w"> </span><span class="kn">import</span> <span class="n">fft</span><span class="p">,</span> <span class="n">ifft</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.._utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">resize</span>
 
 <span class="c1"># ---------------------------------------------------------------------------</span>
 <span class="c1"># Torch C++ extension (lazy, cached)</span>
@@ -854,7 +855,10 @@
         <span class="c1"># ONE batched IFFT + center-crop over last ``ndim`` dims</span>
         <span class="c1"># axes=(-k,...,-1) work correctly on any batch prefix</span>
         <span class="n">grids_nd</span> <span class="o">=</span> <span class="n">grids</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">B</span><span class="p">,</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">)</span>
-        <span class="n">imgs</span> <span class="o">=</span> <span class="n">ifft</span><span class="p">(</span><span class="n">grids_nd</span><span class="p">,</span> <span class="n">oshape</span><span class="o">=</span><span class="p">(</span><span class="n">B</span><span class="p">,</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">),</span> <span class="n">axes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span><span class="p">)</span>
+        <span class="c1"># Full-size IFFT first, then center-crop image; cropping in k-space</span>
+        <span class="c1"># (via oshape) would be wrong when the grid is oversampled.</span>
+        <span class="n">full_imgs</span> <span class="o">=</span> <span class="n">ifft</span><span class="p">(</span><span class="n">grids_nd</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span><span class="p">)</span>  <span class="c1"># (B, *grid_shape)</span>
+        <span class="n">imgs</span> <span class="o">=</span> <span class="n">resize</span><span class="p">(</span><span class="n">full_imgs</span><span class="p">,</span> <span class="p">(</span><span class="n">B</span><span class="p">,</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">))</span>
         <span class="k">return</span> <span class="n">imgs</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span></div>
 
 
@@ -888,13 +892,12 @@
         <span class="n">inv_perm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">inv_perm</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
         <span class="n">imgs_d</span> <span class="o">=</span> <span class="n">batch_imgs</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
 
-        <span class="c1"># ONE batched FFT over last ``ndim`` dims</span>
-        <span class="n">fft_results</span> <span class="o">=</span> <span class="n">fft</span><span class="p">(</span><span class="n">imgs_d</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span><span class="p">)</span>  <span class="c1"># (B, *image_shape)</span>
-
-        <span class="c1"># Zero-pad to grid in one tensor op: (B, *grid_shape)</span>
+        <span class="c1"># Zero-pad images in image space (adjoint of center-crop in image space)</span>
         <span class="n">padded</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">B</span><span class="p">,</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">)</span>
-        <span class="n">padded</span><span class="p">[(</span><span class="nb">slice</span><span class="p">(</span><span class="kc">None</span><span class="p">),</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">_pad_slices</span><span class="p">)]</span> <span class="o">=</span> <span class="n">fft_results</span>
-        <span class="n">padded_flat</span> <span class="o">=</span> <span class="n">padded</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">B</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">padded</span><span class="p">[(</span><span class="nb">slice</span><span class="p">(</span><span class="kc">None</span><span class="p">),</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">_pad_slices</span><span class="p">)]</span> <span class="o">=</span> <span class="n">imgs_d</span>
+        <span class="c1"># ONE batched FFT at full grid_shape</span>
+        <span class="n">fft_results</span> <span class="o">=</span> <span class="n">fft</span><span class="p">(</span><span class="n">padded</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span><span class="p">)</span>  <span class="c1"># (B, *grid_shape)</span>
+        <span class="n">padded_flat</span> <span class="o">=</span> <span class="n">fft_results</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">B</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
 
         <span class="c1"># Gather B times — C++ kernel, bottleneck until batched kernel exists</span>
         <span class="n">output</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
@@ -909,26 +912,32 @@
 <div class="viewcode-block" id="SparseFFT._scatter_ifft_crop">
 <a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._scatter_ifft_crop">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_scatter_ifft_crop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">coil_data</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">,</span> <span class="n">grid</span><span class="p">,</span> <span class="n">_dtype</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Scatter -&gt; IFFT -&gt; crop for one coil.  Reuses *grid* buffer.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Scatter -&gt; full-size IFFT -&gt; image-space center-crop for one coil.</span>
+
+<span class="sd">        The IFFT is performed at the full (oversampled) ``grid_shape``; the</span>
+<span class="sd">        result is then center-cropped in **image space** to ``image_shape``.</span>
+<span class="sd">        Cropping k-space first (the old behaviour) is wrong when</span>
+<span class="sd">        ``grid_shape != image_shape`` (oversampling &gt; 1).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">grid</span><span class="o">.</span><span class="n">zero_</span><span class="p">()</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_scatter</span><span class="p">(</span><span class="n">grid</span><span class="p">,</span> <span class="n">coil_data</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">ifft</span><span class="p">(</span>
-            <span class="n">grid</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">),</span> <span class="n">oshape</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span>
-        <span class="p">)</span></div>
+        <span class="n">full_img</span> <span class="o">=</span> <span class="n">ifft</span><span class="p">(</span><span class="n">grid</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">),</span> <span class="n">axes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">resize</span><span class="p">(</span><span class="n">full_img</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">)</span></div>
 
 
 <div class="viewcode-block" id="SparseFFT._fft_pad_gather">
 <a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._fft_pad_gather">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_fft_pad_gather</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">coil_img</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">,</span> <span class="n">inv_perm</span><span class="p">,</span> <span class="n">padded</span><span class="p">,</span> <span class="n">_dtype</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;FFT -&gt; zero-pad -&gt; gather -&gt; unpermute for one coil.</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Zero-pad image -&gt; FFT at grid_shape -&gt; gather -&gt; unpermute for one coil.</span>
 
+<span class="sd">        Adjoint of: scatter -&gt; IFFT at grid_shape -&gt; center-crop image.</span>
 <span class="sd">        Reuses the *padded* buffer to avoid a fresh allocation per coil.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
-        <span class="n">fft_result</span> <span class="o">=</span> <span class="n">fft</span><span class="p">(</span><span class="n">coil_img</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span><span class="p">)</span>
-        <span class="c1"># In-place zero-pad: write FFT result into centre of pre-zeroed grid</span>
+        <span class="c1"># Zero-pad image in image space (adjoint of center-crop in image space)</span>
         <span class="n">padded</span><span class="o">.</span><span class="n">zero_</span><span class="p">()</span>
-        <span class="n">padded</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_pad_slices</span><span class="p">]</span> <span class="o">=</span> <span class="n">fft_result</span>
-        <span class="k">return</span> <span class="n">_gather</span><span class="p">(</span><span class="n">padded</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">),</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">)[</span><span class="n">inv_perm</span><span class="p">]</span></div>
+        <span class="n">padded</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_pad_slices</span><span class="p">]</span> <span class="o">=</span> <span class="n">coil_img</span>
+        <span class="n">fft_result</span> <span class="o">=</span> <span class="n">fft</span><span class="p">(</span><span class="n">padded</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span><span class="p">)</span>  <span class="c1"># FFT at full grid_shape</span>
+        <span class="k">return</span> <span class="n">_gather</span><span class="p">(</span><span class="n">fft_result</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">),</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">)[</span><span class="n">inv_perm</span><span class="p">]</span></div>
 
 
     <span class="c1"># ------------------------------------------------------------------</span>

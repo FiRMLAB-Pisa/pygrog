@@ -231,7 +231,8 @@ def test_batch_helpers_scatter_ifft_crop_vs_loop(device):
     for b in range(B_batch):
         grid = torch.zeros(op.grid_size, dtype=ksp.dtype, device=dev)
         scatter_add(grid, ksp[b][sp], idx, sw)
-        img = ifft(grid.reshape(op.grid_shape), oshape=op.image_shape, axes=op.fft_axes)
+        full_img = ifft(grid.reshape(op.grid_shape), axes=op.fft_axes)  # IFFT at grid size
+        img = full_img[op._pad_slices]  # center-crop image (not k-space)
         loop_imgs.append(img)
     loop_out = torch.stack(loop_imgs)
 
@@ -254,8 +255,8 @@ def test_batch_helpers_fft_pad_gather_vs_loop(device):
     loop_ksps = []
     for b in range(B_batch):
         padded = torch.zeros(*op.grid_shape, dtype=imgs.dtype, device=dev)
-        padded[op._pad_slices] = fft(imgs[b], axes=op.fft_axes)
-        ksp_b = gather(padded.reshape(-1), idx, sw)[inv]
+        padded[op._pad_slices] = imgs[b]  # zero-pad image in image space
+        ksp_b = gather(fft(padded, axes=op.fft_axes).reshape(-1), idx, sw)[inv]  # FFT at grid size
         loop_ksps.append(ksp_b)
     loop_out = torch.stack(loop_ksps)
 

@@ -31,6 +31,7 @@ import torch
 from mrinufft._array_compat import with_torch
 
 from .._base._fftc import fft, ifft
+from .._utils import resize
 
 # ---------------------------------------------------------------------------
 # Torch C++ extension (lazy, cached)
@@ -476,7 +477,10 @@ class SparseFFT:
         # ONE batched IFFT + center-crop over last ``ndim`` dims
         # axes=(-k,...,-1) work correctly on any batch prefix
         grids_nd = grids.reshape(B, *self.grid_shape)
-        imgs = ifft(grids_nd, oshape=(B, *self.image_shape), axes=self.fft_axes)
+        # Full-size IFFT first, then center-crop image; cropping in k-space
+        # (via oshape) would be wrong when the grid is oversampled.
+        full_imgs = ifft(grids_nd, axes=self.fft_axes)  # (B, *grid_shape)
+        imgs = resize(full_imgs, (B, *self.image_shape))
         return imgs.to(src_device)
 
     def _fft_pad_gather_batch(self, batch_imgs: torch.Tensor) -> torch.Tensor:
@@ -507,13 +511,12 @@ class SparseFFT:
         inv_perm = self.inv_perm.to(comp_device)
         imgs_d = batch_imgs.to(comp_device)
 
-        # ONE batched FFT over last ``ndim`` dims
-        fft_results = fft(imgs_d, axes=self.fft_axes)  # (B, *image_shape)
-
-        # Zero-pad to grid in one tensor op: (B, *grid_shape)
+        # Zero-pad images in image space (adjoint of center-crop in image space)
         padded = torch.zeros(B, *self.grid_shape, dtype=dtype, device=comp_device)
-        padded[(slice(None), *self._pad_slices)] = fft_results
-        padded_flat = padded.reshape(B, -1)
+        padded[(slice(None), *self._pad_slices)] = imgs_d
+        # ONE batched FFT at full grid_shape
+        fft_results = fft(padded, axes=self.fft_axes)  # (B, *grid_shape)
+        padded_flat = fft_results.reshape(B, -1)
 
         # Gather B times — C++ kernel, bottleneck until batched kernel exists
         output = torch.stack(
@@ -525,23 +528,29 @@ class SparseFFT:
     # Core single-coil ops (fused)
     # ------------------------------------------------------------------
     def _scatter_ifft_crop(self, coil_data, indices, sqrt_w, grid, _dtype):
-        """Scatter -> IFFT -> crop for one coil.  Reuses *grid* buffer."""
+        """Scatter -> full-size IFFT -> image-space center-crop for one coil.
+
+        The IFFT is performed at the full (oversampled) ``grid_shape``; the
+        result is then center-cropped in **image space** to ``image_shape``.
+        Cropping k-space first (the old behaviour) is wrong when
+        ``grid_shape != image_shape`` (oversampling > 1).
+        """
         grid.zero_()
         self._scatter(grid, coil_data, indices, sqrt_w)
-        return ifft(
-            grid.reshape(self.grid_shape), oshape=self.image_shape, axes=self.fft_axes
-        )
+        full_img = ifft(grid.reshape(self.grid_shape), axes=self.fft_axes)
+        return resize(full_img, self.image_shape)
 
     def _fft_pad_gather(self, coil_img, indices, sqrt_w, inv_perm, padded, _dtype):
-        """FFT -> zero-pad -> gather -> unpermute for one coil.
+        """Zero-pad image -> FFT at grid_shape -> gather -> unpermute for one coil.
 
+        Adjoint of: scatter -> IFFT at grid_shape -> center-crop image.
         Reuses the *padded* buffer to avoid a fresh allocation per coil.
         """
-        fft_result = fft(coil_img, axes=self.fft_axes)
-        # In-place zero-pad: write FFT result into centre of pre-zeroed grid
+        # Zero-pad image in image space (adjoint of center-crop in image space)
         padded.zero_()
-        padded[self._pad_slices] = fft_result
-        return _gather(padded.reshape(-1), indices, sqrt_w)[inv_perm]
+        padded[self._pad_slices] = coil_img
+        fft_result = fft(padded, axes=self.fft_axes)  # FFT at full grid_shape
+        return _gather(fft_result.reshape(-1), indices, sqrt_w)[inv_perm]
 
     # ------------------------------------------------------------------
     # Dual-stream GPU pipelining  (CPU input -> GPU compute)

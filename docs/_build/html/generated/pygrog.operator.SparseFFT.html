@@ -600,14 +600,19 @@ independently-weighted image (e.g. one ORC component x one coil).</p>
 <dl class="py method">
 <dt class="sig sig-object py" id="pygrog.operator.SparseFFT._scatter_ifft_crop">
 <span class="sig-name descname"><span class="pre">_scatter_ifft_crop</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">coil_data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">indices</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sqrt_w</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_dtype</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/operator/_sparse_fft.html#SparseFFT._scatter_ifft_crop"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.operator.SparseFFT._scatter_ifft_crop" title="Link to this definition">#</a></dt>
-<dd><p>Scatter -&gt; IFFT -&gt; crop for one coil.  Reuses <em>grid</em> buffer.</p>
+<dd><p>Scatter -&gt; full-size IFFT -&gt; image-space center-crop for one coil.</p>
+<p>The IFFT is performed at the full (oversampled) <code class="docutils literal notranslate"><span class="pre">grid_shape</span></code>; the
+result is then center-cropped in <strong>image space</strong> to <code class="docutils literal notranslate"><span class="pre">image_shape</span></code>.
+Cropping k-space first (the old behaviour) is wrong when
+<code class="docutils literal notranslate"><span class="pre">grid_shape</span> <span class="pre">!=</span> <span class="pre">image_shape</span></code> (oversampling &gt; 1).</p>
 </dd></dl>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="pygrog.operator.SparseFFT._fft_pad_gather">
 <span class="sig-name descname"><span class="pre">_fft_pad_gather</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">coil_img</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">indices</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sqrt_w</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inv_perm</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">padded</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_dtype</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/operator/_sparse_fft.html#SparseFFT._fft_pad_gather"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.operator.SparseFFT._fft_pad_gather" title="Link to this definition">#</a></dt>
-<dd><p>FFT -&gt; zero-pad -&gt; gather -&gt; unpermute for one coil.</p>
-<p>Reuses the <em>padded</em> buffer to avoid a fresh allocation per coil.</p>
+<dd><p>Zero-pad image -&gt; FFT at grid_shape -&gt; gather -&gt; unpermute for one coil.</p>
+<p>Adjoint of: scatter -&gt; IFFT at grid_shape -&gt; center-crop image.
+Reuses the <em>padded</em> buffer to avoid a fresh allocation per coil.</p>
 </dd></dl>
 
 <dl class="py method">

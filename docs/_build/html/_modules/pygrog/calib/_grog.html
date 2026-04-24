@@ -366,7 +366,7 @@
 <span class="sd">This is a *pure-torch* implementation (scipy is not needed at runtime).</span>
 <span class="sd">&quot;&quot;&quot;</span>
 
-<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;GrogInterpolator&quot;</span><span class="p">]</span>
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;GrogInterpolator&quot;</span><span class="p">,</span> <span class="s2">&quot;GrogPlan&quot;</span><span class="p">]</span>
 
 <span class="kn">import</span><span class="w"> </span><span class="nn">gc</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">pathlib</span>
@@ -378,6 +378,29 @@
 <span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">._grappa</span><span class="w"> </span><span class="kn">import</span> <span class="n">KernelTable</span>
+
+
+<span class="c1"># ---------------------------------------------------------------------------</span>
+<span class="c1"># Plan container</span>
+<span class="c1"># ---------------------------------------------------------------------------</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">GrogPlan</span><span class="p">(</span><span class="n">SimpleNamespace</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Dynamic namespace for GROG/FFT plan fields.</span>
+
+<span class="sd">    Behaves exactly like :class:`types.SimpleNamespace` (attributes can be set</span>
+<span class="sd">    freely) but exposes :attr:`pre_weights` as a computed ``@property`` so it</span>
+<span class="sd">    is always consistent with ``sqrt_weights`` and ``inv_perm``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">pre_weights</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;torch.Tensor&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;``sqrt_weights`` reordered to match :meth:`~pygrog.calib.GrogInterpolator.interpolate` output.</span>
+
+<span class="sd">        Multiply sparse k-space by this factor **once** before an iterative</span>
+<span class="sd">        reconstruction loop so that</span>
+<span class="sd">        :class:`~pygrog.operator.SparseFFT` ``.forward`` / ``.adjoint`` satisfy</span>
+<span class="sd">        the adjointness condition (i.e. cumulative weighting equals 1/count).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">sqrt_weights</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">inv_perm</span><span class="p">]</span>
 
 <span class="c1"># ---------------------------------------------------------------------------</span>
 <span class="c1"># Torch C++ extension (lazy, cached)</span>
@@ -548,6 +571,7 @@
 <span class="sd">        types.SimpleNamespace</span>
 <span class="sd">            The plan namespace — has ``grid_shape``, ``image_shape``,</span>
 <span class="sd">            ``indices``, ``sqrt_weights``, ``sort_perm``, ``inv_perm``,</span>
+<span class="sd">            ``pre_weights`` (computed property),</span>
 <span class="sd">            ``grid_size``, ``n_samples``, plus all original GROG plan</span>
 <span class="sd">            fields.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
@@ -677,7 +701,10 @@
             <span class="kn">from</span><span class="w"> </span><span class="nn">..operator._sparse_fft</span><span class="w"> </span><span class="kn">import</span> <span class="n">SparseFFT</span>
 
             <span class="n">op</span> <span class="o">=</span> <span class="n">SparseFFT</span><span class="p">(</span><span class="n">plan</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">plan</span><span class="p">)</span>
-            <span class="n">img_coils</span> <span class="o">=</span> <span class="n">op</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">sparse</span><span class="p">)</span>
+            <span class="c1"># Pre-multiply by plan.pre_weights so that SparseFFT.forward applies</span>
+            <span class="c1"># the second sqrt_w factor → full density compensation w = 1/count.</span>
+            <span class="n">pre_w</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">plan</span><span class="o">.</span><span class="n">pre_weights</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">sparse</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+            <span class="n">img_coils</span> <span class="o">=</span> <span class="n">op</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">sparse</span> <span class="o">*</span> <span class="n">pre_w</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
             <span class="n">image</span> <span class="o">=</span> <span class="n">img_coils</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">square</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">sqrt</span><span class="p">()</span>  <span class="c1"># RSS: (*image_shape,)</span>
             <span class="n">gc</span><span class="o">.</span><span class="n">collect</span><span class="p">()</span>
             <span class="n">out</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span> <span class="k">if</span> <span class="n">is_numpy</span> <span class="k">else</span> <span class="n">image</span>
@@ -739,7 +766,8 @@
         <span class="k">if</span> <span class="ow">not</span> <span class="n">valid</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
             <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">ncoils</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
 
-        <span class="c1"># Keep duplicated neighbourhood samples (sparse Cartesian representation).</span>
+        <span class="c1"># Return raw unweighted sparse samples.  The caller is responsible for</span>
+        <span class="c1"># pre-multiplying by sqrt_weights before feeding to SparseFFT.</span>
         <span class="k">return</span> <span class="n">data_interp</span><span class="p">[</span><span class="n">valid</span><span class="p">]</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">contiguous</span><span class="p">()</span></div>
 
 
@@ -805,6 +833,9 @@
 
 <span class="sd">    Adds: ``image_shape``, ``grid_size``, ``n_samples``, ``indices``,</span>
 <span class="sd">    ``sqrt_weights``, ``sort_perm``, ``inv_perm``.</span>
+
+<span class="sd">    ``pre_weights`` is a :class:`GrogPlan` ``@property`` (not stored here)</span>
+<span class="sd">    that returns ``sqrt_weights[inv_perm]`` on access.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">grid_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">plan</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">image_shape</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -845,6 +876,7 @@
     <span class="n">plan</span><span class="o">.</span><span class="n">sqrt_weights</span> <span class="o">=</span> <span class="n">sorted_w</span>
     <span class="n">plan</span><span class="o">.</span><span class="n">sort_perm</span> <span class="o">=</span> <span class="n">sort_perm</span>
     <span class="n">plan</span><span class="o">.</span><span class="n">inv_perm</span> <span class="o">=</span> <span class="n">inv_perm</span>
+    <span class="c1"># pre_weights is a @property on GrogPlan — no eager assignment needed.</span>
 
 
 <span class="c1"># =====================================================================</span>
@@ -941,7 +973,7 @@
         <span class="n">time_map</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">time_map</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
         <span class="n">time_map</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">broadcast_to</span><span class="p">(</span><span class="n">time_map</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">],</span> <span class="n">target_flat</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
 
-    <span class="k">return</span> <span class="n">SimpleNamespace</span><span class="p">(</span>
+    <span class="k">return</span> <span class="n">GrogPlan</span><span class="p">(</span>
         <span class="n">shape</span><span class="o">=</span><span class="n">shape</span><span class="p">,</span>
         <span class="n">oversamp</span><span class="o">=</span><span class="n">oversamp</span><span class="p">,</span>
         <span class="n">grid_shape</span><span class="o">=</span><span class="n">grid_shape</span><span class="p">,</span>

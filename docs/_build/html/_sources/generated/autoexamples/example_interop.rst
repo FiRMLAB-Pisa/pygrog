@@ -44,7 +44,7 @@ an informative error only when the adapter is actually instantiated.
 
 All data are **synthetic** — no scanner files are required.
 
-.. GENERATED FROM PYTHON SOURCE LINES 28-33
+.. GENERATED FROM PYTHON SOURCE LINES 28-39
 
 .. code-block:: Python
 
@@ -53,6 +53,11 @@ All data are **synthetic** — no scanner files are required.
     import torch
     import matplotlib.pyplot as plt
 
+    from mrinufft import get_operator, initialize_2D_spiral
+    from mrinufft.density import voronoi
+    from mrinufft.extras import get_brainweb_map
+    from pygrog.calib import GrogInterpolator
+    from pygrog.operator import SparseFFT
 
 
 
@@ -60,51 +65,70 @@ All data are **synthetic** — no scanner files are required.
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 34-39
 
-Shared SparseFFT operator
-==========================
+.. GENERATED FROM PYTHON SOURCE LINES 40-48
 
-A single :class:`~pygrog.operator.SparseFFT` is used throughout the
-example so every adapter wraps the same underlying computation.
+Shared setup: BrainWeb phantom, spiral trajectory, GROG plan
+=============================================================
 
-.. GENERATED FROM PYTHON SOURCE LINES 39-73
+k-space is always simulated via mri-nufft; PyGROG's GROG interpolation then
+maps it onto a sparse Cartesian grid.  Pre-multiplying by
+``grog.plan.pre_weights`` once before the solver loop ensures
+:class:`~pygrog.operator.SparseFFT` ``.forward`` / ``.adjoint`` satisfy the
+adjointness condition throughout.
+
+.. GENERATED FROM PYTHON SOURCE LINES 48-97
 
 .. code-block:: Python
 
 
-    from pygrog.operator import SparseFFT
+    m0, _, _ = get_brainweb_map(0)
+    image_np = np.flip(m0, axis=(0, 1, 2))[90].astype(np.float32)
+    image_np /= image_np.max() + 1e-8
+    image_shape = image_np.shape   # (217, 217)
+    n_coils = 1                    # single-coil for conciseness
 
-    image_shape = (32, 32)
-    grid_shape = (40, 40)
-    rng = np.random.default_rng(7)
-    grid_size = grid_shape[0] * grid_shape[1]
-    n_samples = grid_size // 4  # 25 % k-space coverage
-    indices = rng.integers(0, grid_size, size=n_samples).astype(np.int64)
-    weights = np.ones(n_samples, dtype=np.float32)
-
-    op = SparseFFT(grid_shape, image_shape, indices, weights)
-
-
-    def _phantom(shape):
-        ny, nx = shape
-        yy, xx = np.mgrid[-1 : 1 : ny * 1j, -1 : 1 : nx * 1j]
-        img = np.zeros(shape, dtype=np.float32)
-        img += 1.0 * ((xx / 0.9) ** 2 + (yy / 0.9) ** 2 < 1)
-        img += 0.4 * ((xx / 0.6) ** 2 + ((yy - 0.1) / 0.7) ** 2 < 1)
-        img -= 0.6 * ((xx / 0.15) ** 2 + ((yy + 0.2) / 0.2) ** 2 < 1)
-        return img.clip(0, 1)
-
-
-    image_ref = torch.as_tensor(_phantom(image_shape)).to(torch.complex64)
-    # Add coil dimension: operator expects (n_coils, *image_shape) when smaps are absent
-    image_1coil = image_ref.unsqueeze(0)  # (1, 32, 32)
-    kspace_ref = op.adjoint(image_1coil)  # (1, n_samples)
-
-    print(
-        f"Operator   : grid={op.grid_shape}, image={op.image_shape}, n={op.indices.shape[0]}"
+    samples = initialize_2D_spiral(Nc=32, Ns=400, nb_revolutions=8, tilt="mri-golden").astype(
+        np.float32
     )
-    print(f"K-space    : {kspace_ref.shape}")
+    density = voronoi(samples)
+
+    nufft = get_operator("finufft")(
+        samples=samples,
+        shape=image_shape,
+        n_coils=n_coils,
+        density=density,
+        squeeze_dims=True,
+    )
+    # k-space simulated entirely via mri-nufft (never via GrogInterpolator)
+    kspace_nufft = nufft.op(image_np.astype(np.complex128))  # (n_coils, n_samples)
+
+    # GROG calibration
+    coords = (samples * np.asarray(image_shape, dtype=np.float32)).astype(np.float32)
+    calib_cart = np.fft.fftshift(
+        np.fft.fftn(
+            np.fft.ifftshift(image_np[None].astype(np.complex64), axes=(-2, -1)),
+            axes=(-2, -1),
+        ),
+        axes=(-2, -1),
+    )
+    grog = GrogInterpolator(
+        shape=image_shape, coords=coords, kernel_width=2, image_shape=image_shape
+    )
+    grog.calc_interp_table(calib_cart, lamda=0.01, precision=1)
+
+    # Interpolate to sparse Cartesian and pre-weight (once, before any iterative loop)
+    kspace_nc_shaped = kspace_nufft.astype(np.complex64).reshape(n_coils, *samples.shape[:2])
+    kspace_sparse_raw = grog.interpolate(kspace_nc_shaped, ret_image=False)
+    kspace_sparse = torch.as_tensor(np.asarray(kspace_sparse_raw))
+    kspace_sparse = kspace_sparse * grog.plan.pre_weights.to(kspace_sparse.dtype).unsqueeze(0)
+
+    # SparseFFT operator wrapping the GROG plan
+    op = SparseFFT(plan=grog.plan)
+
+    print(f"image shape   : {image_shape}")
+    print(f"sparse k-space: {kspace_sparse.shape}  (pre-weighted)")
+    print(f"grid shape    : {op.grid_shape}")
 
 
 
@@ -114,13 +138,18 @@ example so every adapter wraps the same underlying computation.
 
  .. code-block:: none
 
-    Operator   : grid=(40, 40), image=(32, 32), n=400
-    K-space    : torch.Size([1, 400])
+    /home/mcencini/.conda/envs/pygrog/lib/python3.13/site-packages/mrinufft/_utils.py:67: UserWarning: Samples will be rescaled to [-pi, pi), assuming they were in [-0.5, 0.5)
+      warnings.warn(
+    /home/mcencini/.conda/envs/pygrog/lib/python3.13/site-packages/finufft/_interfaces.py:427: UserWarning: Argument `data` does not satisfy the following requirement: C. Copying array (this may reduce performance)
+      warnings.warn(f"Argument `{name}` does not satisfy the following requirement: {prop}. Copying array (this may reduce performance)")
+    image shape   : (217, 217)
+    sparse k-space: torch.Size([1, 38389])  (pre-weighted)
+    grid shape    : (217, 217)
 
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 74-87
+.. GENERATED FROM PYTHON SOURCE LINES 98-111
 
 deepinverse adapter — GrogLinearPhysics
 ========================================
@@ -136,7 +165,7 @@ automatic differentiation through the GROG kernels.
    When not available the lazy class factory raises an informative
    ``ImportError``.
 
-.. GENERATED FROM PYTHON SOURCE LINES 87-110
+.. GENERATED FROM PYTHON SOURCE LINES 111-134
 
 .. code-block:: Python
 
@@ -146,16 +175,16 @@ automatic differentiation through the GROG kernels.
     try:
         physics = GrogLinearPhysics(op)
 
-        # Forward measurement: image → k-space
-        ksp_deepinv = physics.A(image_1coil)  # grad provided by _torch.py autograd fn
-        print(f"\nGrogLinearPhysics.A   output shape: {ksp_deepinv.shape}")
+        # Forward (adjoint NUFFT): pre-weighted sparse k-space -> image
+        img_deepinv = physics.A_adjoint(kspace_sparse)
+        print(f"\nGrogLinearPhysics.A_adjoint output: {img_deepinv.shape}")
 
-        # Adjoint: k-space → image
-        img_deepinv = physics.A_adjoint(ksp_deepinv)
-        print(f"GrogLinearPhysics.A_adjoint output: {img_deepinv.shape}")
+        # Adjoint (forward NUFFT): image -> sparse k-space
+        ksp_deepinv = physics.A(img_deepinv)
+        print(f"GrogLinearPhysics.A   output shape: {ksp_deepinv.shape}")
 
-        # Gradient flows through A
-        ksp_grad = kspace_ref.clone().requires_grad_(True)
+        # Gradient flows through A_adjoint
+        ksp_grad = kspace_sparse.clone().requires_grad_(True)
         img_out = physics.A_adjoint(ksp_grad)
         img_out.abs().sum().backward()
         print(f"Gradient populated on ksp_grad     : {ksp_grad.grad is not None}")
@@ -172,12 +201,14 @@ automatic differentiation through the GROG kernels.
  .. code-block:: none
 
 
-    deepinv not available — skipping GrogLinearPhysics demo: deepinv is required for GrogLinearPhysics.  Install it with: pip install deepinv
+    GrogLinearPhysics.A_adjoint output: torch.Size([1, 217, 217])
+    GrogLinearPhysics.A   output shape: torch.Size([1, 38389])
+    Gradient populated on ksp_grad     : True
 
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 111-117
+.. GENERATED FROM PYTHON SOURCE LINES 135-141
 
 Plain-PyTorch autograd functions
 ---------------------------------
@@ -186,14 +217,15 @@ For use without deepinv, :func:`~pygrog.interop.grog_measure` (image → k-space
 and :func:`~pygrog.interop.grog_backproject` (k-space → image) are the
 underlying autograd functions.
 
-.. GENERATED FROM PYTHON SOURCE LINES 117-126
+.. GENERATED FROM PYTHON SOURCE LINES 141-151
 
 .. code-block:: Python
 
 
     from pygrog.interop import grog_measure
 
-    img_grad = image_1coil.clone().requires_grad_(True)
+    image_t = torch.as_tensor(image_np[None].astype(np.complex64))  # (1, *image_shape)
+    img_grad = image_t.clone().requires_grad_(True)
     ksp_out = grog_measure(img_grad, op)
     ksp_out.abs().sum().backward()
     print(f"\ngrog_measure output shape : {ksp_out.shape}")
@@ -208,13 +240,13 @@ underlying autograd functions.
  .. code-block:: none
 
 
-    grog_measure output shape : torch.Size([1, 400])
+    grog_measure output shape : torch.Size([1, 38389])
     Gradient on img_grad      : True
 
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 127-138
+.. GENERATED FROM PYTHON SOURCE LINES 152-163
 
 sigpy adapter — GrogLinop
 ==========================
@@ -228,7 +260,7 @@ using ``*``, ``+``, and scalar multiplication.
    sigpy is not available this block prints an informative message and
    continues.
 
-.. GENERATED FROM PYTHON SOURCE LINES 138-159
+.. GENERATED FROM PYTHON SOURCE LINES 163-184
 
 .. code-block:: Python
 
@@ -240,12 +272,12 @@ using ``*``, ``+``, and scalar multiplication.
         print(f"\nGrogLinop    ishape={linop.ishape}, oshape={linop.oshape}")
         print(f"GrogLinop.H  ishape={linop.H.ishape}, oshape={linop.H.oshape}")
 
-        # Forward: k-space -> image (sigpy forward direction)
-        ksp_np_sigpy = kspace_ref.numpy()
-        img_sigpy = linop * ksp_np_sigpy  # uses __mul__ (apply)
+        # Forward (adjoint NUFFT): pre-weighted sparse k-space -> image
+        ksp_np_sigpy = kspace_sparse.numpy()
+        img_sigpy = linop * ksp_np_sigpy
         print(f"linop output shape   : {img_sigpy.shape}")
 
-        # Adjoint: image -> k-space
+        # Adjoint (forward NUFFT): image -> sparse k-space
         img_np_sigpy = np.abs(img_sigpy)
         ksp_sigpy = linop.H * img_np_sigpy.astype(np.complex64)
         print(f"linop.H output shape : {ksp_sigpy.shape}")
@@ -262,12 +294,15 @@ using ``*``, ``+``, and scalar multiplication.
  .. code-block:: none
 
 
-    sigpy not available — skipping GrogLinop demo: sigpy is required for GrogLinop.  Install it with: pip install sigpy
+    GrogLinop    ishape=[1, 38389], oshape=[1, 217, 217]
+    GrogLinop.H  ishape=[1, 217, 217], oshape=[1, 38389]
+    linop output shape   : (1, 217, 217)
+    linop.H output shape : (1, 38389)
 
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 160-168
+.. GENERATED FROM PYTHON SOURCE LINES 185-193
 
 mrpro adapter — GrogLinearOp
 =============================
@@ -278,7 +313,7 @@ mrpro adapter — GrogLinearOp
 It participates in mrpro operator algebra (``@``, ``+``, adjoint via ``.H``)
 and can be passed directly to mrpro solvers (e.g. ``ConjugateGradient``).
 
-.. GENERATED FROM PYTHON SOURCE LINES 168-191
+.. GENERATED FROM PYTHON SOURCE LINES 193-216
 
 .. code-block:: Python
 
@@ -289,17 +324,17 @@ and can be passed directly to mrpro solvers (e.g. ``ConjugateGradient``).
         mrpro_op = GrogLinearOp(op)
         print(f"\nGrogLinearOp ready: {type(mrpro_op).__mro__[1].__name__}")
 
-        # Forward (backprojection): k-space -> image
-        (img_mrpro,) = mrpro_op.forward(kspace_ref)
+        # Forward (adjoint NUFFT): pre-weighted sparse k-space -> image
+        (img_mrpro,) = mrpro_op.forward(kspace_sparse)
         print(f"mrpro forward output shape: {img_mrpro.shape}")
 
-        # Adjoint (measurement): image -> k-space
+        # Adjoint (forward NUFFT): image -> sparse k-space
         (ksp_mrpro,) = mrpro_op.adjoint(img_mrpro)
         print(f"mrpro adjoint output shape: {ksp_mrpro.shape}")
 
         # Normal operator A^H A
         AHA = mrpro_op.H @ mrpro_op
-        (img_aha,) = AHA.forward(kspace_ref)
+        (img_aha,) = AHA.forward(kspace_sparse)
         print(f"Normal operator (A^H A) output shape: {img_aha.shape}")
 
     except ImportError as exc:
@@ -315,14 +350,14 @@ and can be passed directly to mrpro solvers (e.g. ``ConjugateGradient``).
 
 
     GrogLinearOp ready: LinearOperator
-    mrpro forward output shape: torch.Size([1, 32, 32])
-    mrpro adjoint output shape: torch.Size([1, 400])
-    Normal operator (A^H A) output shape: torch.Size([1, 400])
+    mrpro forward output shape: torch.Size([1, 217, 217])
+    mrpro adjoint output shape: torch.Size([1, 38389])
+    Normal operator (A^H A) output shape: torch.Size([1, 38389])
 
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 192-214
+.. GENERATED FROM PYTHON SOURCE LINES 217-239
 
 Summary
 =======
@@ -347,7 +382,7 @@ Summary
      - ``mrpro.operators.LinearOperator``
      - mrpro CG / PDHG solvers
 
-.. GENERATED FROM PYTHON SOURCE LINES 214-216
+.. GENERATED FROM PYTHON SOURCE LINES 239-241
 
 .. code-block:: Python
 
@@ -363,7 +398,7 @@ Summary
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 1.784 seconds)
+   **Total running time of the script:** (0 minutes 1.982 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_interop.py:

@@ -30,7 +30,7 @@ This example follows a realistic non-Cartesian pipeline:
 3. Use :class:`~pygrog.calib.GrogInterpolator` to grid and reconstruct,
    then compare PyGROG against the mri-nufft reference.
 
-.. GENERATED FROM PYTHON SOURCE LINES 14-52
+.. GENERATED FROM PYTHON SOURCE LINES 14-44
 
 .. code-block:: Python
 
@@ -38,19 +38,15 @@ This example follows a realistic non-Cartesian pipeline:
     import matplotlib.pyplot as plt
     import numpy as np
 
-    from mrinufft import get_operator, initialize_2D_radial
+    import torch
+
+    from brainweb_dl import get_mri
+
+    from mrinufft import display_2D_trajectory, get_operator, initialize_2D_spiral
     from mrinufft.density import voronoi
-    from mrinufft.extras import get_brainweb_map
+
     from pygrog.calib import GrogInterpolator
-
-
-    def _load_brainweb_slice(step=4):
-        """Load and normalize a 2-D BrainWeb slice."""
-        m0, _, _ = get_brainweb_map(0)
-        image = np.flip(m0, axis=(0, 1, 2))[90]
-        image = np.ascontiguousarray(image[::step, ::step].astype(np.float32))
-        image /= image.max() + 1e-8
-        return image
+    from pygrog.operator import SparseFFT
 
 
     def _synthetic_smaps(shape, n_coils=4):
@@ -63,13 +59,11 @@ This example follows a realistic non-Cartesian pipeline:
             gauss = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2.0 * 0.45**2))
             phase = np.exp(1j * (cx * xx + cy * yy))
             smaps.append(gauss * phase)
-        smaps = np.asarray(smaps, dtype=np.complex128)
+        smaps = np.asarray(smaps, dtype=np.complex64)
         smaps /= np.sqrt((np.abs(smaps) ** 2).sum(0, keepdims=True)) + 1e-12
         return smaps
 
 
-    def _rss(coil_images):
-        return np.sqrt((np.abs(coil_images) ** 2).sum(axis=0))
 
 
 
@@ -77,32 +71,34 @@ This example follows a realistic non-Cartesian pipeline:
 
 
 
+.. GENERATED FROM PYTHON SOURCE LINES 45-50
 
+BrainWeb phantom + golden-angle spiral trajectory
+=================================================
 
-.. GENERATED FROM PYTHON SOURCE LINES 53-55
+Following the same setup as the mri-nufft documentation examples:
+a BrainWeb M0 slice at full resolution and a golden-angle 2D spiral.
 
-BrainWeb image + radial trajectory
-==================================
-
-.. GENERATED FROM PYTHON SOURCE LINES 55-73
+.. GENERATED FROM PYTHON SOURCE LINES 50-69
 
 .. code-block:: Python
 
 
-    image = _load_brainweb_slice(step=4)
+    image = get_mri(0, "T1")
+    image = np.flip(image, axis=(0, 2))[90].astype(np.float32)
+    image /= image.max() + 1e-8
     shape = image.shape
-    n_coils = 4
+    n_coils = 16  # coils for simulation
 
-    samples = initialize_2D_radial(Nc=32, Ns=256)
+    samples = initialize_2D_spiral(Nc=48, Ns=600, nb_revolutions=10).astype(
+        np.float32
+    )
     density = voronoi(samples)
 
-    fig, axes = plt.subplots(1, 2, figsize=(9, 4))
-    axes[0].imshow(image, cmap="gray", origin="lower")
-    axes[0].set_title("BrainWeb phantom")
-    axes[0].axis("off")
-    axes[1].plot(samples[:12, :, 0].T, samples[:12, :, 1].T, linewidth=0.8)
-    axes[1].set_aspect("equal")
-    axes[1].set_title("Radial trajectory (first 12 spokes)")
+    plt.figure()
+    plt.imshow(image, cmap="gray", origin="lower")
+    plt.title("BrainWeb M0 phantom")
+    plt.axis("off")
     plt.tight_layout()
     plt.show()
 
@@ -110,7 +106,7 @@ BrainWeb image + radial trajectory
 
 
 .. image-sg:: /generated/autoexamples/images/sphx_glr_example_basic_usage_001.png
-   :alt: BrainWeb phantom, Radial trajectory (first 12 spokes)
+   :alt: BrainWeb M0 phantom
    :srcset: /generated/autoexamples/images/sphx_glr_example_basic_usage_001.png
    :class: sphx-glr-single-img
 
@@ -118,40 +114,59 @@ BrainWeb image + radial trajectory
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 74-76
-
-mri-nufft: trajectory + k-space generation + reference reconstruction
-=============================================================================
-
-.. GENERATED FROM PYTHON SOURCE LINES 76-102
+.. GENERATED FROM PYTHON SOURCE LINES 70-74
 
 .. code-block:: Python
 
 
-    smaps_true = _synthetic_smaps(shape, n_coils=n_coils)
+    display_2D_trajectory(samples)
+    plt.show()
+
+
+
+
+.. image-sg:: /generated/autoexamples/images/sphx_glr_example_basic_usage_002.png
+   :alt: example basic usage
+   :srcset: /generated/autoexamples/images/sphx_glr_example_basic_usage_002.png
+   :class: sphx-glr-single-img
+
+
+
+
+
+.. GENERATED FROM PYTHON SOURCE LINES 75-77
+
+mri-nufft: k-space simulation + reference adjoint reconstruction
+================================================================
+
+.. GENERATED FROM PYTHON SOURCE LINES 77-102
+
+.. code-block:: Python
+
+
+    smaps = _synthetic_smaps(shape, n_coils=n_coils)
 
     nufft_sim = get_operator("finufft")(
         samples=samples,
         shape=shape,
         n_coils=n_coils,
-        smaps=smaps_true,
+        smaps=smaps,
         density=density,
         squeeze_dims=True,
     )
-    kspace_nc = nufft_sim.op(image.astype(np.complex128))  # (n_coils, n_samples)
-
+    kspace_nc = nufft_sim.op(image.astype(np.complex64))  # (n_coils, n_samples)
     nufft_ref = get_operator("finufft")(
         samples=samples,
         shape=shape,
         n_coils=n_coils,
-        smaps=smaps_true,
+        smaps=smaps,
         density=density,
         squeeze_dims=True,
     )
     image_ref = nufft_ref.adj_op(kspace_nc)
 
-    print(f"k-space shape        : {kspace_nc.shape}")
-    print(f"ground-truth smaps   : {smaps_true.shape}")
+    print(f"k-space shape   : {kspace_nc.shape}")
+    print(f"image shape     : {shape}")
 
 
 
@@ -165,44 +180,75 @@ mri-nufft: trajectory + k-space generation + reference reconstruction
       warnings.warn(
     /home/mcencini/.conda/envs/pygrog/lib/python3.13/site-packages/mrinufft/_utils.py:67: UserWarning: Samples will be rescaled to [-pi, pi), assuming they were in [-0.5, 0.5)
       warnings.warn(
-    k-space shape        : (4, 8192)
-    ground-truth smaps   : (4, 55, 55)
+    k-space shape   : (16, 28800)
+    image shape     : (217, 181)
 
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 103-105
+.. GENERATED FROM PYTHON SOURCE LINES 103-115
 
 PyGROG: calibration, gridding, reconstruction
 =============================================
 
-.. GENERATED FROM PYTHON SOURCE LINES 105-129
+**Shortcut path** — ``ret_image=True`` handles the ``sqrt_weights``
+pre-multiplication internally and returns an RSS-combined image directly.
+Use this for quick one-shot reconstructions.
+
+**Explicit sparse IFFT path** — for iterative reconstruction, call
+``interpolate(ret_image=False)`` once to obtain the raw sparse k-space, then
+pre-multiply by ``sqrt_weights`` *before* the iterative loop so that
+:class:`~pygrog.operator.SparseFFT` ``.forward`` and ``.adjoint`` satisfy the
+adjointness condition throughout.
+
+.. GENERATED FROM PYTHON SOURCE LINES 115-160
 
 .. code-block:: Python
 
 
-    # Calibrate GROG from Cartesian calibration data derived from image + smaps.
-    coil_calib = smaps_true * image[None, ...]
-    calib_cart = np.fft.fftshift(
+    # Calibrate GROG from the 24x24 k-space centre of compressed coil images.
+    # Using the full k-space degrades GRAPPA conditioning; the low-frequency
+    # centre is all that is needed to estimate the GRAPPA operators.
+    coil_calib = smaps * image[None, ...]
+    calib_cart_full = np.fft.fftshift(
         np.fft.fftn(np.fft.ifftshift(coil_calib, axes=(-2, -1)), axes=(-2, -1)),
         axes=(-2, -1),
     ).astype(np.complex64)
+    calib_size = 24
+    cy, cx = shape[0] // 2, shape[1] // 2
+    calib_cart = calib_cart_full[
+        :,
+        cy - calib_size // 2 : cy + calib_size // 2,
+        cx - calib_size // 2 : cx + calib_size // 2,
+    ]
 
     # mri-nufft coordinates are in [-0.5, 0.5): scale to PyGROG grid units.
     coords = (samples * np.asarray(shape, dtype=np.float32)).astype(np.float32)
 
-    grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=2, image_shape=shape)
+    grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=3, oversamp=1.0, image_shape=shape)
     grog.calc_interp_table(calib_cart, lamda=0.01, precision=1)
 
     # GrogInterpolator expects (n_coils, n_shots, n_readout).
     kspace_nc_shaped = kspace_nc.astype(np.complex64).reshape(n_coils, *samples.shape[:2])
 
-    # sparse neighbourhood-expanded Cartesian samples
-    kspace_sparse = grog.interpolate(kspace_nc_shaped, ret_image=False)
-    print(f"PyGROG sparse shape  : {kspace_sparse.shape}")
-
-    # dense image reconstruction convenience (SparseFFT.forward + RSS internally)
+    # --- Shortcut: ret_image=True applies sqrt_weights internally ----------------
     image_grog = grog.interpolate(kspace_nc_shaped, ret_image=True)
+
+    # --- Explicit sparse IFFT path -----------------------------------------------
+    # Step 1: GROG-interpolate to raw sparse Cartesian samples (no weights applied).
+    kspace_sparse = grog.interpolate(kspace_nc_shaped, ret_image=False)
+    print(f"PyGROG sparse shape : {kspace_sparse.shape}")
+
+    # Step 2: Pre-multiply by plan.pre_weights once (caller's responsibility).
+    #   plan.pre_weights gives sqrt(density_compensation) in the same sample order
+    #   as interpolate() returns — no index arithmetic required.
+    sqrt_w = grog.plan.pre_weights
+    sparse_t = torch.as_tensor(np.asarray(kspace_sparse))
+    sparse_weighted = sparse_t * sqrt_w.to(sparse_t.dtype).unsqueeze(0)
+
+    # Step 3: SparseFFT.forward applies sqrt_weights again → full density compensation.
+    op = SparseFFT(plan=grog.plan, smaps=torch.as_tensor(smaps))
+    image_grog_explicit = op.forward(sparse_weighted).abs().cpu().numpy()
 
 
 
@@ -212,47 +258,59 @@ PyGROG: calibration, gridding, reconstruction
 
  .. code-block:: none
 
-    PyGROG sparse shape  : (4, 24536)
+    PyGROG sparse shape : (16, 259062)
 
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 130-132
+.. GENERATED FROM PYTHON SOURCE LINES 161-166
 
 Comparison
 ==========
 
-.. GENERATED FROM PYTHON SOURCE LINES 132-153
+Both PyGROG paths (shortcut and explicit) should match each other and the
+mri-nufft adjoint reference.
+
+.. GENERATED FROM PYTHON SOURCE LINES 166-196
 
 .. code-block:: Python
 
 
     ref_abs = np.abs(image_ref)
     ref_abs /= ref_abs.max() + 1e-12
+
     grog_abs = np.abs(image_grog)
     grog_abs /= grog_abs.max() + 1e-12
 
-    nmse = ((grog_abs - ref_abs) ** 2).mean() / ((ref_abs**2).mean() + 1e-12)
-    print(f"PyGROG vs mri-nufft adjoint NMSE: {nmse:.3e}")
+    grog_exp_abs = image_grog_explicit
+    grog_exp_abs /= grog_exp_abs.max() + 1e-12
 
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    nmse_shortcut = ((grog_abs - ref_abs) ** 2).mean() / (ref_abs**2).mean()
+    nmse_explicit = ((grog_exp_abs - ref_abs) ** 2).mean() / (ref_abs**2).mean()
+    print(f"NMSE shortcut  (ret_image=True)    : {nmse_shortcut:.3e}")
+    print(f"NMSE explicit  (sparse IFFT path)  : {nmse_explicit:.3e}")
+
+    fig, axes = plt.subplots(1, 4, figsize=(16, 4))
     axes[0].imshow(ref_abs, cmap="gray", origin="lower")
     axes[0].set_title("mri-nufft adjoint (reference)")
     axes[0].axis("off")
     axes[1].imshow(grog_abs, cmap="gray", origin="lower")
-    axes[1].set_title("PyGROG reconstruction")
+    axes[1].set_title("PyGROG shortcut (ret_image=True)")
     axes[1].axis("off")
-    axes[2].imshow(grog_abs - ref_abs, cmap="bwr", origin="lower", vmin=-0.2, vmax=0.2)
-    axes[2].set_title("Difference")
+    axes[2].imshow(grog_exp_abs, cmap="gray", origin="lower")
+    axes[2].set_title("PyGROG explicit (sparse IFFT)")
     axes[2].axis("off")
+    axes[3].imshow(grog_exp_abs - ref_abs, cmap="bwr", origin="lower", vmin=-0.2, vmax=0.2)
+    axes[3].set_title("Explicit - reference")
+    axes[3].axis("off")
     plt.tight_layout()
     plt.show()
 
 
 
-.. image-sg:: /generated/autoexamples/images/sphx_glr_example_basic_usage_002.png
-   :alt: mri-nufft adjoint (reference), PyGROG reconstruction, Difference
-   :srcset: /generated/autoexamples/images/sphx_glr_example_basic_usage_002.png
+.. image-sg:: /generated/autoexamples/images/sphx_glr_example_basic_usage_003.png
+   :alt: mri-nufft adjoint (reference), PyGROG shortcut (ret_image=True), PyGROG explicit (sparse IFFT), Explicit - reference
+   :srcset: /generated/autoexamples/images/sphx_glr_example_basic_usage_003.png
    :class: sphx-glr-single-img
 
 
@@ -260,7 +318,8 @@ Comparison
 
  .. code-block:: none
 
-    PyGROG vs mri-nufft adjoint NMSE: 2.372e-01
+    NMSE shortcut  (ret_image=True)    : 2.129e-01
+    NMSE explicit  (sparse IFFT path)  : 3.668e-01
 
 
 
@@ -268,7 +327,7 @@ Comparison
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 1.704 seconds)
+   **Total running time of the script:** (0 minutes 2.787 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_basic_usage.py:
