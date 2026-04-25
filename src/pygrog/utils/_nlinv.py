@@ -132,13 +132,23 @@ def nlinv_calib(
 
     # --- Build operator closures ----------------------------------------
     if noncart:
-        fwd = lambda x: _op_noncart(x, coords, weights, cshape, oversamp, eps)
-        deriv = lambda x0, dx: _der_noncart(
-            x0, dx, W, coords, weights, cshape, oversamp, eps
-        )
-        derivH = lambda x0, dk: _derH_noncart(
-            x0, dk, W, coords, weights, cshape, oversamp, eps
-        )
+        # Pre-compute sqrt(DCF) for consistent data pre-conditioning:
+        # y was multiplied by sqrt(W) in _setup_noncartesian, so the forward
+        # model must also include sqrt(W) so residuals are in the same units.
+        _sqrt_w = weights**0.5 if weights is not None else None
+
+        def fwd(x):
+            k = _op_noncart(x, coords, weights, cshape, oversamp, eps)
+            return k * _sqrt_w if _sqrt_w is not None else k
+
+        def deriv(x0, dx):
+            k = _der_noncart(x0, dx, W, coords, weights, cshape, oversamp, eps)
+            return k * _sqrt_w if _sqrt_w is not None else k
+
+        def derivH(x0, dk):
+            dk_w = dk * _sqrt_w if _sqrt_w is not None else dk
+            return _derH_noncart(x0, dk_w, W, coords, weights, cshape, oversamp, eps)
+
         if toeplitz:
             toep_op = ToeplitzOp(cshape, coords, weights, oversamp, eps)
             normal_eq = lambda x0, dx: _derH_der_noncart_toeplitz(
@@ -233,7 +243,7 @@ def _setup_cartesian(y, ndim, mask, cal_width, sobolev_width, sobolev_deg):
         mask = resize(mask, cal_shape[1:])
     cshape = tuple(y.shape[1:])
 
-    W = _sobolev_weights(cshape, sobolev_width, sobolev_deg, device=y.device)
+    W = _sobolev_weights(cshape, oshape, sobolev_width, sobolev_deg, device=y.device)
 
     return oshape, cshape, y, mask, W
 
@@ -275,7 +285,7 @@ def _setup_noncartesian(
         flat_y = flat_y * flat_w**0.5
 
     cshape = tuple([cal_width] * ndim)
-    W = _sobolev_weights(cshape, sobolev_width, sobolev_deg, device=y.device)
+    W = _sobolev_weights(cshape, oshape, sobolev_width, sobolev_deg, device=y.device)
 
     return oshape, cshape, flat_y, flat_coords, flat_w, W
 
@@ -433,11 +443,22 @@ def _postprocess(XN, W, yscale, cshape, oshape, _noncart, ret_cal, ret_image):
 # -----------------------------------------------------------------------
 
 
-def _sobolev_weights(shape, width, degree, device=None):
-    """Compute Sobolev regularization weights in k-space."""
+def _sobolev_weights(cshape, oshape, width, degree, device=None):
+    """Compute Sobolev regularization weights in k-space.
+
+    Matches the mrops / MATLAB reference: pixel-unit coordinates
+    ``arange(-n//2, n//2)`` scaled by ``width / max(oshape)^2``.
+    This ensures the filter half-power point is independent of
+    the calibration grid size and consistent with the reference.
+    """
+    n = max(oshape)
+    kw = width / (n**2)
     grids = torch.meshgrid(
-        *[torch.linspace(-0.5, 0.5, s, device=device) for s in shape],
+        *[
+            torch.arange(-s // 2, s // 2, dtype=torch.float32, device=device)
+            for s in cshape
+        ],
         indexing="ij",
     )
     d = sum(g**2 for g in grids)
-    return (1.0 / (1.0 + width * d) ** degree).float()
+    return (1.0 / (1.0 + kw * d) ** (degree / 2)).float()

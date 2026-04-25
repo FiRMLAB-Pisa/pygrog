@@ -12,6 +12,7 @@ the low-resolution calibration region based on the requested cal_width), then sa
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
 import numpy as np
@@ -73,6 +74,7 @@ def main() -> None:
     weights = dcf.reshape(-1).astype(np.float32)
 
     print(f"Running NLINV calibration (shape={shape}, cal_width={cal_width}) ...")
+    t0 = time.time()
     smaps, grappa_train, image = nlinv_calib(
         y,
         cal_width=cal_width,
@@ -82,6 +84,8 @@ def main() -> None:
         ret_cal=True,
         ret_image=True,
     )
+    elapsed = time.time() - t0
+    print(f"  NLINV calibration completed in {elapsed:.1f}s")
 
     print(f"  smaps:        {smaps.shape}  dtype={smaps.dtype}")
     print(f"  grappa_train: {grappa_train.shape}  dtype={grappa_train.dtype}")
@@ -102,7 +106,7 @@ def main() -> None:
     ncols = n_show
     fig, axes = plt.subplots(3, ncols, figsize=(2.5 * ncols, 7))
     fig.suptitle(
-        f"NLINV calibration QC  |  cal_width={cal_width}  |  shape={shape}", fontsize=11
+        f"NLINV calibration QC  |  cal_width={cal_width}  |  shape={shape}  |  t={elapsed:.1f}s", fontsize=11
     )
 
     for c in range(n_show):

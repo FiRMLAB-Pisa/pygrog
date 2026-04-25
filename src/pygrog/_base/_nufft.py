@@ -15,7 +15,7 @@ from mrinufft._array_compat import with_torch
 from mrinufft._utils import proper_trajectory
 from mrinufft.operators.base import FourierOperatorBase
 
-from .._utils import rescale_coords, estimate_shape
+from .._utils import estimate_shape
 
 # ---------------------------------------------------------------------------
 # pytorch-finufft backend for mri-nufft (auto-registers via __init_subclass__)
@@ -82,7 +82,11 @@ class _MRIPytorchFinufft(FourierOperatorBase):
         samples = proper_trajectory(
             np.asarray(samples).astype(np.float32, copy=False), normalize="pi"
         )
-        self._samples = np.ascontiguousarray(samples)
+        self._samples = np.ascontiguousarray(samples)  # (n_samples, ndim) — required by base class n_samples property
+        # Store transposed (ndim, n_samples) already contiguous so _get_points
+        # doesn't create a non-contiguous view via .T every call (which causes
+        # finufft "Argument x/y/z not C-contiguous" warnings at runtime).
+        self._samples_T = np.ascontiguousarray(samples.T)  # (ndim, n_samples)
         self.dtype = np.float32
 
         self.n_coils = n_coils
@@ -96,7 +100,7 @@ class _MRIPytorchFinufft(FourierOperatorBase):
 
     def _get_points(self, device):
         """Return trajectory as (ndim, n_samples) float32 tensor on *device*."""
-        return torch.as_tensor(self._samples.T, device=device)
+        return torch.as_tensor(self._samples_T, device=device)
 
     def _safe_squeeze(self, arr):
         if self.squeeze_dims:
@@ -264,9 +268,12 @@ def __nufft_init__(
     if shape is None:
         shape = estimate_shape(coords)
 
-    # normalize to [-pi, pi]
+    # normalize to [-pi, pi]: scale each spatial dimension by its global max
+    # coords is numpy (..., ndim) at this point — normalize per last-axis dimension
     if normalize_coords:
-        coords = rescale_coords(coords, 2 * math.pi)
+        cmax = np.abs(coords).reshape(-1, coords.shape[-1]).max(axis=0)  # (ndim,)
+        cmax = np.where(cmax == 0, 1.0, cmax)  # avoid divide by zero
+        coords = (math.pi * coords / cmax).astype(np.float32)
 
     return mrinufft.get_operator("pytorch-finufft")(
         samples=coords.reshape(-1, coords.shape[-1]),
