@@ -14,7 +14,6 @@ import numpy as np
 
 EXPECTED_FILES = {
     "compressed_data.npy",
-    "coilsens.npy",
     "basis.npy",
     "metadata.npy",
     "traj_grp48_inacc1.mat",
@@ -23,7 +22,6 @@ EXPECTED_FILES = {
 }
 
 OUTPUT_FILES = {
-    "smaps": "smaps.npy",
     "basis": "basis.npy",
     "trajectory": "trajectory.npy",
     "dcf": "dcf.npy",
@@ -62,7 +60,6 @@ def _zenodo_command() -> list[str]:
 def _normalize_dataset(tmp_path: Path, data_dir: Path) -> int:
     compressed = np.load(tmp_path / "compressed_data.npy").astype(np.complex64)
     metadata = np.load(tmp_path / "metadata.npy", allow_pickle=True).item()
-    smaps = np.load(tmp_path / "coilsens.npy").astype(np.complex64)
     basis = np.load(tmp_path / "basis.npy").astype(np.complex64)
 
     kspace = compressed.swapaxes(0, 2)[0].swapaxes(0, 1).astype(np.complex64)
@@ -77,7 +74,6 @@ def _normalize_dataset(tmp_path: Path, data_dir: Path) -> int:
     np.save(data_dir / OUTPUT_FILES["kspace"], kspace)
     np.save(data_dir / OUTPUT_FILES["trajectory"], trajectory)
     np.save(data_dir / OUTPUT_FILES["dcf"], dcf)
-    np.save(data_dir / OUTPUT_FILES["smaps"], smaps)
     np.save(data_dir / OUTPUT_FILES["basis"], basis)
     return len(OUTPUT_FILES)
 

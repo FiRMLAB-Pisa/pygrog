@@ -50,7 +50,6 @@ DEFAULT_SCALING_RATIOS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.4, 0.7]
 class BenchmarkConfig:
     shape: tuple[int, ...]
     n_coils: int
-    max_frames: int | None
     max_coeff: int | None
     n_spokes: int
     n_readout: int
@@ -122,10 +121,7 @@ def _prepare_real_inputs(cfg: BenchmarkConfig, data_dir: Path) -> BenchmarkInput
         )
 
     total_frames = kspace_tcns.shape[0]
-    if cfg.max_frames is None:
-        n_frames = total_frames
-    else:
-        n_frames = min(max(1, cfg.max_frames), total_frames)
+    n_frames = total_frames
     kspace_tcns = kspace_tcns[:n_frames]
     trajectory = trajectory[:n_frames]
     dcf = dcf[:n_frames]
@@ -209,7 +205,7 @@ def _make_grog(
 ) -> tuple[GrogInterpolator, SparseFFT, dict[str, Any]]:
     coords = (samples * np.asarray(shape, dtype=np.float32)).astype(np.float32)
 
-    grog = GrogInterpolator(shape=shape, coords=coords, image_shape=shape)
+    grog = GrogInterpolator(shape=shape, coords=coords, oversamp=1.25, kernel_width=2, image_shape=shape)
 
     coil_calib = smaps * calib_image[None, ...]
     fft_axes = tuple(range(-calib_image.ndim, 0))
@@ -1006,14 +1002,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=Path("benchmark/results"))
     parser.add_argument("--data-dir", type=Path, default=Path("benchmark/data"))
-    parser.add_argument("--shape", type=int, nargs="+", default=(160, 160))
+    parser.add_argument("--shape", type=int, nargs="+", default=(220, 220, 220))
     parser.add_argument("--n-coils", type=int, default=8)
-    parser.add_argument(
-        "--smoke",
-        action="store_true",
-        default=False,
-        help="Smoke-test mode: use only 1 frame to verify the pipeline runs on this machine.",
-    )
     parser.add_argument(
         "--max-coeff",
         type=int,
@@ -1068,7 +1058,6 @@ def main() -> None:
     cfg = BenchmarkConfig(
         shape=tuple(args.shape),
         n_coils=args.n_coils,
-        max_frames=1 if args.smoke else None,
         max_coeff=args.max_coeff,
         n_spokes=args.n_spokes,
         n_readout=args.n_readout,

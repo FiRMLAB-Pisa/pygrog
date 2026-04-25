@@ -137,146 +137,208 @@ plt.show()
 # NLINV coil sensitivity estimation
 # ==================================
 #
-# :func:`~pygrog.utils.nlinv_calib` estimates coil sensitivity maps from a
-# Cartesian **undersampled** acquisition using the nonlinear-inverse (NLINV)
-# algorithm (Uecker et al.\ 2008).  It alternates between estimating the image
-# and the sensitivities, coupled by a Sobolev-space regulariser on the maps.
-# Crucially, **no separate autocalibration (ACS) region is required** — NLINV
-# estimates both the image and the maps jointly from the undersampled data.
+# :func:`~pygrog.utils.nlinv_calib` estimates coil sensitivity maps jointly
+# with the image using the nonlinear-inverse (NLINV) algorithm
+# (Uecker et al.\ 2008).  It requires a small **fully-sampled ACS centre**
+# to bootstrap estimation, but no explicit coil sensitivity maps.
 #
-# The function returns ``(smaps, image)`` when ``ret_image=True``, or just
-# ``smaps`` otherwise.
+# The function has two operating modes, both demonstrated below:
+#
+# * **``cal_width=None``** — full k-space, matching the MATLAB reference:
+#   NLINV is a *calibrationless image reconstruction* algorithm that jointly
+#   returns both the image and the sensitivity maps.
+# * **``cal_width=24``** — crops to a 24×24 central region before solving:
+#   NLINV becomes a fast *calibration* step that produces low-resolution
+#   sensitivity maps (zero-padded to full FOV) and a fully-synthesized
+#   Cartesian k-space patch ready for GRAPPA/GROG kernel training.
+#
+# The mask mirrors the MATLAB reference: R=2 subsampling in the **readout
+# (column)** direction with a 16-column fully-sampled ACS centre.
 
 from pygrog.utils import nlinv_calib
 
-# Cartesian undersampling mask: regular acceleration x2 on phase-encode
-mask = np.zeros(image_shape, dtype=bool)
-mask[::2, :] = True  # keep every other phase-encode line
+acs = 8         # fully-sampled ACS centre width (columns), as in MATLAB reference
+cal_width = 24  # NLINV internal calibration resolution for Step 2
 
-# Apply mask to k-space
+# Cartesian undersampling mask: R=2 readout subsampling + 16-col ACS centre
+mask = np.zeros(image_shape, dtype=bool)
+mask[:, ::2] = True  # R=2 subsampling on readout (column) direction
+cx = image_shape[1] // 2
+cy = image_shape[0] // 2
+mask[cy - acs // 2 : cy + acs // 2, cx - acs // 2 : cx + acs // 2] = True  # ACS
+
 kspace_us = kspace_full * mask[np.newaxis]
 
-print(f"\nUndersampling factor: {mask.size / mask.sum():.1f}x")
-print(f"Undersampled k-space shape: {kspace_us.shape}")
+print(f"\nUndersampling factor : {mask.size / mask.sum():.2f}x")
+print(f"ACS region           : all rows × {acs} cols")
+print(f"Undersampled k-space : {kspace_us.shape}")
+
+ncols_show = min(n_coils // 2, 4)
+
+# Zero-filled RSS image from undersampled data (baseline)
+coil_images_us = np.fft.fftshift(
+    np.fft.ifft2(np.fft.ifftshift(kspace_us, axes=(-2, -1))), axes=(-2, -1)
+)
+rss_us = np.sqrt((np.abs(coil_images_us) ** 2).sum(0))
 
 # %%
+# Step 1 — Calibrationless image reconstruction (``cal_width=None``)
+# -------------------------------------------------------------------
+# With ``cal_width=None`` NLINV operates on the full k-space matrix, exactly
+# as in the original paper.  Three rows compare:
+#
+# * **Row 1** — Reference image and ground-truth sensitivity maps.
+# * **Row 2** — RSS of the zero-filled k-space (aliased baseline) and the
+#   NLINV-estimated sensitivity maps (interpolated to full FOV).
+# * **Row 3** — NLINV-reconstructed image (aliasing removed) with the same maps.
 
-# NLINV calibration (Cartesian, pass mask and ndim)
-smaps_nlinv, _, image_nlinv = nlinv_calib(
+# cal_width=None → full k-space, no cropping, matching MATLAB reference
+smaps_full, _, image_full = nlinv_calib(
     kspace_us,
+    cal_width=None,
     ndim=2,
     mask=mask,
-    max_iter=8,
-    cg_iter=5,
     ret_cal=True,
     ret_image=True,
 )
 
-print(f"\nEstimated smaps shape: {smaps_nlinv.shape}")
-print(f"Reconstructed image shape: {image_nlinv.shape}")
+smaps_full_np = (
+    smaps_full.numpy() if isinstance(smaps_full, torch.Tensor) else smaps_full
+)
+image_full_np = (
+    image_full.numpy() if isinstance(image_full, torch.Tensor) else image_full
+)
+
+print(f"\n[Step 1] Smaps shape     : {smaps_full_np.shape}")
+print(f"[Step 1] NLINV image shape: {image_full_np.shape}")
 
 # %%
 
-fig, axes = plt.subplots(2, n_coils // 2 + 1, figsize=(11, 5))
-axes = axes.flatten()
+fig, axes = plt.subplots(3, ncols_show + 1, figsize=(3 * (ncols_show + 1), 8))
 
-axes[0].imshow(image, cmap="gray", origin="lower")
-axes[0].set_title("Reference")
-axes[0].axis("off")
+axes[0, 0].imshow(image, cmap="gray", origin="lower")
+axes[0, 0].set_title("Reference")
+axes[0, 0].axis("off")
+for i in range(ncols_show):
+    axes[0, i + 1].imshow(np.abs(smaps_gt[i]), cmap="magma", origin="lower", vmin=0)
+    axes[0, i + 1].set_title(f"GT smap {i + 1}")
+    axes[0, i + 1].axis("off")
 
-for i in range(n_coils // 2):
-    axes[i + 1].imshow(np.abs(smaps_gt[i]), cmap="magma", origin="lower", vmin=0)
-    axes[i + 1].set_title(f"GT smap {i + 1}")
-    axes[i + 1].axis("off")
-
-smaps_nlinv_np = (
-    smaps_nlinv.numpy() if isinstance(smaps_nlinv, torch.Tensor) else smaps_nlinv
-)
-axes[n_coils // 2 + 1].imshow(np.abs(image_nlinv), cmap="gray", origin="lower")
-axes[n_coils // 2 + 1].set_title("NLINV image")
-axes[n_coils // 2 + 1].axis("off")
-
-for i in range(n_coils // 2):
-    axes[n_coils // 2 + 2 + i].imshow(
-        np.abs(smaps_nlinv_np[i]), cmap="magma", origin="lower", vmin=0
+axes[1, 0].imshow(rss_us, cmap="gray", origin="lower")
+axes[1, 0].set_title("RSS (zero-filled)")
+axes[1, 0].axis("off")
+for i in range(ncols_show):
+    axes[1, i + 1].imshow(
+        np.abs(smaps_full_np[i]), cmap="magma", origin="lower", vmin=0
     )
-    axes[n_coils // 2 + 2 + i].set_title(f"NLINV smap {i + 1}")
-    axes[n_coils // 2 + 2 + i].axis("off")
+    axes[1, i + 1].set_title(f"NLINV smap {i + 1}")
+    axes[1, i + 1].axis("off")
 
-plt.suptitle("NLINV coil sensitivity estimation")
+axes[2, 0].imshow(np.abs(image_full_np), cmap="gray", origin="lower")
+axes[2, 0].set_title("NLINV image")
+axes[2, 0].axis("off")
+for i in range(ncols_show):
+    axes[2, i + 1].imshow(
+        np.abs(smaps_full_np[i]), cmap="magma", origin="lower", vmin=0
+    )
+    axes[2, i + 1].set_title(f"NLINV smap {i + 1}")
+    axes[2, i + 1].axis("off")
+
+plt.suptitle(
+    f"NLINV — calibrationless image reconstruction  ({image_shape[0]}×{image_shape[1]})"
+)
 plt.tight_layout()
 plt.show()
 
 # %%
-# .. note::
-#    NLINV is an iterative method; accuracy improves with more ``max_iter``
-#    and ``cg_iter`` at the cost of compute time.  The Sobolev-space
-#    regulariser (``sobolev_width``, ``sobolev_deg``) enforces smooth
-#    sensitivity maps — increase ``sobolev_deg`` for smoother maps at the
-#    cost of accuracy near the FOV boundary.
-
-# %%
-# Synthetic calibration k-space from NLINV
-# =========================================
+# Step 2 — Calibration mode (``cal_width=24``)
+# ----------------------------------------------
+# With ``cal_width=24`` NLINV crops to the central 24×24 k-space region
+# before solving.  The result is a fast, low-resolution calibration that
+# returns sensitivity maps zero-padded back to the full FOV and a fully
+# synthesized 24×24 Cartesian calibration k-space.  The latter is exactly
+# what GRAPPA and GROG kernel training require.
 #
-# By default (``ret_cal=True``) :func:`~pygrog.utils.nlinv_calib` also returns
-# a **synthesized calibration k-space** (``grappa_train``) — a fully-sampled
-# Cartesian calibration region reconstructed from the NLINV image and
-# sensitivity estimates.  This is exactly the input expected by GRAPPA/GROG
-# calibration kernels, making it easy to plug NLINV into non-Cartesian
-# pipelines where no explicit calibration scan is available.
+# The panel shows the low-resolution image and smaps (what NLINV actually
+# solved at 24×24), followed by a log-magnitude comparison of the
+# zero-filled vs NLINV-synthesized central k-space patch.
 
-smaps_nlinv2, grappa_train, image_nlinv2 = nlinv_calib(
+smaps_cal, grappa_train, image_cal = nlinv_calib(
     kspace_us,
+    cal_width=cal_width,
     ndim=2,
     mask=mask,
-    max_iter=8,
-    cg_iter=5,
-    ret_cal=True,  # default — return synthetic calibration k-space
+    ret_cal=True,
     ret_image=True,
 )
 
+smaps_cal_np = (
+    smaps_cal.numpy() if isinstance(smaps_cal, torch.Tensor) else smaps_cal
+)
 grappa_train_np = (
     grappa_train.numpy() if isinstance(grappa_train, torch.Tensor) else grappa_train
 )
+image_cal_np = (
+    image_cal.numpy() if isinstance(image_cal, torch.Tensor) else image_cal
+)
 
-print(f"\nSynthetic calibration k-space shape: {grappa_train_np.shape}")
-print(f"  coils x cal_height x cal_width : {grappa_train_np.shape}")
+print(f"\n[Step 2] Smaps shape       : {smaps_cal_np.shape}")
+print(f"[Step 2] Low-res image shape: {image_cal_np.shape}")
+print(f"[Step 2] Cal k-space shape  : {grappa_train_np.shape}")
 
 # %%
 
-cal_height, cal_width = grappa_train_np.shape[-2], grappa_train_np.shape[-1]
-ncols = min(n_coils // 2, 4)
+# Low-res image and smaps at cal_width resolution
+fig, axes = plt.subplots(1, ncols_show + 1, figsize=(3 * (ncols_show + 1), 3))
 
-fig, axes = plt.subplots(2, ncols, figsize=(3 * ncols, 5.5))
-for i in range(ncols):
-    # top row: log-magnitude of calibration k-space
+axes[0].imshow(np.abs(image_cal_np), cmap="gray", origin="lower")
+axes[0].set_title(f"NLINV image ({cal_width}×{cal_width})")
+axes[0].axis("off")
+for i in range(ncols_show):
+    axes[i + 1].imshow(np.abs(smaps_cal_np[i]), cmap="magma", origin="lower", vmin=0)
+    axes[i + 1].set_title(f"NLINV smap {i + 1}")
+    axes[i + 1].axis("off")
+
+plt.suptitle(f"NLINV calibration mode — low-res result  ({cal_width}×{cal_width})")
+plt.tight_layout()
+plt.show()
+
+# %%
+
+# Zero-filled vs synthesized central k-space patch
+acr_zf = kspace_us[
+    :,
+    cy - cal_width // 2 : cy + cal_width // 2,
+    cx - cal_width // 2 : cx + cal_width // 2,
+]
+
+fig, axes = plt.subplots(2, ncols_show, figsize=(3 * ncols_show, 5.5))
+for i in range(ncols_show):
     axes[0, i].imshow(
+        np.log1p(np.abs(acr_zf[i])), cmap="inferno", origin="lower"
+    )
+    axes[0, i].set_title(f"Zero-filled — coil {i + 1}")
+    axes[0, i].axis("off")
+    axes[1, i].imshow(
         np.log1p(np.abs(grappa_train_np[i])), cmap="inferno", origin="lower"
     )
-    axes[0, i].set_title(f"Calib k-space (log) — coil {i + 1}")
-    axes[0, i].axis("off")
-    # bottom row: IFFT of calibration region (coil PSF)
-    cal_img = np.fft.fftshift(
-        np.fft.ifft2(np.fft.ifftshift(grappa_train_np[i], axes=(-2, -1))),
-        axes=(-2, -1),
-    )
-    axes[1, i].imshow(np.abs(cal_img), cmap="gray", origin="lower")
-    axes[1, i].set_title(f"Cal image — coil {i + 1}")
+    axes[1, i].set_title(f"Synthesized — coil {i + 1}")
     axes[1, i].axis("off")
 
 plt.suptitle(
-    f"NLINV synthetic calibration k-space  ({cal_height}x{cal_width} centre region)"
+    f"Calibration k-space ({cal_width}×{cal_width})  —  "
+    f"zero-filled (top) vs NLINV-synthesized (bottom)"
 )
 plt.tight_layout()
 plt.show()
 
 # %%
 # .. note::
-#    The synthetic calibration region is computed from the NLINV image and
-#    sensitivity estimates as ``FFT(image x smap)`` for each coil, cropped to
-#    the central ``cal_width x cal_width`` lines.  Its quality therefore
-#    depends on the NLINV reconstruction quality — more iterations give a more
-#    faithful calibration dataset.
+#    In calibration mode (integer ``cal_width``) the sensitivity maps are
+#    estimated at low resolution and zero-padded to the full FOV — they are
+#    smoother but less accurate near the FOV boundary.  Use ``cal_width=None``
+#    when full image reconstruction quality matters; use an integer
+#    ``cal_width`` when only the synthesized k-space patch and fast coil
+#    estimates are needed (e.g.\ as input to GROG/GRAPPA kernel training).
 
 plt.show()

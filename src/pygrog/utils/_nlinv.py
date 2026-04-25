@@ -28,14 +28,14 @@ def nlinv_calib(
     weights: NDArray[float] | None = None,
     oversamp: float = 1.25,
     eps: float = 1e-3,
-    sobolev_width: int = 200,
+    sobolev_width: float = 200.0,
     sobolev_deg: int = 32,
     max_iter: int = 10,
     cg_iter: int = 10,
     cg_tol: float = 1e-2,
     alpha0: float = 1.0,
     q: float = 2 / 3,
-    toeplitz: bool = False,
+    toeplitz: bool | None = None,
     ret_cal: bool = True,
     ret_image: bool = False,
 ) -> tuple[NDArray[complex], ...]:
@@ -62,10 +62,10 @@ def nlinv_calib(
         NUFFT oversampling factor.  The default is ``1.25``.
     eps : float, optional
         NUFFT precision.  The default is ``1e-3``.
-    sobolev_width : int, optional
-        Sobolev kernel width.  The default is ``200``.
+    sobolev_width : float, optional
+        Sobolev kernel width.  The default is ``220``.
     sobolev_deg : int, optional
-        Sobolev norm order.  The default is ``32``.
+        Sobolev norm order.  The default is ``16``.
     max_iter : int, optional
         Gauss-Newton iterations.  The default is ``10``.
     cg_iter : int, optional
@@ -75,12 +75,13 @@ def nlinv_calib(
     alpha0 : float, optional
         Initial regularization parameter.  The default is ``1.0``.
     q : float, optional
-        Regularization decay factor per iteration.  The default is ``2/3``.
-    toeplitz : bool, optional
+        Regularization decay factor per iteration.  The default is ``1/3``.
+    toeplitz : bool | None, optional
         Use Toeplitz acceleration for the CG normal equation in the
         non-Cartesian case.  Precomputes the NUFFT PSF kernel and replaces
         each ``nufft_adjoint(nufft(·))`` pair with an FFT-based multiplication,
-        significantly reducing per-iteration cost.  The default is ``False``.
+        significantly reducing per-iteration cost.  ``None`` (default) auto-selects:
+        ``True`` on CPU (where NUFFT is expensive), ``False`` on GPU.
     ret_cal : bool, optional
         Return synthesized calibration data.  The default is ``True``.
     ret_image : bool, optional
@@ -100,6 +101,11 @@ def nlinv_calib(
     noncart = coords is not None
     n_coils = y.shape[0]
     device = y.device
+
+    # Auto-select Toeplitz: use PSF embedding on CPU (avoids repeated NUFFTs),
+    # disable on GPU where NUFFT is fast enough.
+    if toeplitz is None:
+        toeplitz = noncart and (device.type == "cpu")
 
     # --- Setup ----------------------------------------------------------
     if noncart:
@@ -220,14 +226,14 @@ def _setup_cartesian(y, ndim, mask, cal_width, sobolev_width, sobolev_deg):
 
     mask = (y.abs().pow(2).sum(dim=0) > 0).float() if mask is None else mask.float()
 
-    # Extract calibration region
-    cal_shape = list(y.shape[:1]) + [min(cal_width, s) for s in oshape]
-    y = resize(y, cal_shape)
-    mask = resize(mask, cal_shape[1:])
+    if cal_width is not None:
+        # Extract calibration region
+        cal_shape = list(y.shape[:1]) + [min(cal_width, s) for s in oshape]
+        y = resize(y, cal_shape)
+        mask = resize(mask, cal_shape[1:])
     cshape = tuple(y.shape[1:])
 
-    n = max(oshape)
-    W = _sobolev_weights(cshape, sobolev_width / n**2, sobolev_deg, device=y.device)
+    W = _sobolev_weights(cshape, sobolev_width, sobolev_deg, device=y.device)
 
     return oshape, cshape, y, mask, W
 
@@ -247,26 +253,31 @@ def _setup_noncartesian(
     ndim = coords.shape[-1]
     oshape = tuple(shape) if shape is not None else estimate_shape(coords)
 
-    # Extract calibration samples (samples within cal_width radius)
+    # Filter to calibration samples: keep only those within cal_width/2 radius
+    # in scaled k-space units (coords scaled so each axis spans oshape).
+    # rescale_coords expects (ndim, npts); coords is (..., ndim) → transpose
     from .._utils import rescale_coords
 
-    scaled = rescale_coords(coords, list(oshape[-ndim:]))
+    flat_coords = coords.reshape(-1, ndim)
+    flat_y = y.reshape(y.shape[0], -1)
+    flat_w = weights.reshape(-1) if weights is not None else None
+
+    scaled = rescale_coords(flat_coords.movedim(-1, 0), list(oshape[-ndim:])).movedim(0, -1)
     radius = 0.5 * cal_width
-    dist = (scaled**2).sum(dim=-1).sqrt()
-    flat_dist = dist.reshape(-1)
-    _ = (
-        flat_dist <= radius
-    )  # density threshold (unused: all samples kept for non-Cartesian)
+    mask = (scaled**2).sum(dim=-1).sqrt() <= radius
+
+    flat_coords = flat_coords[mask].contiguous()
+    flat_y = flat_y[:, mask].contiguous()
+    flat_w = flat_w[mask].contiguous() if flat_w is not None else None
 
     # Apply DCF
-    if weights is not None:
-        y = y * weights**0.5
+    if flat_w is not None:
+        flat_y = flat_y * flat_w**0.5
 
     cshape = tuple([cal_width] * ndim)
-    n = max(oshape)
-    W = _sobolev_weights(cshape, sobolev_width / n**2, sobolev_deg, device=y.device)
+    W = _sobolev_weights(cshape, sobolev_width, sobolev_deg, device=y.device)
 
-    return oshape, cshape, y, coords, weights, W
+    return oshape, cshape, flat_y, flat_coords, flat_w, W
 
 
 # -----------------------------------------------------------------------

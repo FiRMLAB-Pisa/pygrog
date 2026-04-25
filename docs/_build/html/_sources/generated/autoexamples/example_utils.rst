@@ -236,37 +236,59 @@ The argument ``n_coils`` accepts:
    Use a float threshold ``coil_compress(data, 0.99)`` for automatic rank
    selection.
 
-.. GENERATED FROM PYTHON SOURCE LINES 137-149
+.. GENERATED FROM PYTHON SOURCE LINES 137-157
 
 NLINV coil sensitivity estimation
 ==================================
 
-:func:`~pygrog.utils.nlinv_calib` estimates coil sensitivity maps from a
-Cartesian **undersampled** acquisition using the nonlinear-inverse (NLINV)
-algorithm (Uecker et al.\ 2008).  It alternates between estimating the image
-and the sensitivities, coupled by a Sobolev-space regulariser on the maps.
-Crucially, **no separate autocalibration (ACS) region is required** — NLINV
-estimates both the image and the maps jointly from the undersampled data.
+:func:`~pygrog.utils.nlinv_calib` estimates coil sensitivity maps jointly
+with the image using the nonlinear-inverse (NLINV) algorithm
+(Uecker et al.\ 2008).  It requires a small **fully-sampled ACS centre**
+to bootstrap estimation, but no explicit coil sensitivity maps.
 
-The function returns ``(smaps, image)`` when ``ret_image=True``, or just
-``smaps`` otherwise.
+The function has two operating modes, both demonstrated below:
 
-.. GENERATED FROM PYTHON SOURCE LINES 149-162
+* **``cal_width=None``** — full k-space, matching the MATLAB reference:
+  NLINV is a *calibrationless image reconstruction* algorithm that jointly
+  returns both the image and the sensitivity maps.
+* **``cal_width=24``** — crops to a 24×24 central region before solving:
+  NLINV becomes a fast *calibration* step that produces low-resolution
+  sensitivity maps (zero-padded to full FOV) and a fully-synthesized
+  Cartesian k-space patch ready for GRAPPA/GROG kernel training.
+
+The mask mirrors the MATLAB reference: R=2 subsampling in the **readout
+(column)** direction with a 16-column fully-sampled ACS centre.
+
+.. GENERATED FROM PYTHON SOURCE LINES 157-184
 
 .. code-block:: Python
 
 
     from pygrog.utils import nlinv_calib
 
-    # Cartesian undersampling mask: regular acceleration x2 on phase-encode
-    mask = np.zeros(image_shape, dtype=bool)
-    mask[::2, :] = True  # keep every other phase-encode line
+    acs = 8         # fully-sampled ACS centre width (columns), as in MATLAB reference
+    cal_width = 24  # NLINV internal calibration resolution for Step 2
 
-    # Apply mask to k-space
+    # Cartesian undersampling mask: R=2 readout subsampling + 16-col ACS centre
+    mask = np.zeros(image_shape, dtype=bool)
+    mask[:, ::2] = True  # R=2 subsampling on readout (column) direction
+    cx = image_shape[1] // 2
+    cy = image_shape[0] // 2
+    mask[cy - acs // 2 : cy + acs // 2, cx - acs // 2 : cx + acs // 2] = True  # ACS
+
     kspace_us = kspace_full * mask[np.newaxis]
 
-    print(f"\nUndersampling factor: {mask.size / mask.sum():.1f}x")
-    print(f"Undersampled k-space shape: {kspace_us.shape}")
+    print(f"\nUndersampling factor : {mask.size / mask.sum():.2f}x")
+    print(f"ACS region           : all rows × {acs} cols")
+    print(f"Undersampled k-space : {kspace_us.shape}")
+
+    ncols_show = min(n_coils // 2, 4)
+
+    # Zero-filled RSS image from undersampled data (baseline)
+    coil_images_us = np.fft.fftshift(
+        np.fft.ifft2(np.fft.ifftshift(kspace_us, axes=(-2, -1))), axes=(-2, -1)
+    )
+    rss_us = np.sqrt((np.abs(coil_images_us) ** 2).sum(0))
 
 
 
@@ -277,30 +299,49 @@ The function returns ``(smaps, image)`` when ``ret_image=True``, or just
  .. code-block:: none
 
 
-    Undersampling factor: 2.0x
-    Undersampled k-space shape: (16, 217, 181)
+    Undersampling factor : 1.99x
+    ACS region           : all rows × 8 cols
+    Undersampled k-space : (16, 217, 181)
 
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 163-178
+.. GENERATED FROM PYTHON SOURCE LINES 185-194
+
+Step 1 — Calibrationless image reconstruction (``cal_width=None``)
+-------------------------------------------------------------------
+With ``cal_width=None`` NLINV operates on the full k-space matrix, exactly
+as in the original paper.  Three rows compare:
+
+* **Row 1** — Reference image and ground-truth sensitivity maps.
+* **Row 2** — RSS of the zero-filled k-space (aliased baseline) and the
+  NLINV-estimated sensitivity maps (interpolated to full FOV).
+* **Row 3** — NLINV-reconstructed image (aliasing removed) with the same maps.
+
+.. GENERATED FROM PYTHON SOURCE LINES 194-215
 
 .. code-block:: Python
 
 
-    # NLINV calibration (Cartesian, pass mask and ndim)
-    smaps_nlinv, _, image_nlinv = nlinv_calib(
+    # cal_width=None → full k-space, no cropping, matching MATLAB reference
+    smaps_full, _, image_full = nlinv_calib(
         kspace_us,
+        cal_width=None,
         ndim=2,
         mask=mask,
-        max_iter=8,
-        cg_iter=5,
         ret_cal=True,
         ret_image=True,
     )
 
-    print(f"\nEstimated smaps shape: {smaps_nlinv.shape}")
-    print(f"Reconstructed image shape: {image_nlinv.shape}")
+    smaps_full_np = (
+        smaps_full.numpy() if isinstance(smaps_full, torch.Tensor) else smaps_full
+    )
+    image_full_np = (
+        image_full.numpy() if isinstance(image_full, torch.Tensor) else image_full
+    )
+
+    print(f"\n[Step 1] Smaps shape     : {smaps_full_np.shape}")
+    print(f"[Step 1] NLINV image shape: {image_full_np.shape}")
 
 
 
@@ -311,44 +352,50 @@ The function returns ``(smaps, image)`` when ``ret_image=True``, or just
  .. code-block:: none
 
 
-    Estimated smaps shape: (16, 217, 181)
-    Reconstructed image shape: (24, 24)
+    [Step 1] Smaps shape     : (16, 217, 181)
+    [Step 1] NLINV image shape: (217, 181)
 
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 179-210
+.. GENERATED FROM PYTHON SOURCE LINES 216-253
 
 .. code-block:: Python
 
 
-    fig, axes = plt.subplots(2, n_coils // 2 + 1, figsize=(11, 5))
-    axes = axes.flatten()
+    fig, axes = plt.subplots(3, ncols_show + 1, figsize=(3 * (ncols_show + 1), 8))
 
-    axes[0].imshow(image, cmap="gray", origin="lower")
-    axes[0].set_title("Reference")
-    axes[0].axis("off")
+    axes[0, 0].imshow(image, cmap="gray", origin="lower")
+    axes[0, 0].set_title("Reference")
+    axes[0, 0].axis("off")
+    for i in range(ncols_show):
+        axes[0, i + 1].imshow(np.abs(smaps_gt[i]), cmap="magma", origin="lower", vmin=0)
+        axes[0, i + 1].set_title(f"GT smap {i + 1}")
+        axes[0, i + 1].axis("off")
 
-    for i in range(n_coils // 2):
-        axes[i + 1].imshow(np.abs(smaps_gt[i]), cmap="magma", origin="lower", vmin=0)
-        axes[i + 1].set_title(f"GT smap {i + 1}")
-        axes[i + 1].axis("off")
-
-    smaps_nlinv_np = (
-        smaps_nlinv.numpy() if isinstance(smaps_nlinv, torch.Tensor) else smaps_nlinv
-    )
-    axes[n_coils // 2 + 1].imshow(np.abs(image_nlinv), cmap="gray", origin="lower")
-    axes[n_coils // 2 + 1].set_title("NLINV image")
-    axes[n_coils // 2 + 1].axis("off")
-
-    for i in range(n_coils // 2):
-        axes[n_coils // 2 + 2 + i].imshow(
-            np.abs(smaps_nlinv_np[i]), cmap="magma", origin="lower", vmin=0
+    axes[1, 0].imshow(rss_us, cmap="gray", origin="lower")
+    axes[1, 0].set_title("RSS (zero-filled)")
+    axes[1, 0].axis("off")
+    for i in range(ncols_show):
+        axes[1, i + 1].imshow(
+            np.abs(smaps_full_np[i]), cmap="magma", origin="lower", vmin=0
         )
-        axes[n_coils // 2 + 2 + i].set_title(f"NLINV smap {i + 1}")
-        axes[n_coils // 2 + 2 + i].axis("off")
+        axes[1, i + 1].set_title(f"NLINV smap {i + 1}")
+        axes[1, i + 1].axis("off")
 
-    plt.suptitle("NLINV coil sensitivity estimation")
+    axes[2, 0].imshow(np.abs(image_full_np), cmap="gray", origin="lower")
+    axes[2, 0].set_title("NLINV image")
+    axes[2, 0].axis("off")
+    for i in range(ncols_show):
+        axes[2, i + 1].imshow(
+            np.abs(smaps_full_np[i]), cmap="magma", origin="lower", vmin=0
+        )
+        axes[2, i + 1].set_title(f"NLINV smap {i + 1}")
+        axes[2, i + 1].axis("off")
+
+    plt.suptitle(
+        f"NLINV — calibrationless image reconstruction  ({image_shape[0]}×{image_shape[1]})"
+    )
     plt.tight_layout()
     plt.show()
 
@@ -356,7 +403,7 @@ The function returns ``(smaps, image)`` when ``ret_image=True``, or just
 
 
 .. image-sg:: /generated/autoexamples/images/sphx_glr_example_utils_003.png
-   :alt: NLINV coil sensitivity estimation, Reference, GT smap 1, GT smap 2, GT smap 3, GT smap 4, GT smap 5, GT smap 6, GT smap 7, GT smap 8, NLINV image, NLINV smap 1, NLINV smap 2, NLINV smap 3, NLINV smap 4, NLINV smap 5, NLINV smap 6, NLINV smap 7, NLINV smap 8
+   :alt: NLINV — calibrationless image reconstruction  (217×181), Reference, GT smap 1, GT smap 2, GT smap 3, GT smap 4, RSS (zero-filled), NLINV smap 1, NLINV smap 2, NLINV smap 3, NLINV smap 4, NLINV image, NLINV smap 1, NLINV smap 2, NLINV smap 3, NLINV smap 4
    :srcset: /generated/autoexamples/images/sphx_glr_example_utils_003.png
    :class: sphx-glr-single-img
 
@@ -364,48 +411,47 @@ The function returns ``(smaps, image)`` when ``ret_image=True``, or just
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 211-217
+.. GENERATED FROM PYTHON SOURCE LINES 254-265
 
-.. note::
-   NLINV is an iterative method; accuracy improves with more ``max_iter``
-   and ``cg_iter`` at the cost of compute time.  The Sobolev-space
-   regulariser (``sobolev_width``, ``sobolev_deg``) enforces smooth
-   sensitivity maps — increase ``sobolev_deg`` for smoother maps at the
-   cost of accuracy near the FOV boundary.
+Step 2 — Calibration mode (``cal_width=24``)
+----------------------------------------------
+With ``cal_width=24`` NLINV crops to the central 24×24 k-space region
+before solving.  The result is a fast, low-resolution calibration that
+returns sensitivity maps zero-padded back to the full FOV and a fully
+synthesized 24×24 Cartesian calibration k-space.  The latter is exactly
+what GRAPPA and GROG kernel training require.
 
-.. GENERATED FROM PYTHON SOURCE LINES 219-228
+The panel shows the low-resolution image and smaps (what NLINV actually
+solved at 24×24), followed by a log-magnitude comparison of the
+zero-filled vs NLINV-synthesized central k-space patch.
 
-Synthetic calibration k-space from NLINV
-=========================================
-
-By default (``ret_cal=True``) :func:`~pygrog.utils.nlinv_calib` also returns
-a **synthesized calibration k-space** (``grappa_train``) — a fully-sampled
-Cartesian calibration region reconstructed from the NLINV image and
-sensitivity estimates.  This is exactly the input expected by GRAPPA/GROG
-calibration kernels, making it easy to plug NLINV into non-Cartesian
-pipelines where no explicit calibration scan is available.
-
-.. GENERATED FROM PYTHON SOURCE LINES 228-246
+.. GENERATED FROM PYTHON SOURCE LINES 265-289
 
 .. code-block:: Python
 
 
-    smaps_nlinv2, grappa_train, image_nlinv2 = nlinv_calib(
+    smaps_cal, grappa_train, image_cal = nlinv_calib(
         kspace_us,
+        cal_width=cal_width,
         ndim=2,
         mask=mask,
-        max_iter=8,
-        cg_iter=5,
-        ret_cal=True,  # default — return synthetic calibration k-space
+        ret_cal=True,
         ret_image=True,
     )
 
+    smaps_cal_np = (
+        smaps_cal.numpy() if isinstance(smaps_cal, torch.Tensor) else smaps_cal
+    )
     grappa_train_np = (
         grappa_train.numpy() if isinstance(grappa_train, torch.Tensor) else grappa_train
     )
+    image_cal_np = (
+        image_cal.numpy() if isinstance(image_cal, torch.Tensor) else image_cal
+    )
 
-    print(f"\nSynthetic calibration k-space shape: {grappa_train_np.shape}")
-    print(f"  coils x cal_height x cal_width : {grappa_train_np.shape}")
+    print(f"\n[Step 2] Smaps shape       : {smaps_cal_np.shape}")
+    print(f"[Step 2] Low-res image shape: {image_cal_np.shape}")
+    print(f"[Step 2] Cal k-space shape  : {grappa_train_np.shape}")
 
 
 
@@ -416,40 +462,30 @@ pipelines where no explicit calibration scan is available.
  .. code-block:: none
 
 
-    Synthetic calibration k-space shape: (16, 24, 24)
-      coils x cal_height x cal_width : (16, 24, 24)
+    [Step 2] Smaps shape       : (16, 217, 181)
+    [Step 2] Low-res image shape: (24, 24)
+    [Step 2] Cal k-space shape  : (16, 24, 24)
 
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 247-274
+.. GENERATED FROM PYTHON SOURCE LINES 290-306
 
 .. code-block:: Python
 
 
-    cal_height, cal_width = grappa_train_np.shape[-2], grappa_train_np.shape[-1]
-    ncols = min(n_coils // 2, 4)
+    # Low-res image and smaps at cal_width resolution
+    fig, axes = plt.subplots(1, ncols_show + 1, figsize=(3 * (ncols_show + 1), 3))
 
-    fig, axes = plt.subplots(2, ncols, figsize=(3 * ncols, 5.5))
-    for i in range(ncols):
-        # top row: log-magnitude of calibration k-space
-        axes[0, i].imshow(
-            np.log1p(np.abs(grappa_train_np[i])), cmap="inferno", origin="lower"
-        )
-        axes[0, i].set_title(f"Calib k-space (log) — coil {i + 1}")
-        axes[0, i].axis("off")
-        # bottom row: IFFT of calibration region (coil PSF)
-        cal_img = np.fft.fftshift(
-            np.fft.ifft2(np.fft.ifftshift(grappa_train_np[i], axes=(-2, -1))),
-            axes=(-2, -1),
-        )
-        axes[1, i].imshow(np.abs(cal_img), cmap="gray", origin="lower")
-        axes[1, i].set_title(f"Cal image — coil {i + 1}")
-        axes[1, i].axis("off")
+    axes[0].imshow(np.abs(image_cal_np), cmap="gray", origin="lower")
+    axes[0].set_title(f"NLINV image ({cal_width}×{cal_width})")
+    axes[0].axis("off")
+    for i in range(ncols_show):
+        axes[i + 1].imshow(np.abs(smaps_cal_np[i]), cmap="magma", origin="lower", vmin=0)
+        axes[i + 1].set_title(f"NLINV smap {i + 1}")
+        axes[i + 1].axis("off")
 
-    plt.suptitle(
-        f"NLINV synthetic calibration k-space  ({cal_height}x{cal_width} centre region)"
-    )
+    plt.suptitle(f"NLINV calibration mode — low-res result  ({cal_width}×{cal_width})")
     plt.tight_layout()
     plt.show()
 
@@ -457,7 +493,7 @@ pipelines where no explicit calibration scan is available.
 
 
 .. image-sg:: /generated/autoexamples/images/sphx_glr_example_utils_004.png
-   :alt: NLINV synthetic calibration k-space  (24x24 centre region), Calib k-space (log) — coil 1, Calib k-space (log) — coil 2, Calib k-space (log) — coil 3, Calib k-space (log) — coil 4, Cal image — coil 1, Cal image — coil 2, Cal image — coil 3, Cal image — coil 4
+   :alt: NLINV calibration mode — low-res result  (24×24), NLINV image (24×24), NLINV smap 1, NLINV smap 2, NLINV smap 3, NLINV smap 4
    :srcset: /generated/autoexamples/images/sphx_glr_example_utils_004.png
    :class: sphx-glr-single-img
 
@@ -465,16 +501,61 @@ pipelines where no explicit calibration scan is available.
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 275-281
+.. GENERATED FROM PYTHON SOURCE LINES 307-335
+
+.. code-block:: Python
+
+
+    # Zero-filled vs synthesized central k-space patch
+    acr_zf = kspace_us[
+        :,
+        cy - cal_width // 2 : cy + cal_width // 2,
+        cx - cal_width // 2 : cx + cal_width // 2,
+    ]
+
+    fig, axes = plt.subplots(2, ncols_show, figsize=(3 * ncols_show, 5.5))
+    for i in range(ncols_show):
+        axes[0, i].imshow(
+            np.log1p(np.abs(acr_zf[i])), cmap="inferno", origin="lower"
+        )
+        axes[0, i].set_title(f"Zero-filled — coil {i + 1}")
+        axes[0, i].axis("off")
+        axes[1, i].imshow(
+            np.log1p(np.abs(grappa_train_np[i])), cmap="inferno", origin="lower"
+        )
+        axes[1, i].set_title(f"Synthesized — coil {i + 1}")
+        axes[1, i].axis("off")
+
+    plt.suptitle(
+        f"Calibration k-space ({cal_width}×{cal_width})  —  "
+        f"zero-filled (top) vs NLINV-synthesized (bottom)"
+    )
+    plt.tight_layout()
+    plt.show()
+
+
+
+
+.. image-sg:: /generated/autoexamples/images/sphx_glr_example_utils_005.png
+   :alt: Calibration k-space (24×24)  —  zero-filled (top) vs NLINV-synthesized (bottom), Zero-filled — coil 1, Zero-filled — coil 2, Zero-filled — coil 3, Zero-filled — coil 4, Synthesized — coil 1, Synthesized — coil 2, Synthesized — coil 3, Synthesized — coil 4
+   :srcset: /generated/autoexamples/images/sphx_glr_example_utils_005.png
+   :class: sphx-glr-single-img
+
+
+
+
+
+.. GENERATED FROM PYTHON SOURCE LINES 336-343
 
 .. note::
-   The synthetic calibration region is computed from the NLINV image and
-   sensitivity estimates as ``FFT(image x smap)`` for each coil, cropped to
-   the central ``cal_width x cal_width`` lines.  Its quality therefore
-   depends on the NLINV reconstruction quality — more iterations give a more
-   faithful calibration dataset.
+   In calibration mode (integer ``cal_width``) the sensitivity maps are
+   estimated at low resolution and zero-padded to the full FOV — they are
+   smoother but less accurate near the FOV boundary.  Use ``cal_width=None``
+   when full image reconstruction quality matters; use an integer
+   ``cal_width`` when only the synthesized k-space patch and fast coil
+   estimates are needed (e.g.\ as input to GROG/GRAPPA kernel training).
 
-.. GENERATED FROM PYTHON SOURCE LINES 281-283
+.. GENERATED FROM PYTHON SOURCE LINES 343-345
 
 .. code-block:: Python
 
@@ -490,7 +571,7 @@ pipelines where no explicit calibration scan is available.
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 2.510 seconds)
+   **Total running time of the script:** (0 minutes 10.069 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_utils.py:
