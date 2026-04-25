@@ -148,6 +148,11 @@ class SubspaceSparseFFT:
     def forward(self, sparse_kspace):
         """Time-domain k-space → subspace coefficient images.
 
+        Correct algorithm: loop over K (not T).  For each coefficient i,
+        weight all T frames' k-space by ``phi[i,:]^*`` and apply one
+        IFFT/SparseFFT call.  This costs K transforms instead of T, giving
+        a ~T/K speedup (×100 for T=500, K=5).
+
         Parameters
         ----------
         sparse_kspace : torch.Tensor
@@ -161,36 +166,23 @@ class SubspaceSparseFFT:
         device = sparse_kspace.device
         dtype = sparse_kspace.dtype
         basis = self.basis.to(device, dtype=dtype)  # (K, T)
-        n_coils = sparse_kspace.shape[1]
-        n_samples = sparse_kspace.shape[2]
 
-        use_batch = self._base.smaps is not None and hasattr(
-            self._base, "_scatter_ifft_crop_batch"
-        )
+        coeff_imgs = []
+        for i in range(self.K):
+            # Weight all frames by phi[i,:]^* → (T,1,1) broadcast → sum over T
+            phi_i = basis[i].conj()  # (T,)
+            y_i = (phi_i[:, None, None] * sparse_kspace).sum(0)  # (n_coils, n_samples)
+            img_i = self._base.forward(y_i)  # (*image_shape,)
+            coeff_imgs.append(img_i)
 
-        if use_batch:
-            conj_smaps = self._base._conj_smaps.to(device, dtype=dtype)
-            # Flatten frames x coils: (T*n_coils, n_samples)
-            ksp_flat = sparse_kspace.reshape(-1, n_samples)
-            # ONE batched IFFT instead of T x n_coils separate calls
-            imgs_flat = self._base._scatter_ifft_crop_batch(ksp_flat)
-            # Smaps combination: (T, n_coils, *image) x conj_smaps -> (T, *image)
-            imgs = (
-                imgs_flat.reshape(self.T, n_coils, *self.image_shape)
-                * conj_smaps.unsqueeze(0)
-            ).sum(1)
-        else:
-            # NUFFT per frame → (T, *image_shape)
-            imgs = torch.stack(
-                [self._base.forward(sparse_kspace[t]) for t in range(self.T)]
-            )
-
-        # Baked projection: (K, T) @ (T, n_spatial) → (K, n_spatial)
-        coeffs_flat = basis.conj() @ imgs.reshape(self.T, -1)
-        return coeffs_flat.reshape(self.K, *self.image_shape)
+        return torch.stack(coeff_imgs, dim=0)  # (K, *image_shape)
 
     def adjoint(self, coeffs):
         """Subspace coefficient images → time-domain k-space.
+
+        Correct algorithm: loop over K (not T).  For each coefficient i,
+        apply one FFT/SparseFFT call and broadcast the result across all T
+        frames scaled by ``phi[i,:]``.  This costs K transforms instead of T.
 
         Parameters
         ----------
@@ -206,28 +198,15 @@ class SubspaceSparseFFT:
         dtype = coeffs.dtype
         basis = self.basis.to(device, dtype=dtype)  # (K, T)
 
-        # Baked synthesis: (T, K) @ (K, n_spatial) → (T, n_spatial)
-        imgs = (basis.T @ coeffs.reshape(self.K, -1)).reshape(self.T, *self.image_shape)
+        kspace_out: torch.Tensor | None = None
+        for i in range(self.K):
+            ksp_i = self._base.adjoint(coeffs[i])  # (n_coils, n_samples)
+            phi_i = basis[i]  # (T,) — no conjugate for forward/synthesis
+            contrib = phi_i[:, None, None] * ksp_i[None, :, :]  # (T, n_coils, n_samples)
+            kspace_out = contrib if kspace_out is None else kspace_out + contrib
 
-        use_batch = self._base.smaps is not None and hasattr(
-            self._base, "_fft_pad_gather_batch"
-        )
-
-        if use_batch:
-            smaps = self._base.smaps.to(device, dtype=dtype)  # (n_coils, *image_shape)
-            n_coils = smaps.shape[0]
-            # Smaps expansion + flatten: (T*n_coils, *image_shape)
-            all_imgs = (imgs.unsqueeze(1) * smaps.unsqueeze(0)).reshape(
-                -1, *self.image_shape
-            )
-            # ONE batched FFT instead of T x n_coils separate calls
-            all_ksps = self._base._fft_pad_gather_batch(
-                all_imgs
-            )  # (T*n_coils, n_samples)
-            return all_ksps.reshape(self.T, n_coils, -1)
-        else:
-            # NUFFT per frame → (T, n_coils, n_samples)
-            return torch.stack([self._base.adjoint(imgs[t]) for t in range(self.T)])
+        assert kspace_out is not None
+        return kspace_out  # (T, n_coils, n_samples)
 
     def normal(self, coeffs):
         """Normal operator: ``A^H A x``."""

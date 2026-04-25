@@ -1,0 +1,30 @@
+{
+  "error": "operands could not be broadcast together with shapes (500,1,1) (1,6,48,1688) ",
+  "traceback": "Traceback (most recent call last):\n  File \"/home/mcencini/pygrog-project/pygrog/benchmark/run_benchmarks.py\", line 1235, in main\n    results = run(cfg, output_dir)\n  File \"/home/mcencini/pygrog-project/pygrog/benchmark/run_benchmarks.py\", line 940, in run\n    _, nufft_fwd_cpu_m = profile(\n                         ~~~~~~~^\n        _nufft_subspace_forward,\n        ^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<6 lines>...\n        gpu_device=None,\n        ^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/home/mcencini/pygrog-project/pygrog/benchmark/benchmark.py\", line 156, in profile\n    output = func(*args, **kwargs)\n  File \"/home/mcencini/pygrog-project/pygrog/benchmark/run_benchmarks.py\", line 447, in _nufft_subspace_forward\n    contrib = phi_i[:, None, None] * ksp_i[None, ...]  # (T, n_coils, N)\n              ~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~\nValueError: operands could not be broadcast together with shapes (500,1,1) (1,6,48,1688) \n",
+  "config": {
+    "shape": [
+      220,
+      220,
+      220
+    ],
+    "n_coils": 8,
+    "max_coeff": null,
+    "n_spokes": 48,
+    "n_readout": 512,
+    "repeats": 1,
+    "warmup": 0,
+    "gpu_device": 0,
+    "require_cufinufft": false,
+    "data_dir": "benchmark/data",
+    "scaling_ratios": [
+      0.01,
+      0.02,
+      0.05,
+      0.1,
+      0.2,
+      0.4,
+      0.7
+    ],
+    "no_gpu": true
+  }
+}

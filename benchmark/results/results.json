@@ -1,11 +1,11 @@
 {
   "config": {
     "shape": [
-      160,
-      160
+      220,
+      220,
+      220
     ],
     "n_coils": 8,
-    "max_frames": 1,
     "max_coeff": null,
     "n_spokes": 48,
     "n_readout": 512,
@@ -33,7 +33,7 @@
       220
     ],
     "n_coils": 6,
-    "n_frames": 1,
+    "n_frames": 500,
     "n_coeff": 5,
     "data_dir": "benchmark/data",
     "dataset_files": {
@@ -44,10 +44,10 @@
       "dcf": "dcf.npy"
     },
     "total_frames": 500,
-    "used_frames": 1,
+    "used_frames": 500,
     "total_coeff": 5,
     "used_coeff": 5,
-    "trajectory_varies_across_frames": false
+    "trajectory_varies_across_frames": true
   },
   "environment": {
     "torch_cuda_available": true,
@@ -58,12 +58,12 @@
       "repeat": 1,
       "warmup": 0,
       "runtimes_sec": [
-        10.609645820999958
+        14.104585471999599
       ],
-      "runtime_mean_sec": 10.609645820999958,
+      "runtime_mean_sec": 14.104585471999599,
       "runtime_std_sec": 0.0,
-      "peak_cpu_percent": 1051.6,
-      "peak_ram_gb": 10.37258529663086,
+      "peak_cpu_percent": 1030.1,
+      "peak_ram_gb": 12.377037048339844,
       "peak_gpu_mem_gb_nvml": null,
       "peak_gpu_mem_gb_torch": 0.0,
       "peak_gpu_mem_gb_cupy": 0.0,
@@ -80,35 +80,21 @@
         ]
       }
     },
-    "grog_interpolation": {
-      "repeat": 1,
-      "warmup": 0,
-      "runtimes_sec": [
-        0.08569927000007738
-      ],
-      "runtime_mean_sec": 0.08569927000007738,
-      "runtime_std_sec": 0.0,
-      "peak_cpu_percent": 889.7,
-      "peak_ram_gb": 3.8089523315429688,
-      "peak_gpu_mem_gb_nvml": null,
-      "peak_gpu_mem_gb_torch": 0.0,
-      "peak_gpu_mem_gb_cupy": 0.0
-    },
     "subspace_comparison": {
-      "rel_l2_error": 6647.70751953125,
-      "abs_corrcoef": 0.5990605161075684
+      "rel_l2_error": 2408.6640625,
+      "abs_corrcoef": 0.8827550777471836
     },
     "runtime_cpu": {
       "nufft_finufft_adjoint": {
         "repeat": 1,
         "warmup": 0,
         "runtimes_sec": [
-          4.861894827000015
+          41.80786498999987
         ],
-        "runtime_mean_sec": 4.861894827000015,
+        "runtime_mean_sec": 41.80786498999987,
         "runtime_std_sec": 0.0,
-        "peak_cpu_percent": 1050.0,
-        "peak_ram_gb": 5.616798400878906,
+        "peak_cpu_percent": 1081.7,
+        "peak_ram_gb": 10.573875427246094,
         "peak_gpu_mem_gb_nvml": null,
         "peak_gpu_mem_gb_torch": 0.0,
         "peak_gpu_mem_gb_cupy": 0.0
@@ -117,12 +103,12 @@
         "repeat": 1,
         "warmup": 0,
         "runtimes_sec": [
-          3.992581335000068
+          28.50647736800056
         ],
-        "runtime_mean_sec": 3.992581335000068,
+        "runtime_mean_sec": 28.50647736800056,
         "runtime_std_sec": 0.0,
-        "peak_cpu_percent": 1083.7,
-        "peak_ram_gb": 5.617168426513672,
+        "peak_cpu_percent": 1189.5,
+        "peak_ram_gb": 7.790111541748047,
         "peak_gpu_mem_gb_nvml": null,
         "peak_gpu_mem_gb_torch": 0.0,
         "peak_gpu_mem_gb_cupy": 0.0
@@ -131,12 +117,12 @@
         "repeat": 1,
         "warmup": 0,
         "runtimes_sec": [
-          1.053769357999954
+          34.102838836000956
         ],
-        "runtime_mean_sec": 1.053769357999954,
+        "runtime_mean_sec": 34.102838836000956,
         "runtime_std_sec": 0.0,
-        "peak_cpu_percent": 1048.5,
-        "peak_ram_gb": 5.4281158447265625,
+        "peak_cpu_percent": 1659.7,
+        "peak_ram_gb": 8.038497924804688,
         "peak_gpu_mem_gb_nvml": null,
         "peak_gpu_mem_gb_torch": 0.0,
         "peak_gpu_mem_gb_cupy": 0.0
@@ -145,12 +131,12 @@
         "repeat": 1,
         "warmup": 0,
         "runtimes_sec": [
-          1.0856536100000085
+          10.754081336999661
         ],
-        "runtime_mean_sec": 1.0856536100000085,
+        "runtime_mean_sec": 10.754081336999661,
         "runtime_std_sec": 0.0,
-        "peak_cpu_percent": 1189.5,
-        "peak_ram_gb": 5.367290496826172,
+        "peak_cpu_percent": 1066.7,
+        "peak_ram_gb": 7.963523864746094,
         "peak_gpu_mem_gb_nvml": null,
         "peak_gpu_mem_gb_torch": 0.0,
         "peak_gpu_mem_gb_cupy": 0.0
@@ -173,7 +159,7 @@
       0.7
     ],
     "real_samples_per_frame": 81024,
-    "scaling_frames": 1,
+    "scaling_frames": 2,
     "cases": [
       {
         "label": "Synth-0k",
@@ -188,17 +174,17 @@
         "preprocessing": {
           "cpu": {
             "planning": {
-              "runtime_sec": 14.535997123000016,
-              "ram_gb": 12.01388931274414,
+              "runtime_sec": 11.570570435000263,
+              "ram_gb": 13.769004821777344,
               "vram_gb": 0.0
             },
             "interpolation": {
-              "runtime_sec": 0.0028615209998861246,
-              "ram_gb": 5.374214172363281,
+              "runtime_sec": 0.026092164000147022,
+              "ram_gb": 7.128395080566406,
               "vram_gb": 0.0
             },
-            "runtime_sec": 14.538858643999902,
-            "ram_gb": 12.01388931274414,
+            "runtime_sec": 11.59666259900041,
+            "ram_gb": 13.769004821777344,
             "vram_gb": 0.0
           },
           "gpu": null
@@ -206,13 +192,13 @@
         "linop": {
           "forward": {
             "finufft_cpu": {
-              "runtime_sec": 3.9988375069997346,
-              "ram_gb": 6.212268829345703,
+              "runtime_sec": 11.65861547500026,
+              "ram_gb": 8.046161651611328,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 0.8536649540001235,
-              "ram_gb": 6.023529052734375,
+              "runtime_sec": 4.637971435999134,
+              "ram_gb": 8.29974365234375,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -228,13 +214,13 @@
           },
           "adjoint": {
             "finufft_cpu": {
-              "runtime_sec": 4.118684954999935,
-              "ram_gb": 6.212013244628906,
+              "runtime_sec": 11.783051456999601,
+              "ram_gb": 8.045867919921875,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 1.0042119380000258,
-              "ram_gb": 5.970584869384766,
+              "runtime_sec": 4.717395809999289,
+              "ram_gb": 8.375553131103516,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -263,17 +249,17 @@
         "preprocessing": {
           "cpu": {
             "planning": {
-              "runtime_sec": 10.161476367999967,
-              "ram_gb": 12.491065979003906,
+              "runtime_sec": 11.585616021000533,
+              "ram_gb": 14.243179321289062,
               "vram_gb": 0.0
             },
             "interpolation": {
-              "runtime_sec": 0.013096588000280462,
-              "ram_gb": 5.850933074951172,
+              "runtime_sec": 0.006488013001217041,
+              "ram_gb": 7.6031951904296875,
               "vram_gb": 0.0
             },
-            "runtime_sec": 10.174572956000247,
-            "ram_gb": 12.491065979003906,
+            "runtime_sec": 11.59210403400175,
+            "ram_gb": 14.243179321289062,
             "vram_gb": 0.0
           },
           "gpu": null
@@ -281,13 +267,13 @@
         "linop": {
           "forward": {
             "finufft_cpu": {
-              "runtime_sec": 3.929636696000216,
-              "ram_gb": 6.689006805419922,
+              "runtime_sec": 11.604646040999796,
+              "ram_gb": 8.520687103271484,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 1.154571469000075,
-              "ram_gb": 6.501346588134766,
+              "runtime_sec": 4.559041259000878,
+              "ram_gb": 8.77457046508789,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -303,13 +289,13 @@
           },
           "adjoint": {
             "finufft_cpu": {
-              "runtime_sec": 4.830846691999795,
-              "ram_gb": 6.688835144042969,
+              "runtime_sec": 12.074169278999761,
+              "ram_gb": 8.520393371582031,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 1.020603643999948,
-              "ram_gb": 6.497371673583984,
+              "runtime_sec": 4.602623644999767,
+              "ram_gb": 8.850353240966797,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -338,17 +324,17 @@
         "preprocessing": {
           "cpu": {
             "planning": {
-              "runtime_sec": 15.135364895999828,
-              "ram_gb": 12.96689224243164,
+              "runtime_sec": 11.401119525000468,
+              "ram_gb": 14.715972900390625,
               "vram_gb": 0.0
             },
             "interpolation": {
-              "runtime_sec": 0.002794367000205966,
-              "ram_gb": 6.326881408691406,
+              "runtime_sec": 0.004917538999507087,
+              "ram_gb": 8.075679779052734,
               "vram_gb": 0.0
             },
-            "runtime_sec": 15.138159263000034,
-            "ram_gb": 12.96689224243164,
+            "runtime_sec": 11.406037063999975,
+            "ram_gb": 14.715972900390625,
             "vram_gb": 0.0
           },
           "gpu": null
@@ -356,13 +342,13 @@
         "linop": {
           "forward": {
             "finufft_cpu": {
-              "runtime_sec": 3.9506567210000867,
-              "ram_gb": 7.164905548095703,
+              "runtime_sec": 11.511761827001465,
+              "ram_gb": 8.993350982666016,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 0.9481120830000691,
-              "ram_gb": 6.964305877685547,
+              "runtime_sec": 4.391941679999945,
+              "ram_gb": 8.295276641845703,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -378,13 +364,13 @@
           },
           "adjoint": {
             "finufft_cpu": {
-              "runtime_sec": 4.144718120000107,
-              "ram_gb": 7.164707183837891,
+              "runtime_sec": 11.984311692998745,
+              "ram_gb": 8.993213653564453,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 1.0019202570001653,
-              "ram_gb": 6.954456329345703,
+              "runtime_sec": 4.733216184000412,
+              "ram_gb": 9.322925567626953,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -413,17 +399,17 @@
         "preprocessing": {
           "cpu": {
             "planning": {
-              "runtime_sec": 12.090374368000084,
-              "ram_gb": 13.443714141845703,
+              "runtime_sec": 11.599408780000886,
+              "ram_gb": 14.240398406982422,
               "vram_gb": 0.0
             },
             "interpolation": {
-              "runtime_sec": 0.011570327999834262,
-              "ram_gb": 6.803493499755859,
+              "runtime_sec": 0.01827027800027281,
+              "ram_gb": 7.600101470947266,
               "vram_gb": 0.0
             },
-            "runtime_sec": 12.101944695999919,
-            "ram_gb": 13.443714141845703,
+            "runtime_sec": 11.617679058001158,
+            "ram_gb": 14.240398406982422,
             "vram_gb": 0.0
           },
           "gpu": null
@@ -431,13 +417,13 @@
         "linop": {
           "forward": {
             "finufft_cpu": {
-              "runtime_sec": 4.0289874220002275,
-              "ram_gb": 7.641365051269531,
+              "runtime_sec": 11.652442126998722,
+              "ram_gb": 8.517829895019531,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 0.9531159680000201,
-              "ram_gb": 7.453895568847656,
+              "runtime_sec": 4.609081475999119,
+              "ram_gb": 8.771839141845703,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -453,13 +439,13 @@
           },
           "adjoint": {
             "finufft_cpu": {
-              "runtime_sec": 4.168368587000259,
-              "ram_gb": 7.641262054443359,
+              "runtime_sec": 12.058698141001514,
+              "ram_gb": 8.517459869384766,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 0.9299781750000875,
-              "ram_gb": 7.424385070800781,
+              "runtime_sec": 4.626235252999322,
+              "ram_gb": 8.842350006103516,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -488,17 +474,17 @@
         "preprocessing": {
           "cpu": {
             "planning": {
-              "runtime_sec": 11.716401081000186,
-              "ram_gb": 13.91946792602539,
+              "runtime_sec": 11.243707260999145,
+              "ram_gb": 14.716861724853516,
               "vram_gb": 0.0
             },
             "interpolation": {
-              "runtime_sec": 0.032394063000083406,
-              "ram_gb": 7.2793426513671875,
+              "runtime_sec": 0.01971689600031823,
+              "ram_gb": 8.076400756835938,
               "vram_gb": 0.0
             },
-            "runtime_sec": 11.748795144000269,
-            "ram_gb": 13.91946792602539,
+            "runtime_sec": 11.263424156999463,
+            "ram_gb": 14.716861724853516,
             "vram_gb": 0.0
           },
           "gpu": null
@@ -506,13 +492,13 @@
         "linop": {
           "forward": {
             "finufft_cpu": {
-              "runtime_sec": 3.9025487619996966,
-              "ram_gb": 8.117511749267578,
+              "runtime_sec": 11.55637629299963,
+              "ram_gb": 9.01171875,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 0.9607510020000518,
-              "ram_gb": 7.848720550537109,
+              "runtime_sec": 4.5938236719994165,
+              "ram_gb": 9.265491485595703,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -528,13 +514,13 @@
           },
           "adjoint": {
             "finufft_cpu": {
-              "runtime_sec": 4.445421362000161,
-              "ram_gb": 8.117317199707031,
+              "runtime_sec": 12.49724306799908,
+              "ram_gb": 9.01123046875,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 0.9517966839998735,
-              "ram_gb": 7.921306610107422,
+              "runtime_sec": 4.782998548000251,
+              "ram_gb": 9.324607849121094,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -563,17 +549,17 @@
         "preprocessing": {
           "cpu": {
             "planning": {
-              "runtime_sec": 9.850259744999676,
-              "ram_gb": 14.35848617553711,
+              "runtime_sec": 11.817868985001041,
+              "ram_gb": 15.108856201171875,
               "vram_gb": 0.0
             },
             "interpolation": {
-              "runtime_sec": 0.025053856000340602,
-              "ram_gb": 7.7557373046875,
+              "runtime_sec": 0.05801232599878858,
+              "ram_gb": 8.467517852783203,
               "vram_gb": 0.0
             },
-            "runtime_sec": 9.875313601000016,
-            "ram_gb": 14.35848617553711,
+            "runtime_sec": 11.87588131099983,
+            "ram_gb": 15.108856201171875,
             "vram_gb": 0.0
           },
           "gpu": null
@@ -581,13 +567,13 @@
         "linop": {
           "forward": {
             "finufft_cpu": {
-              "runtime_sec": 3.883655331999762,
-              "ram_gb": 8.605518341064453,
+              "runtime_sec": 11.817556055999376,
+              "ram_gb": 9.385276794433594,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 0.9417534869999145,
-              "ram_gb": 8.33871078491211,
+              "runtime_sec": 4.6537571379994915,
+              "ram_gb": 9.639171600341797,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -603,13 +589,13 @@
           },
           "adjoint": {
             "finufft_cpu": {
-              "runtime_sec": 4.5285440719999315,
-              "ram_gb": 8.60525131225586,
+              "runtime_sec": 13.204651415999251,
+              "ram_gb": 9.38482666015625,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 0.9001339710002867,
-              "ram_gb": 8.418006896972656,
+              "runtime_sec": 5.0154240779993415,
+              "ram_gb": 9.715087890625,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -638,17 +624,17 @@
         "preprocessing": {
           "cpu": {
             "planning": {
-              "runtime_sec": 10.54490761299985,
-              "ram_gb": 14.853973388671875,
+              "runtime_sec": 11.648460990998501,
+              "ram_gb": 15.560123443603516,
               "vram_gb": 0.0
             },
             "interpolation": {
-              "runtime_sec": 0.05636750700023185,
-              "ram_gb": 8.27243423461914,
+              "runtime_sec": 0.06478224400052568,
+              "ram_gb": 8.907268524169922,
               "vram_gb": 0.0
             },
-            "runtime_sec": 10.601275120000082,
-            "ram_gb": 14.853973388671875,
+            "runtime_sec": 11.713243234999027,
+            "ram_gb": 15.560123443603516,
             "vram_gb": 0.0
           },
           "gpu": null
@@ -656,13 +642,13 @@
         "linop": {
           "forward": {
             "finufft_cpu": {
-              "runtime_sec": 3.8146967640000184,
-              "ram_gb": 9.110366821289062,
+              "runtime_sec": 11.530182058999344,
+              "ram_gb": 9.824848175048828,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 0.8831630539998514,
-              "ram_gb": 8.922859191894531,
+              "runtime_sec": 4.58792398499827,
+              "ram_gb": 10.075637817382812,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -678,13 +664,13 @@
           },
           "adjoint": {
             "finufft_cpu": {
-              "runtime_sec": 4.666674153999793,
-              "ram_gb": 9.110157012939453,
+              "runtime_sec": 13.031088379000721,
+              "ram_gb": 9.824512481689453,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 0.950226794000173,
-              "ram_gb": 8.846153259277344,
+              "runtime_sec": 4.654319921000933,
+              "ram_gb": 10.154361724853516,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -713,17 +699,17 @@
         "preprocessing": {
           "cpu": {
             "planning": {
-              "runtime_sec": 10.226021717000094,
-              "ram_gb": 15.428539276123047,
+              "runtime_sec": 10.736560428000303,
+              "ram_gb": 14.611679077148438,
               "vram_gb": 0.0
             },
             "interpolation": {
-              "runtime_sec": 0.04805399899987606,
-              "ram_gb": 8.78841781616211,
+              "runtime_sec": 0.08710609000081604,
+              "ram_gb": 8.058643341064453,
               "vram_gb": 0.0
             },
-            "runtime_sec": 10.27407571599997,
-            "ram_gb": 15.428539276123047,
+            "runtime_sec": 10.823666518001119,
+            "ram_gb": 14.611679077148438,
             "vram_gb": 0.0
           },
           "gpu": null
@@ -731,13 +717,13 @@
         "linop": {
           "forward": {
             "finufft_cpu": {
-              "runtime_sec": 3.800810069000363,
-              "ram_gb": 9.64499282836914,
+              "runtime_sec": 11.466360710999652,
+              "ram_gb": 8.94277572631836,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 0.8973584020000089,
-              "ram_gb": 9.384098052978516,
+              "runtime_sec": 4.459161631000825,
+              "ram_gb": 9.19668960571289,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -753,13 +739,13 @@
           },
           "adjoint": {
             "finufft_cpu": {
-              "runtime_sec": 4.9666376659997695,
-              "ram_gb": 9.644790649414062,
+              "runtime_sec": 14.103849473000082,
+              "ram_gb": 8.942394256591797,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 0.8903085889996873,
-              "ram_gb": 9.390556335449219,
+              "runtime_sec": 4.67605008099963,
+              "ram_gb": 9.272205352783203,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -788,17 +774,17 @@
         "preprocessing": {
           "cpu": {
             "planning": {
-              "runtime_sec": 10.606699315999776,
-              "ram_gb": 15.415760040283203,
+              "runtime_sec": 11.151252095000018,
+              "ram_gb": 14.620044708251953,
               "vram_gb": 0.0
             },
             "interpolation": {
-              "runtime_sec": 0.09075332100019295,
-              "ram_gb": 8.828678131103516,
+              "runtime_sec": 0.15637103599874536,
+              "ram_gb": 8.072940826416016,
               "vram_gb": 0.0
             },
-            "runtime_sec": 10.69745263699997,
-            "ram_gb": 15.415760040283203,
+            "runtime_sec": 11.307623130998763,
+            "ram_gb": 14.620044708251953,
             "vram_gb": 0.0
           },
           "gpu": null
@@ -806,13 +792,13 @@
         "linop": {
           "forward": {
             "finufft_cpu": {
-              "runtime_sec": 3.853096157999971,
-              "ram_gb": 9.680877685546875,
+              "runtime_sec": 11.258494146000885,
+              "ram_gb": 8.99056625366211,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 0.8933473709998907,
-              "ram_gb": 9.457157135009766,
+              "runtime_sec": 4.499343634000979,
+              "ram_gb": 9.20294189453125,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {
@@ -828,13 +814,13 @@
           },
           "adjoint": {
             "finufft_cpu": {
-              "runtime_sec": 4.822782735000146,
-              "ram_gb": 9.680625915527344,
+              "runtime_sec": 13.792765450998559,
+              "ram_gb": 8.990150451660156,
               "vram_gb": 0.0
             },
             "grog_cpu": {
-              "runtime_sec": 0.8843992980000621,
-              "ram_gb": 9.490890502929688,
+              "runtime_sec": 4.543971951003186,
+              "ram_gb": 9.280338287353516,
               "vram_gb": 0.0
             },
             "cufinufft_gpu": {

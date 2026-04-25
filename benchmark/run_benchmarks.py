@@ -305,6 +305,147 @@ def _nufft_forward_all(
     return np.stack(ksps, axis=0)
 
 
+# ---------------------------------------------------------------------------
+# Subspace (MRF) operators — correct algorithm: loop over n_coeff (K << T).
+#
+#   Adjoint: for i in range(K):
+#               y_i = Σ_t  phi[i,t]^*  ·  y_t        (weight k-space / sparse)
+#               alpha[i] = E^H(y_i)                   (one NUFFT / SparseFFT)
+#
+#   Forward: for i in range(K):
+#               k_i = E(alpha[i])                     (one NUFFT / SparseFFT)
+#               y_t += phi[i,t] · k_i   for all t
+#
+# K=5 transforms instead of T=500 — 100× fewer IFFT/NUFFT calls.
+# Peak memory: O(T · n_coils · n_sparse)  +  O(K · spatial) for GROG;
+#              O(n_coils · N)              +  O(K · spatial) for NUFFT.
+# ---------------------------------------------------------------------------
+
+
+def _grog_subspace_adjoint(
+    grog: GrogInterpolator,
+    kspace_tcns: np.ndarray,
+    sqrt_weights: np.ndarray,
+    sparse_fft: SparseFFT,
+    basis_kt: np.ndarray,  # (n_coeff, n_frames)
+    mode: str = "cpu",
+    gpu_device: int = 0,
+) -> np.ndarray:
+    """Subspace adjoint (E Φ)^H y → alpha (n_coeff, *shape).
+
+    Double loop: T GROG interps (can't avoid) + K SparseFFT calls.
+    For each frame t, immediately accumulates phi[i,t]^* * sparse_t
+    into K pre-allocated buffers — no (T, n_coils, n_sparse) stack in RAM.
+    Peak memory: (K+1) × (n_coils, n_sparse) ≈ tens of MB.
+    """
+    n_coeff, n_frames = basis_kt.shape
+    use_cuda = mode in {"gpu-full", "gpu-dual"}
+    kspace_t = torch.as_tensor(kspace_tcns, dtype=torch.complex64)
+    sqrt_w_t = torch.as_tensor(sqrt_weights, dtype=torch.float32)
+    phi = torch.as_tensor(basis_kt, dtype=torch.complex64)  # (K, T)
+
+    # K accumulators — shape allocated on first frame
+    accum: list[torch.Tensor | None] = [None] * n_coeff
+
+    for t in range(n_frames):
+        sparse_t = grog._sparse_full(kspace_t[t]).cpu()  # (n_coils, n_sparse)
+        sparse_t = sparse_t * sqrt_w_t[: sparse_t.shape[-1]]
+        for i in range(n_coeff):
+            contrib = phi[i, t].conj() * sparse_t  # scalar × tensor
+            accum[i] = contrib if accum[i] is None else accum[i] + contrib
+
+    coeff_imgs: list[torch.Tensor] = []
+    for i in range(n_coeff):
+        y_i = accum[i]
+        assert y_i is not None
+        if use_cuda:
+            y_i = y_i.to(f"cuda:{gpu_device}")
+        img_i = sparse_fft.forward(y_i)  # (*shape,)
+        coeff_imgs.append(img_i.detach().cpu())
+
+    return torch.stack(coeff_imgs, dim=0).numpy()  # (K, *shape)
+
+
+def _nufft_subspace_adjoint(
+    op,
+    kspace_tcns: np.ndarray,
+    basis_kt: np.ndarray,  # (n_coeff, n_frames)
+) -> np.ndarray:
+    """Subspace adjoint (E Φ)^H y → alpha (n_coeff, *shape).
+
+    For each coeff i, weights all frames' k-space by phi[i,:]^* and applies
+    a single NUFFT adjoint (using the fixed reference trajectory stored in op).
+    Total: K NUFFT adjoint calls.
+    """
+    n_coeff, n_frames = basis_kt.shape
+    n_coils = kspace_tcns.shape[1]
+    # (T, n_coils, n_spokes, n_readout) → (T, n_coils, N)
+    y = kspace_tcns.reshape(n_frames, n_coils, -1).astype(np.complex64)
+
+    coeff_imgs: list[np.ndarray] = []
+    for i in range(n_coeff):
+        phi_i = basis_kt[i].conj()  # (T,) complex
+        # Weighted sum over frames: (T, 1, 1) * (T, n_coils, N) → (n_coils, N)
+        y_i = (phi_i[:, None, None] * y).sum(0)
+        img_i = np.asarray(op.adj_op(y_i))  # (*shape,)
+        coeff_imgs.append(img_i)
+
+    return np.stack(coeff_imgs, axis=0)  # (K, *shape)
+
+
+def _grog_subspace_forward(
+    sparse_fft: SparseFFT,
+    coeff: np.ndarray,  # (n_coeff, *shape)
+    basis_kt: np.ndarray,  # (n_coeff, n_frames)
+    mode: str = "cpu",
+    gpu_device: int = 0,
+) -> np.ndarray:
+    """Subspace forward E Φ alpha → (n_coeff, n_coils, n_sparse).
+
+    For each coeff i applies one SparseFFT adjoint (image → sparse Cartesian
+    k-space).  Returns the per-coefficient sparse outputs (K, n_coils, n_sparse)
+    rather than the full (T, n_coils, n_sparse) frame stack: the T-frame
+    synthesis (K×T scalar multiplications) is negligible vs K FFT calls.
+    Total: K SparseFFT calls.  Peak memory: K × (n_coils, n_sparse) ≈ tens of MB.
+    """
+    n_coeff = basis_kt.shape[0]
+    use_cuda = mode in {"gpu-full", "gpu-dual"}
+    coeff_t = torch.as_tensor(coeff, dtype=torch.complex64)
+
+    ksps: list[torch.Tensor] = []
+    for i in range(n_coeff):
+        img_i = coeff_t[i]
+        if use_cuda:
+            img_i = img_i.to(f"cuda:{gpu_device}")
+        ksp_i = sparse_fft.adjoint(img_i).cpu()  # (n_coils, n_sparse)
+        ksps.append(ksp_i)
+
+    return torch.stack(ksps, dim=0).numpy()  # (K, n_coils, n_sparse)
+
+
+def _nufft_subspace_forward(
+    op,
+    coeff: np.ndarray,  # (n_coeff, *shape)
+    basis_kt: np.ndarray,  # (n_coeff, n_frames)
+    sample_shape: tuple[int, ...] | None = None,
+) -> np.ndarray:
+    """Subspace forward E Φ alpha → (n_coeff, n_coils, n_samples).
+
+    For each coeff i applies one NUFFT forward call (using the fixed reference
+    trajectory in op).  Returns per-coeff k-spaces (K, n_coils, N) — the
+    T-frame synthesis (K×T scalar mults) is negligible vs K NUFFT calls.
+    Total: K NUFFT forward calls.
+    """
+    n_coeff = basis_kt.shape[0]
+    ksps: list[np.ndarray] = []
+    for i in range(n_coeff):
+        ksp_i = np.asarray(op.op(coeff[i]))  # (n_coils, N)
+        if sample_shape is not None and getattr(ksp_i, "ndim", 0) == 2:
+            ksp_i = ksp_i.reshape(ksp_i.shape[0], *sample_shape)
+        ksps.append(ksp_i)
+    return np.stack(ksps, axis=0)  # (K, n_coils, n_samples)
+
+
 def _safe_backend_available(backend: str) -> tuple[bool, str | None]:
     try:
         _ = get_operator(backend)
@@ -736,31 +877,24 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
     results["steps"]["grog_plan_creation"] = _serialize_metrics(plan_metrics)
     results["steps"]["grog_plan_creation"]["prep"] = grog_aux["prep"]
 
-    # GROG interpolation runtime
-    sparse_tcns, interp_metrics = profile(
-        _grog_interpolate_all,
-        grog,
-        kspace_tcns,
-        grog_aux["sqrt_weights"],
-        warmup=cfg.warmup,
-        repeat=cfg.repeats,
-        gpu_device=cfg.gpu_device if _cuda_available else None,
-    )
-    results["steps"]["grog_interpolation"] = _serialize_metrics(interp_metrics)
-
-    # Subspace coefficient comparison: NUFFT adjoint vs GROG (interp + SparseFFT forward)
-    imgs_nufft, _ = profile(
-        _nufft_adjoint_all,
+    # Subspace coefficient comparison: NUFFT vs GROG.
+    # Both accumulate (n_coeff, *shape) by looping over frames — no (n_frames, *shape) stack.
+    coeff_nufft, _ = profile(
+        _nufft_subspace_adjoint,
         nufft_sim,
         kspace_tcns,
+        basis_kt,
         warmup=cfg.warmup,
         repeat=1,
         gpu_device=None,
     )
-    imgs_grog_cpu, _ = profile(
-        _grog_adjoint_from_sparse,
-        sparse_tcns,
+    coeff_grog_cpu, _ = profile(
+        _grog_subspace_adjoint,
+        grog,
+        kspace_tcns,
+        grog_aux["sqrt_weights"],
         sparse_fft_cpu,
+        basis_kt,
         "cpu",
         cfg.gpu_device,
         warmup=cfg.warmup,
@@ -768,37 +902,41 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         gpu_device=None,
     )
 
-    coeff_nufft = _coeff_from_frames(np.asarray(imgs_nufft), basis_kt)
-    coeff_grog = _coeff_from_frames(np.asarray(imgs_grog_cpu), basis_kt)
+    coeff_nufft = np.asarray(coeff_nufft)
+    coeff_grog_cpu = np.asarray(coeff_grog_cpu)
 
     coeff_rel = float(
-        np.linalg.norm(coeff_nufft - coeff_grog) / (np.linalg.norm(coeff_nufft) + 1e-8)
+        np.linalg.norm(coeff_nufft - coeff_grog_cpu) / (np.linalg.norm(coeff_nufft) + 1e-8)
     )
     coeff_corr = float(
-        np.corrcoef(np.abs(coeff_nufft).ravel(), np.abs(coeff_grog).ravel())[0, 1]
+        np.corrcoef(np.abs(coeff_nufft).ravel(), np.abs(coeff_grog_cpu).ravel())[0, 1]
     )
 
     np.save(output_dir / "coeff_nufft.npy", coeff_nufft)
-    np.save(output_dir / "coeff_grog.npy", coeff_grog)
+    np.save(output_dir / "coeff_grog.npy", coeff_grog_cpu)
     results["steps"]["subspace_comparison"] = {
         "rel_l2_error": coeff_rel,
         "abs_corrcoef": coeff_corr,
     }
 
-    # Runtime + memory comparisons
+    # Runtime + memory comparisons — subspace adjoint/forward
+    # Adjoint: (E Φ)^H y → alpha (n_coeff, *shape)
+    # Forward: E Φ alpha → per-frame k-space
     # CPU
-    nufft_adj_cpu, nufft_adj_cpu_m = profile(
-        _nufft_adjoint_all,
+    _, nufft_adj_cpu_m = profile(
+        _nufft_subspace_adjoint,
         nufft_sim,
         kspace_tcns,
+        basis_kt,
         warmup=cfg.warmup,
         repeat=cfg.repeats,
         gpu_device=None,
     )
     _, nufft_fwd_cpu_m = profile(
-        _nufft_forward_all,
+        _nufft_subspace_forward,
         nufft_sim,
-        np.asarray(nufft_adj_cpu),
+        coeff_nufft,
+        basis_kt,
         inputs.samples.shape[:-1],
         warmup=cfg.warmup,
         repeat=cfg.repeats,
@@ -806,9 +944,12 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
     )
 
     _, grog_adj_cpu_m = profile(
-        _grog_adjoint_from_sparse,
-        sparse_tcns,
+        _grog_subspace_adjoint,
+        grog,
+        kspace_tcns,
+        grog_aux["sqrt_weights"],
         sparse_fft_cpu,
+        basis_kt,
         "cpu",
         cfg.gpu_device,
         warmup=cfg.warmup,
@@ -816,9 +957,10 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         gpu_device=None,
     )
     _, grog_fwd_cpu_m = profile(
-        _grog_forward_from_images,
-        np.asarray(nufft_adj_cpu),
+        _grog_subspace_forward,
         sparse_fft_cpu,
+        coeff_nufft,
+        basis_kt,
         "cpu",
         cfg.gpu_device,
         warmup=cfg.warmup,
@@ -846,9 +988,12 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
             )
             _gpu_sparse_fft = sparse_fft_gpu_full
             _, grog_adj_gpu_full_m = profile(
-                _grog_adjoint_from_sparse,
-                sparse_tcns,
+                _grog_subspace_adjoint,
+                grog,
+                kspace_tcns,
+                grog_aux["sqrt_weights"],
                 sparse_fft_gpu_full,
+                basis_kt,
                 "gpu-full",
                 cfg.gpu_device,
                 warmup=cfg.warmup,
@@ -856,9 +1001,10 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 gpu_device=cfg.gpu_device,
             )
             _, grog_fwd_gpu_full_m = profile(
-                _grog_forward_from_images,
-                np.asarray(nufft_adj_cpu),
+                _grog_subspace_forward,
                 sparse_fft_gpu_full,
+                coeff_nufft,
+                basis_kt,
                 "gpu-full",
                 cfg.gpu_device,
                 warmup=cfg.warmup,
@@ -876,9 +1022,12 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 device=f"cuda:{cfg.gpu_device}",
             )
             _, grog_adj_gpu_dual_m = profile(
-                _grog_adjoint_from_sparse,
-                sparse_tcns,
+                _grog_subspace_adjoint,
+                grog,
+                kspace_tcns,
+                grog_aux["sqrt_weights"],
                 sparse_fft_gpu_dual,
+                basis_kt,
                 "gpu-dual",
                 cfg.gpu_device,
                 warmup=cfg.warmup,
@@ -886,9 +1035,10 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 gpu_device=cfg.gpu_device,
             )
             _, grog_fwd_gpu_dual_m = profile(
-                _grog_forward_from_images,
-                np.asarray(nufft_adj_cpu),
+                _grog_subspace_forward,
                 sparse_fft_gpu_dual,
+                coeff_nufft,
+                basis_kt,
                 "gpu-dual",
                 cfg.gpu_device,
                 warmup=cfg.warmup,
@@ -909,17 +1059,19 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
             )
             _gpu_nufft = nufft_gpu
             _, nufft_adj_gpu_m = profile(
-                _nufft_adjoint_all,
+                _nufft_subspace_adjoint,
                 nufft_gpu,
                 kspace_tcns,
+                basis_kt,
                 warmup=cfg.warmup,
                 repeat=cfg.repeats,
                 gpu_device=cfg.gpu_device,
             )
             _, nufft_fwd_gpu_m = profile(
-                _nufft_forward_all,
+                _nufft_subspace_forward,
                 nufft_gpu,
-                np.asarray(nufft_adj_cpu),
+                coeff_nufft,
+                basis_kt,
                 inputs.samples.shape[:-1],
                 warmup=cfg.warmup,
                 repeat=cfg.repeats,
@@ -964,15 +1116,16 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
 
     results["steps"]["runtime_gpu"] = gpu_results
 
-    # CUDA subspace coefficient comparison (only when GPU NUFFT + GROG both available)
+    # CUDA subspace comparison (only when GPU NUFFT + GROG both available)
     if _gpu_sparse_fft is not None and _gpu_nufft is not None:
         try:
-            imgs_nufft_cuda = _nufft_adjoint_all(_gpu_nufft, kspace_tcns)
-            imgs_grog_cuda = _grog_adjoint_from_sparse(
-                np.asarray(sparse_tcns), _gpu_sparse_fft, "gpu-full", cfg.gpu_device
+            coeff_nufft_cuda = np.asarray(
+                _nufft_subspace_adjoint(_gpu_nufft, kspace_tcns, basis_kt)
             )
-            coeff_nufft_cuda = _coeff_from_frames(np.asarray(imgs_nufft_cuda), basis_kt)
-            coeff_grog_cuda = _coeff_from_frames(np.asarray(imgs_grog_cuda), basis_kt)
+            coeff_grog_cuda = _grog_subspace_adjoint(
+                grog, kspace_tcns, grog_aux["sqrt_weights"],
+                _gpu_sparse_fft, basis_kt, "gpu-full", cfg.gpu_device
+            )
             np.save(output_dir / "coeff_nufft_cuda.npy", coeff_nufft_cuda)
             np.save(output_dir / "coeff_grog_cuda.npy", coeff_grog_cuda)
             coeff_cuda_rel = float(
