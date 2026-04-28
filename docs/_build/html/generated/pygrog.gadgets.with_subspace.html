@@ -167,7 +167,7 @@
 <li class="toctree-l1 has-children"><a class="reference internal" href="autoexamples/index.html">Examples</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
-<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">Interoperability with mrpro, sigpy and deepinverse</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
 </details></li>
@@ -437,17 +437,17 @@
 <h1>with_subspace<a class="headerlink" href="#with-subspace" title="Link to this heading">#</a></h1>
 <dl class="py function">
 <dt class="sig sig-object py" id="pygrog.gadgets.with_subspace">
-<span class="sig-prename descclassname"><span class="pre">pygrog.gadgets.</span></span><span class="sig-name descname"><span class="pre">with_subspace</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">base_op</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subspace_basis</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#with_subspace"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.with_subspace" title="Link to this definition">#</a></dt>
+<span class="sig-prename descclassname"><span class="pre">pygrog.gadgets.</span></span><span class="sig-name descname"><span class="pre">with_subspace</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">base_op</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subspace_basis</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">encoding_axis</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">-4</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#with_subspace"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.with_subspace" title="Link to this definition">#</a></dt>
 <dd><p>Wrap a SparseFFT operator with subspace projection.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>base_op</strong> (<a class="reference internal" href="pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT" title="pygrog.operator.SparseFFT"><em>SparseFFT</em></a><em> (or </em><a class="reference internal" href="pygrog.gadgets.OffResonanceSparseFFT.html#pygrog.gadgets.OffResonanceSparseFFT" title="pygrog.gadgets.OffResonanceSparseFFT"><em>OffResonanceSparseFFT</em></a><em>)</em>) – Base operator with <code class="docutils literal notranslate"><span class="pre">forward</span></code> / <code class="docutils literal notranslate"><span class="pre">adjoint</span></code> API.</p></li>
+<li><p><strong>base_op</strong> (<a class="reference internal" href="pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT" title="pygrog.operator.SparseFFT"><em>SparseFFT</em></a>) – Underlying operator with a multi-dim <code class="docutils literal notranslate"><span class="pre">natural_shape</span></code> containing
+the temporal axis.</p></li>
 <li><p><strong>subspace_basis</strong> (<em>array-like</em><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#complex" title="(in Python v3.14)"><em>complex</em></a>) – <code class="docutils literal notranslate"><span class="pre">(K,</span> <span class="pre">T)</span></code> subspace basis matrix.</p></li>
+<li><p><strong>encoding_axis</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Axis (in the full sparse-tensor layout) carrying <code class="docutils literal notranslate"><span class="pre">T</span></code>.  Default
+<code class="docutils literal notranslate"><span class="pre">-4</span></code> matches <code class="docutils literal notranslate"><span class="pre">(*batch,</span> <span class="pre">C,</span> <span class="pre">T,</span> <span class="pre">k1,</span> <span class="pre">k0,</span> <span class="pre">kw)</span></code>.</p></li>
 </ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p><a class="reference internal" href="pygrog.gadgets.SubspaceSparseFFT.html#pygrog.gadgets.SubspaceSparseFFT" title="pygrog.gadgets.SubspaceSparseFFT">SubspaceSparseFFT</a></p>
 </dd>
 </dl>
 </dd></dl>

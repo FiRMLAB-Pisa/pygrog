@@ -166,7 +166,7 @@
 <li class="toctree-l1 has-children"><a class="reference internal" href="../../../generated/autoexamples/index.html">Examples</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_interop.html">Interoperability with mrpro, sigpy and deepinverse</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
 </details></li>
@@ -595,6 +595,9 @@
             <span class="bp">self</span><span class="o">.</span><span class="n">sqrt_weights</span> <span class="o">=</span> <span class="n">plan</span><span class="o">.</span><span class="n">sqrt_weights</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">sort_perm</span> <span class="o">=</span> <span class="n">plan</span><span class="o">.</span><span class="n">sort_perm</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">inv_perm</span> <span class="o">=</span> <span class="n">plan</span><span class="o">.</span><span class="n">inv_perm</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">natural_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span>
+                <span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">plan</span><span class="p">,</span> <span class="s2">&quot;natural_shape&quot;</span><span class="p">,</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">plan</span><span class="o">.</span><span class="n">n_samples</span><span class="p">),))</span>
+            <span class="p">)</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="k">if</span> <span class="n">grid_shape</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">image_shape</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
                 <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
@@ -616,7 +619,9 @@
             <span class="n">inv_perm</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty_like</span><span class="p">(</span><span class="n">sort_perm</span><span class="p">)</span>
             <span class="n">inv_perm</span><span class="p">[</span><span class="n">sort_perm</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">sort_perm</span><span class="p">))</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">inv_perm</span> <span class="o">=</span> <span class="n">inv_perm</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">natural_shape</span> <span class="o">=</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">idx</span><span class="o">.</span><span class="n">numel</span><span class="p">()),)</span>
 
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">indices</span><span class="o">.</span><span class="n">numel</span><span class="p">())</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">ndim</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
 
@@ -683,13 +688,24 @@
 <span class="sd">        Parameters</span>
 <span class="sd">        ----------</span>
 <span class="sd">        sparse_kspace : torch.Tensor</span>
-<span class="sd">            ``(n_coils, n_samples)`` complex.</span>
+<span class="sd">            ``(n_coils, *natural_shape)`` or ``(n_coils, n_samples)`` (legacy),</span>
+<span class="sd">            or with a leading batch dim. ``prod(natural_shape) == n_samples``.</span>
 
 <span class="sd">        Returns</span>
 <span class="sd">        -------</span>
 <span class="sd">        torch.Tensor</span>
-<span class="sd">            ``(*image_shape,)`` combined image (complex).</span>
+<span class="sd">            ``(*image_shape,)`` or ``(*lead, *image_shape)`` combined image.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Natural-shape (multi-dim) input → fold trailing dims into n_samples.</span>
+        <span class="n">nat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">natural_shape</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">nat</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="ow">and</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">nat</span><span class="p">):])</span> <span class="o">==</span> <span class="n">nat</span><span class="p">:</span>
+            <span class="n">flat_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">nat</span><span class="p">)])</span> <span class="o">+</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">,)</span>
+            <span class="n">sparse_kspace</span> <span class="o">=</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">flat_shape</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>  <span class="c1"># (T, n_coils, n_samples) → (T, *image_shape)</span>
+            <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
+                <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">sparse_kspace</span><span class="p">[</span><span class="n">t</span><span class="p">])</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">sparse_kspace</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])],</span>
+                <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+            <span class="p">)</span>
         <span class="n">n_coils</span> <span class="o">=</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
         <span class="n">src_device</span> <span class="o">=</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">device</span>
         <span class="n">comp_device</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">src_device</span>
@@ -748,13 +764,34 @@
 <span class="sd">        Parameters</span>
 <span class="sd">        ----------</span>
 <span class="sd">        image : torch.Tensor</span>
-<span class="sd">            ``(*image_shape,)`` complex.</span>
+<span class="sd">            ``(*image_shape,)`` or ``(T, *image_shape)`` complex.</span>
+<span class="sd">            When smaps are absent, single-frame input is ``(n_coils, *image_shape)``</span>
+<span class="sd">            and batched input is ``(T, n_coils, *image_shape)``.</span>
 
 <span class="sd">        Returns</span>
 <span class="sd">        -------</span>
 <span class="sd">        torch.Tensor</span>
-<span class="sd">            ``(n_coils, n_samples)`` complex.</span>
+<span class="sd">            ``(n_coils, *natural_shape)`` (or with leading batch dim).</span>
 <span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_adjoint_flat</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>
+        <span class="n">nat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">natural_shape</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">nat</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">out</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="o">*</span><span class="n">nat</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">out</span></div>
+
+
+<div class="viewcode-block" id="SparseFFT._adjoint_flat">
+<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._adjoint_flat">[docs]</a>
+    <span class="nd">@with_torch</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_adjoint_flat</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Flat-output adjoint: returns (..., n_samples).&quot;&quot;&quot;</span>
+        <span class="c1"># Batch detection: one extra leading dim beyond the expected single-frame ndim.</span>
+        <span class="n">single_frame_ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">)</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">smaps</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="k">if</span> <span class="n">image</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="n">single_frame_ndim</span> <span class="o">+</span> <span class="mi">1</span><span class="p">:</span>  <span class="c1"># (T, ...) batched</span>
+            <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
+                <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_adjoint_flat</span><span class="p">(</span><span class="n">image</span><span class="p">[</span><span class="n">t</span><span class="p">])</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])],</span>
+                <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+            <span class="p">)</span>
         <span class="n">src_device</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">device</span>
         <span class="n">comp_device</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">src_device</span>
         <span class="n">use_pipeline</span> <span class="o">=</span> <span class="n">comp_device</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="s2">&quot;cuda&quot;</span> <span class="ow">and</span> <span class="n">src_device</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="s2">&quot;cpu&quot;</span>

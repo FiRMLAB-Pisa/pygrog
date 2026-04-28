@@ -58,21 +58,39 @@ def _make_orc_op(image_shape, n_samples, n_coils, L, *, seed=0, smaps=True):
 
 
 def _make_subspace_op(image_shape, n_samples, n_coils, K, T, *, seed=0):
-    """Return SubspaceSparseFFT with smaps so batch path is exercised."""
+    """Return SubspaceSparseFFT with smaps so batch path is exercised.
+
+    The base SparseFFT is built with a 2-D ``natural_shape=(T, n_pts)``
+    so the subspace gadget's ``encoding_axis`` (default ``-4``) lands
+    on the temporal axis (``T``).
+    """
+    import types
+    assert n_samples % T == 0, "n_samples must be divisible by T"
+    n_pts = n_samples // T
     torch.manual_seed(seed)
     smaps = torch.randn(n_coils, *image_shape, dtype=torch.complex64)
-    base = _make_sparse_fft(
-        tuple(s + 4 for s in image_shape),
-        image_shape,
-        n_samples,
-        smaps=smaps,
-        seed=seed,
+    grid_shape = tuple(s + 4 for s in image_shape)
+    rng = np.random.default_rng(seed)
+    indices = torch.from_numpy(
+        rng.integers(0, int(np.prod(grid_shape)), n_samples).astype(np.int64))
+    weights = torch.ones(n_samples, dtype=torch.float32)
+    sort_perm = torch.argsort(indices)
+    inv_perm = torch.empty_like(sort_perm)
+    inv_perm[sort_perm] = torch.arange(n_samples)
+    plan = types.SimpleNamespace(
+        grid_shape=grid_shape, image_shape=tuple(image_shape),
+        grid_size=int(np.prod(grid_shape)),
+        indices=indices[sort_perm],
+        sqrt_weights=torch.sqrt(weights)[sort_perm],
+        sort_perm=sort_perm, inv_perm=inv_perm,
+        natural_shape=(T, n_pts), n_samples=n_samples,
     )
-    rng = torch.Generator().manual_seed(seed)
-    # Random full-rank basis (K < T), normalised columns
-    basis_raw = torch.randn(K, T, dtype=torch.complex64, generator=rng)
+    base = SparseFFT(plan=plan, smaps=smaps)
+    rng2 = torch.Generator().manual_seed(seed)
+    basis_raw = torch.randn(K, T, dtype=torch.complex64, generator=rng2)
     basis = basis_raw / basis_raw.norm(dim=1, keepdim=True)
-    return SubspaceSparseFFT(base, basis)
+    # encoding_axis=-2: full layout is (C, T, n_pts) → -2 → T axis.
+    return SubspaceSparseFFT(base, basis, encoding_axis=-2)
 
 
 # Constants for OffResonanceCorrection tests
@@ -161,7 +179,8 @@ def test_subspace_projection_is_idempotent():
 def test_subspace_sparse_fft_forward_shape(device):
     op = _make_subspace_op(_SUB_IMG, _SUB_N_SAMPLES, _SUB_N_COILS, _SUB_K, _SUB_T)
     ksp = torch.randn(
-        _SUB_T, _SUB_N_COILS, _SUB_N_SAMPLES, dtype=torch.complex64, device=device
+        _SUB_N_COILS, _SUB_T, _SUB_N_SAMPLES // _SUB_T,
+        dtype=torch.complex64, device=device,
     )
     out = op.forward(ksp)
     assert out.shape == (_SUB_K, *_SUB_IMG)
@@ -172,7 +191,8 @@ def test_subspace_sparse_fft_adjoint_shape(device):
     op = _make_subspace_op(_SUB_IMG, _SUB_N_SAMPLES, _SUB_N_COILS, _SUB_K, _SUB_T)
     coeffs = torch.randn(_SUB_K, *_SUB_IMG, dtype=torch.complex64, device=device)
     out = op.adjoint(coeffs)
-    assert out.shape == (_SUB_T, _SUB_N_COILS, _SUB_N_SAMPLES)
+    # Adjoint output shape is (1, C, T, n_pts) with the leading 1 batch.
+    assert out.shape[-3:] == (_SUB_N_COILS, _SUB_T, _SUB_N_SAMPLES // _SUB_T)
     assert out.device.type == device.type
 
 
@@ -182,26 +202,26 @@ def test_subspace_sparse_fft_adjointness(device):
         _SUB_IMG, _SUB_N_SAMPLES, _SUB_N_COILS, _SUB_K, _SUB_T, seed=1
     )
     x = torch.randn(
-        _SUB_T, _SUB_N_COILS, _SUB_N_SAMPLES, dtype=torch.complex64, device=device
+        _SUB_N_COILS, _SUB_T, _SUB_N_SAMPLES // _SUB_T,
+        dtype=torch.complex64, device=device,
     )
     y = torch.randn(_SUB_K, *_SUB_IMG, dtype=torch.complex64, device=device)
+    fx = op.forward(x)
+    aty = op.adjoint(y).reshape(x.shape)
     torch.testing.assert_close(
-        _cdot(op.forward(x), y), _cdot(x, op.adjoint(y)), rtol=1e-4, atol=1e-4
+        _cdot(fx, y), _cdot(x, aty), rtol=1e-4, atol=1e-4
     )
 
 
 def test_subspace_sparse_fft_with_subspace_wrapper(device):
     """with_subspace() returns a SubspaceSparseFFT with correct types."""
-    torch.manual_seed(2)
-    smaps = torch.randn(_SUB_N_COILS, *_SUB_IMG, dtype=torch.complex64)
-    base = _make_sparse_fft(
-        tuple(s + 4 for s in _SUB_IMG), _SUB_IMG, _SUB_N_SAMPLES, smaps=smaps, seed=2
+    op = _make_subspace_op(
+        _SUB_IMG, _SUB_N_SAMPLES, _SUB_N_COILS, _SUB_K, _SUB_T, seed=2
     )
-    basis = torch.randn(_SUB_K, _SUB_T, dtype=torch.complex64)
-    op = with_subspace(base, basis)
     assert isinstance(op, SubspaceSparseFFT)
     ksp = torch.randn(
-        _SUB_T, _SUB_N_COILS, _SUB_N_SAMPLES, dtype=torch.complex64, device=device
+        _SUB_N_COILS, _SUB_T, _SUB_N_SAMPLES // _SUB_T,
+        dtype=torch.complex64, device=device,
     )
     assert op.forward(ksp).shape == (_SUB_K, *_SUB_IMG)
 

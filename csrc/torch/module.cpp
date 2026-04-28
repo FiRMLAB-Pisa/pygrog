@@ -32,6 +32,25 @@ torch::Tensor gather(
     torch::Tensor indices,
     torch::Tensor weights);
 
+// Declarations from toep_psf.cpp
+void psf_scatter_scalar(
+    torch::Tensor psf,
+    torch::Tensor indices,
+    torch::Tensor w_sq);
+
+void psf_scatter_outer(
+    torch::Tensor psf,
+    torch::Tensor indices,
+    torch::Tensor w_sq,
+    torch::Tensor basis_per_sample);
+
+void psf_scatter_outer_basis(
+    torch::Tensor psf,
+    torch::Tensor indices,
+    torch::Tensor w_sq,
+    torch::Tensor basis,
+    torch::Tensor time_index);
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.doc() = "PyGROG C++/CUDA extension: GROG interpolation + sparse scatter/gather";
 
@@ -51,4 +70,18 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("gather", &gather,
           py::arg("grid"), py::arg("indices"), py::arg("weights"),
           "Gather: out[i] = weights[i] * grid[indices[i]]");
+
+    m.def("psf_scatter_scalar", &psf_scatter_scalar,
+          py::arg("psf"), py::arg("indices"), py::arg("w_sq"),
+          "Scalar PSF accumulation: psf[indices[i]] += w_sq[i] (in-place)");
+
+    m.def("psf_scatter_outer", &psf_scatter_outer,
+          py::arg("psf"), py::arg("indices"), py::arg("w_sq"),
+          py::arg("basis_per_sample"),
+          "Outer-product PSF: psf[indices[i], l, l'] += w_sq[i] * conj(b[i,l]) * b[i,l']");
+
+    m.def("psf_scatter_outer_basis", &psf_scatter_outer_basis,
+          py::arg("psf"), py::arg("indices"), py::arg("w_sq"),
+          py::arg("basis"), py::arg("time_index"),
+          "Subspace PSF: psf[indices[i], k, k'] += w_sq[i] * conj(B[k,t_i]) * B[k',t_i]");
 }

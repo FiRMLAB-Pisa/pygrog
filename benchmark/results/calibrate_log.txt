@@ -1,0 +1,11 @@
+Loading benchmark data from benchmark/data ...
+  kspace:     (500, 6, 48, 1688)  (T=500, C=6, spokes=48, readout=1688)
+  trajectory: (500, 48, 1688, 3)
+  dcf:        (500, 48, 1688)
+Running NLINV calibration (shape=(220, 220, 220), cal_width=24) ...
+  NLINV calibration completed in 27.5s
+  smaps:        (6, 220, 220, 220)  dtype=complex64
+  grappa_train: (6, 24, 24, 24)  dtype=complex64
+Saved smaps.npy -> benchmark/data/smaps.npy
+Saved smaps_qc.png -> benchmark/results/smaps_qc.png
+

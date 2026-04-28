@@ -166,7 +166,7 @@
 <li class="toctree-l1 has-children"><a class="reference internal" href="../../../generated/autoexamples/index.html">Examples</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_interop.html">Interoperability with mrpro, sigpy and deepinverse</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
 </details></li>
@@ -455,30 +455,71 @@
         <span class="n">readout_time_np</span> <span class="o">=</span> <span class="n">_to_np</span><span class="p">(</span><span class="n">readout_time</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
         <span class="n">r2star_np</span> <span class="o">=</span> <span class="n">_to_np</span><span class="p">(</span><span class="n">r2star_map</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span> <span class="k">if</span> <span class="n">r2star_map</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">None</span>
 
+        <span class="c1"># Preserve the original time-axis layout so we can broadcast B against</span>
+        <span class="c1"># ``base.natural_shape`` at apply time without materialising it.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_time_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">readout_time_np</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+
         <span class="k">if</span> <span class="n">mask</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">field_map_np</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
 
         <span class="n">complex_fmap</span> <span class="o">=</span> <span class="n">get_complex_fieldmap_rad</span><span class="p">(</span><span class="n">field_map_np</span><span class="p">,</span> <span class="n">r2star_np</span><span class="p">)</span>
 
         <span class="n">factorize</span> <span class="o">=</span> <span class="n">get_orc_factorization</span><span class="p">(</span><span class="n">method</span><span class="p">)</span>
+        <span class="c1"># The temporal LS problem depends only on the per-sample time *values*,</span>
+        <span class="c1"># not on their tensor shape, so we ravel before factorising.</span>
         <span class="n">B_np</span><span class="p">,</span> <span class="n">C_np</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">factorize</span><span class="p">(</span>
             <span class="n">field_map</span><span class="o">=</span><span class="n">complex_fmap</span><span class="p">,</span>
-            <span class="n">readout_time</span><span class="o">=</span><span class="n">readout_time_np</span><span class="p">,</span>
+            <span class="n">readout_time</span><span class="o">=</span><span class="n">readout_time_np</span><span class="o">.</span><span class="n">ravel</span><span class="p">(),</span>
             <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">,</span>
             <span class="n">L</span><span class="o">=</span><span class="n">n_components</span><span class="p">,</span>
             <span class="n">n_bins</span><span class="o">=</span><span class="n">n_bins</span><span class="p">,</span>
             <span class="n">lazy</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
         <span class="p">)</span>
 
-        <span class="c1"># B: (n_samples, L) complex64 — temporal basis</span>
+        <span class="c1"># B: (prod(time_shape), L) → reshape to (*time_shape, L) for natural-shape</span>
+        <span class="c1">#    broadcasting against ``base.natural_shape``.</span>
         <span class="c1"># C: (L, *spatial) complex64 — spatial coefficients</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_B</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">B_np</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">))</span>
+        <span class="n">B_t</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">B_np</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">))</span>
+        <span class="n">L</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">B_t</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_B</span> <span class="o">=</span> <span class="n">B_t</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">_time_shape</span><span class="p">,</span> <span class="n">L</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_C</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">C_np</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">))</span>
 
     <span class="nd">@property</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">n_components</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Number of basis components ``L``.&quot;&quot;&quot;</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_B</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_B</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+
+<div class="viewcode-block" id="OffResonanceCorrection._b_view">
+<a class="viewcode-back" href="../../../generated/pygrog.gadgets.OffResonanceCorrection.html#pygrog.gadgets.OffResonanceCorrection._b_view">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_b_view</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">B</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Reshape ``B`` to broadcast against ``base.natural_shape``.</span>
+
+<span class="sd">        Returns a strided view of shape ``(*nat_with_singletons, L)`` where</span>
+<span class="sd">        ``time_shape`` occupies a contiguous slice of ``natural_shape`` and the</span>
+<span class="sd">        other axes are singletons.  No memory is materialised.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">nat</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">sparse_fft</span><span class="o">.</span><span class="n">natural_shape</span><span class="p">)</span>
+        <span class="n">ts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_time_shape</span>
+        <span class="n">L</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">B</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+        <span class="c1"># Find the first contiguous slice of nat that matches ts.</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">nat</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">ts</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">nat</span><span class="p">[</span><span class="n">i</span> <span class="p">:</span> <span class="n">i</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">ts</span><span class="p">)]</span> <span class="o">==</span> <span class="n">ts</span><span class="p">:</span>
+                <span class="n">start</span> <span class="o">=</span> <span class="n">i</span>
+                <span class="k">break</span>
+        <span class="k">if</span> <span class="n">start</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;readout_time shape </span><span class="si">{</span><span class="n">ts</span><span class="si">}</span><span class="s2"> is not a contiguous slice of &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;base.natural_shape </span><span class="si">{</span><span class="n">nat</span><span class="si">}</span><span class="s2">; cannot broadcast B.&quot;</span>
+            <span class="p">)</span>
+        <span class="n">view_shape</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="p">(</span><span class="mi">1</span><span class="p">,)</span> <span class="o">*</span> <span class="n">start</span>
+            <span class="o">+</span> <span class="n">ts</span>
+            <span class="o">+</span> <span class="p">(</span><span class="mi">1</span><span class="p">,)</span> <span class="o">*</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">nat</span><span class="p">)</span> <span class="o">-</span> <span class="n">start</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">ts</span><span class="p">))</span>
+            <span class="o">+</span> <span class="p">(</span><span class="n">L</span><span class="p">,)</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">B</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">view_shape</span><span class="p">)</span></div>
+
 
 <div class="viewcode-block" id="OffResonanceCorrection.forward">
 <a class="viewcode-back" href="../../../generated/pygrog.gadgets.OffResonanceCorrection.html#pygrog.gadgets.OffResonanceCorrection.forward">[docs]</a>
@@ -495,20 +536,23 @@
 <span class="sd">        Returns</span>
 <span class="sd">        -------</span>
 <span class="sd">        torch.Tensor</span>
-<span class="sd">            Shape ``(n_coils, n_samples)``.</span>
+<span class="sd">            Shape ``(n_coils, *natural_shape)``.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">device</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">device</span>
-        <span class="n">B</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_B</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">image</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>  <span class="c1"># (n_samples, L)</span>
+        <span class="n">B</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_B</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">image</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
         <span class="n">C</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">image</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>  <span class="c1"># (L, *spatial)</span>
+
+        <span class="c1"># Strided view of B → (*nat_with_singletons, L); move L to the front.</span>
+        <span class="n">Bv</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_b_view</span><span class="p">(</span><span class="n">B</span><span class="p">)</span><span class="o">.</span><span class="n">movedim</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>         <span class="c1"># (L, *nat_with_singletons)</span>
 
         <span class="c1"># Pre-weight image per component: (L, n_coils, *spatial)</span>
         <span class="n">weighted</span> <span class="o">=</span> <span class="n">C</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">image</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
-        <span class="c1"># NUFFT per component → (L, n_coils, n_samples)</span>
+        <span class="c1"># NUFFT per component → (n_coils, *natural_shape); stack over L.</span>
         <span class="n">ksps</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
             <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">sparse_fft</span><span class="o">.</span><span class="n">adjoint</span><span class="p">(</span><span class="n">weighted</span><span class="p">[</span><span class="n">l</span><span class="p">])</span> <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_components</span><span class="p">)]</span>
-        <span class="p">)</span>
-        <span class="c1"># Weighted sum: B.T is (L, n_samples), broadcast over coils</span>
-        <span class="k">return</span> <span class="p">(</span><span class="n">B</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">ksps</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span></div>
+        <span class="p">)</span>                                            <span class="c1"># (L, n_coils, *nat)</span>
+        <span class="c1"># Broadcast-multiply by B (strided) and sum over L.</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">Bv</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">ksps</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span></div>
 
 
 <div class="viewcode-block" id="OffResonanceCorrection.adjoint">
@@ -521,7 +565,8 @@
 <span class="sd">        Parameters</span>
 <span class="sd">        ----------</span>
 <span class="sd">        kspace : torch.Tensor</span>
-<span class="sd">            Shape ``(n_coils, n_samples)``.</span>
+<span class="sd">            Shape ``(n_coils, *natural_shape)`` (or any shape broadcastable to it</span>
+<span class="sd">            after reshape).</span>
 
 <span class="sd">        Returns</span>
 <span class="sd">        -------</span>
@@ -529,11 +574,15 @@
 <span class="sd">            Shape ``(n_coils, *spatial)``.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">device</span> <span class="o">=</span> <span class="n">kspace</span><span class="o">.</span><span class="n">device</span>
-        <span class="n">B</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_B</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">kspace</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>  <span class="c1"># (n_samples, L)</span>
-        <span class="n">C</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">kspace</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>  <span class="c1"># (L, *spatial)</span>
+        <span class="n">nat</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">sparse_fft</span><span class="o">.</span><span class="n">natural_shape</span><span class="p">)</span>
+        <span class="n">kspace_nat</span> <span class="o">=</span> <span class="n">kspace</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">kspace</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="o">*</span><span class="n">nat</span><span class="p">)</span>
 
-        <span class="c1"># Pre-weight k-space per component: (L, n_coils, n_samples)</span>
-        <span class="n">weighted</span> <span class="o">=</span> <span class="n">kspace</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">*</span> <span class="n">B</span><span class="o">.</span><span class="n">conj</span><span class="p">()</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">B</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_B</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">kspace</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="n">C</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">kspace</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>  <span class="c1"># (L, *spatial)</span>
+        <span class="n">Bv</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_b_view</span><span class="p">(</span><span class="n">B</span><span class="p">)</span><span class="o">.</span><span class="n">movedim</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>         <span class="c1"># (L, *nat_with_singletons)</span>
+
+        <span class="c1"># Pre-weight k-space per component via broadcasting (no expand+contiguous).</span>
+        <span class="n">weighted</span> <span class="o">=</span> <span class="n">kspace_nat</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">*</span> <span class="n">Bv</span><span class="o">.</span><span class="n">conj</span><span class="p">()</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># (L, n_coils, *nat)</span>
         <span class="c1"># NUFFT per component → (L, n_coils, *spatial)</span>
         <span class="n">imgs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
             <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">sparse_fft</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">weighted</span><span class="p">[</span><span class="n">l</span><span class="p">])</span> <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_components</span><span class="p">)]</span>

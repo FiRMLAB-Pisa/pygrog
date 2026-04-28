@@ -43,6 +43,12 @@ def parse_args() -> argparse.Namespace:
         default=24,
         help="Calibration region width in pixels. Default: 24.",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("benchmark/results"),
+        help="Directory for output figures. Default: benchmark/results.",
+    )
     return parser.parse_args()
 
 
@@ -51,6 +57,8 @@ def main() -> None:
 
     args = parse_args()
     data_dir = args.data_dir
+    output_dir = args.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
     shape = tuple(args.shape)
     cal_width = args.cal_width
 
@@ -94,60 +102,67 @@ def main() -> None:
     np.save(data_dir / "smaps.npy", smaps)
     print(f"Saved smaps.npy -> {data_dir / 'smaps.npy'}")
 
-    # Save QC figure
-    # For 3D volumes, take the central slice along the first spatial axis
-    def _central_slice(arr):
-        """Return 2D central slice of a ND array (last two dims are displayed)."""
-        while arr.ndim > 2:
-            arr = arr[arr.shape[0] // 2]
-        return arr
+    # -----------------------------------------------------------------------
+    # QC figure: 3 rows (axial, sagittal, coronal) × (1 + n_coils) columns
+    #   col 0       : NLINV image estimate — magnitude, grey
+    #   col 1..C    : sensitivity maps — RGB hue=phase, value=magnitude
+    # -----------------------------------------------------------------------
+    import matplotlib.colors as mcolors
 
-    n_show = min(n_coils, 8)
-    ncols = n_show
+    def _slice(vol, axis):
+        """Return the central 2D slice of *vol* perpendicular to *axis*, CCW rotated."""
+        if vol.ndim < 3:
+            return np.rot90(np.squeeze(vol), k=1)
+        idx = vol.shape[axis] // 2
+        sl = np.take(vol, idx, axis=axis)
+        return np.rot90(sl, k=1)
+
+    def _phase_mag_rgb(arr2d):
+        """Complex 2D array → RGB image: hue=phase, value=magnitude."""
+        mag = np.abs(arr2d)
+        mag_norm = mag / (mag.max() + 1e-8)
+        hue = (np.angle(arr2d) + np.pi) / (2 * np.pi)   # [0, 1]
+        sat = np.ones_like(hue)
+        return mcolors.hsv_to_rgb(np.stack([hue, sat, mag_norm], axis=-1))
+
+    n_show = min(n_coils, 6)
+    ncols = 1 + n_show
+    row_labels = ["Axial", "Coronal", "Sagittal"]
+    axes_idx = [2, 1, 0]   # axis2=axial (x,y), axis1=coronal (x,z), axis0=sagittal (y,z)
+
+    img_vol = np.abs(np.asarray(image)) if image is not None else None
+
     fig, axes = plt.subplots(3, ncols, figsize=(2.5 * ncols, 7))
+    # Ensure axes is always 2-D (handles ncols == 1 edge-case)
+    axes = np.atleast_2d(axes)
+
     fig.suptitle(
-        f"NLINV calibration QC  |  cal_width={cal_width}  |  shape={shape}  |  t={elapsed:.1f}s", fontsize=11
+        f"NLINV QC  |  cal_width={cal_width}  |  shape={shape}  |  t={elapsed:.1f}s",
+        fontsize=11,
     )
 
-    for c in range(n_show):
-        # Row 0: sensitivity map magnitude (central slice)
-        ax = axes[0, c]
-        ax.imshow(np.abs(_central_slice(smaps[c])), cmap="gray")
-        ax.set_title(f"smap {c}", fontsize=8)
+    for row, (label, ax_idx) in enumerate(zip(row_labels, axes_idx)):
+        # col 0: NLINV image (magnitude)
+        ax = axes[row, 0]
+        if img_vol is not None:
+            sl = _slice(img_vol, ax_idx)
+            ax.imshow(sl, cmap="gray", interpolation="nearest")
+        ax.set_title("image" if row == 0 else "", fontsize=8)
+        ax.set_ylabel(label, fontsize=8)
         ax.axis("off")
 
-        # Row 1: sensitivity map phase (central slice)
-        ax = axes[1, c]
-        ax.imshow(np.angle(_central_slice(smaps[c])), cmap="hsv", vmin=-np.pi, vmax=np.pi)
-        ax.set_title(f"phase {c}", fontsize=8)
-        ax.axis("off")
-
-        # Row 2: grappa_train log-magnitude (central slice)
-        ax = axes[2, c]
-        cal_mag = np.log1p(np.abs(_central_slice(grappa_train[c])))
-        ax.imshow(cal_mag, cmap="viridis")
-        ax.set_title(f"cal {c}", fontsize=8)
-        ax.axis("off")
-
-    axes[0, 0].set_ylabel("smap |·|", fontsize=8)
-    axes[1, 0].set_ylabel("smap ∠", fontsize=8)
-    axes[2, 0].set_ylabel("log|cal k-space|", fontsize=8)
-
-    # Also show the reconstructed image if available
-    if image is not None:
-        fig2, ax2 = plt.subplots(1, 1, figsize=(4, 4))
-        ax2.imshow(np.abs(_central_slice(np.asarray(image))), cmap="gray")
-        ax2.set_title("NLINV image estimate")
-        ax2.axis("off")
-        fig2.tight_layout()
-        fig2.savefig(data_dir / "smaps_image_qc.png", dpi=100)
-        plt.close(fig2)
-        print(f"Saved smaps_image_qc.png -> {data_dir / 'smaps_image_qc.png'}")
+        # cols 1…n_show: sensitivity maps (phase → RGB hue, magnitude → value)
+        for c in range(n_show):
+            ax = axes[row, 1 + c]
+            sl = _slice(smaps[c], ax_idx)
+            ax.imshow(_phase_mag_rgb(sl), interpolation="nearest")
+            ax.set_title(f"coil {c}" if row == 0 else "", fontsize=8)
+            ax.axis("off")
 
     fig.tight_layout()
-    fig.savefig(data_dir / "smaps_qc.png", dpi=100)
+    fig.savefig(output_dir / "smaps_qc.png", dpi=120)
     plt.close(fig)
-    print(f"Saved smaps_qc.png -> {data_dir / 'smaps_qc.png'}")
+    print(f"Saved smaps_qc.png -> {output_dir / 'smaps_qc.png'}")
 
 
 if __name__ == "__main__":

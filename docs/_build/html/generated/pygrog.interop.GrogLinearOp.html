@@ -167,7 +167,7 @@
 <li class="toctree-l1 has-children"><a class="reference internal" href="autoexamples/index.html">Examples</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
-<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">Interoperability with mrpro, sigpy and deepinverse</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
 </details></li>
@@ -444,12 +444,13 @@
 <dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
 <p>Wrap a pygrog operator as an <code class="docutils literal notranslate"><span class="pre">mrpro.operators.LinearOperator</span></code>.</p>
 <p>Because mrpro is an optional dependency, the class is built lazily on
-first instantiation so the import of this module does not fail when mrpro
-is not installed.</p>
+first instantiation so importing this module does not fail when mrpro
+is absent.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>op</strong> (<em>SparseFFT-like</em>) – Any operator with <code class="docutils literal notranslate"><span class="pre">forward(kspace)</span> <span class="pre">-&gt;</span> <span class="pre">image</span></code> and
-<code class="docutils literal notranslate"><span class="pre">adjoint(image)</span> <span class="pre">-&gt;</span> <span class="pre">kspace</span></code> methods.</p>
+<code class="docutils literal notranslate"><span class="pre">adjoint(image)</span> <span class="pre">-&gt;</span> <span class="pre">kspace</span></code> methods, plus a <code class="docutils literal notranslate"><span class="pre">natural_shape</span></code>
+attribute whose last axis is the GROG kernel width.</p>
 </dd>
 <dt class="field-even">Raises<span class="colon">:</span></dt>
 <dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#ImportError" title="(in Python v3.14)"><strong>ImportError</strong></a> – If <code class="docutils literal notranslate"><span class="pre">mrpro</span></code> is not installed.</p>
@@ -458,14 +459,13 @@ is not installed.</p>
 <p class="rubric">Examples</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">pygrog.operator</span><span class="w"> </span><span class="kn">import</span> <span class="n">SparseFFT</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">pygrog.interop</span><span class="w"> </span><span class="kn">import</span> <span class="n">GrogLinearOp</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mrpro.algorithms.optimizers</span><span class="w"> </span><span class="kn">import</span> <span class="n">pgd</span>
 
 <span class="n">base</span> <span class="o">=</span> <span class="n">SparseFFT</span><span class="p">(</span><span class="n">plan</span><span class="o">=</span><span class="n">grog</span><span class="o">.</span><span class="n">plan</span><span class="p">,</span> <span class="n">smaps</span><span class="o">=</span><span class="n">smaps</span><span class="p">)</span>
 <span class="n">mrpro_op</span> <span class="o">=</span> <span class="n">GrogLinearOp</span><span class="p">(</span><span class="n">base</span><span class="p">)</span>
-
-<span class="c1"># Use inside mrpro CG reconstruction:</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">mrpro.algorithms</span><span class="w"> </span><span class="kn">import</span> <span class="n">ConjugateGradient</span>
-<span class="n">x0</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">image_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">complex64</span><span class="p">)</span>
-<span class="n">result</span><span class="p">,</span> <span class="o">=</span> <span class="n">ConjugateGradient</span><span class="p">(</span><span class="n">mrpro_op</span><span class="o">.</span><span class="n">H</span> <span class="o">@</span> <span class="n">mrpro_op</span><span class="p">,</span> <span class="n">mrpro_op</span><span class="o">.</span><span class="n">H</span><span class="p">(</span><span class="n">kspace</span><span class="p">)[</span><span class="mi">0</span><span class="p">],</span> <span class="n">x0</span><span class="p">)</span>
+<span class="c1"># mrpro_op now consumes/produces standard</span>
+<span class="c1"># ``(*other, n_coils, k2, k1, k0)`` k-space and ``(*other, z, y, x)``</span>
+<span class="c1"># images, ready for any mrpro algorithm.</span>
 </pre></div>
 </div>
 <p class="rubric">Methods</p>

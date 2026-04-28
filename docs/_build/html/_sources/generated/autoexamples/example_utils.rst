@@ -571,7 +571,7 @@ zero-filled vs NLINV-synthesized central k-space patch.
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 12.489 seconds)
+   **Total running time of the script:** (0 minutes 13.793 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_utils.py:

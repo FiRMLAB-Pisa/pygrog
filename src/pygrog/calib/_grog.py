@@ -36,6 +36,8 @@ class GrogPlan(SimpleNamespace):
     def pre_weights(self) -> "torch.Tensor":
         """``sqrt_weights`` reordered to match :meth:`~pygrog.calib.GrogInterpolator.interpolate` output.
 
+        Returns a flat 1-D tensor of shape ``(n_samples,)``.
+
         Multiply sparse k-space by this factor **once** before an iterative
         reconstruction loop so that
         :class:`~pygrog.operator.SparseFFT` ``.forward`` / ``.adjoint`` satisfy
@@ -321,16 +323,27 @@ class GrogInterpolator:
             gc.collect()
             return None
 
+        # Shape-preserving interpolation: route everything through
+        # ``_sparse_full``.  It detects how many leading batch dims sit in
+        # front of (coils, *spatial) using ``plan.target_idx.shape``.
         sparse = self._sparse_full(data_t)
+
+        # Flatten from (*batch, C, *natural_shape) → (*batch, C, n_samples).
+        # Public API contract: no-batch input → (n_coils, n_samples).
+        nat_ndim = len(self.plan.natural_shape)
+        n_coils = int(sparse.shape[-(nat_ndim + 1)])
+        batch_prefix = sparse.shape[:-(nat_ndim + 1)]
+        sparse_flat = sparse.reshape(*batch_prefix, n_coils, self.plan.n_samples)
 
         if ret_image:
             from ..operator._sparse_fft import SparseFFT
 
             op = SparseFFT(plan=self.plan)
-            # Pre-multiply by plan.pre_weights so that SparseFFT.forward applies
-            # the second sqrt_w factor → full density compensation w = 1/count.
-            pre_w = self.plan.pre_weights.to(sparse.dtype)
-            img_coils = op.forward(sparse * pre_w.unsqueeze(0))
+            # Pre-multiply by plan.pre_weights (n_samples,) so that
+            # SparseFFT.forward applies the second sqrt_w factor → full
+            # density compensation w = 1/count.
+            pre_w = self.plan.pre_weights.to(sparse_flat.dtype)  # (n_samples,)
+            img_coils = op.forward(sparse_flat * pre_w.unsqueeze(0))
             image = img_coils.abs().square().sum(0).sqrt()  # RSS: (*image_shape,)
             gc.collect()
             out = image.numpy() if is_numpy else image
@@ -338,7 +351,7 @@ class GrogInterpolator:
 
         gc.collect()
 
-        out = sparse.numpy() if is_numpy else sparse
+        out = sparse_flat.numpy() if is_numpy else sparse_flat
         return out
 
     def __call__(self, data, shot_index=None, ret_image=False):
@@ -348,47 +361,66 @@ class GrogInterpolator:
     # Core interpolation
     # ------------------------------------------------------------------
     def _sparse_full(self, data: torch.Tensor) -> torch.Tensor:
-        """Interpolate full dataset to sparse Cartesian neighbour samples.
+        """Shape-preserving GROG interpolation.
 
-        data : (coils, ..., npts) where ... matches coords leading dims
-        plan.target_idx : (..., npts, kw) int64
-        plan.weights    : (..., npts, kw) float32
-        _interp_idx     : (..., npts, kw) int64
-        _interp_kernel  : (K, C, C) complex
+        Replicates each non-Cartesian source sample ``kw`` times (one per
+        Cartesian neighbour in the kernel) and applies the pre-computed
+        GRAPPA kernel in-place.  Invalid neighbours (outside the GROG
+        validity window) keep whatever value the kernel produced; their
+        weight is zero in :attr:`~pygrog.calib.GrogPlan.sqrt_weights`, so
+        downstream scatter / gather calls treat them as no-ops.
+
+        Parameters
+        ----------
+        data : torch.Tensor
+            Shape ``(*batch, n_coils, *spatial)`` where ``*spatial`` matches
+            ``plan.target_idx.shape[:-1]``.  Leading ``*batch`` dims are
+            optional.
+
+        Returns
+        -------
+        torch.Tensor
+            Shape ``(*batch, n_coils, *spatial, kw)``.
         """
         plan = self.plan
-        target_idx = torch.as_tensor(plan.target_idx)  # (..., npts, kw)
-        interp_idx = self._interp_idx  # (..., npts, kw)
-        kernel = self._interp_kernel  # (K, C, C)
+        target_idx = torch.as_tensor(plan.target_idx)  # (*spatial, kw)
+        interp_idx = self._interp_idx                  # (*spatial, kw)
+        kernel = self._interp_kernel                   # (K, C, C)
 
-        kw = target_idx.shape[-1]
-        ncoils = data.shape[0]
+        spatial = tuple(int(s) for s in target_idx.shape[:-1])
+        kw = int(target_idx.shape[-1])
+        ncoils_pos = data.ndim - len(spatial) - 1
+        if ncoils_pos < 0:
+            raise ValueError(
+                f"data.ndim={data.ndim} too small for spatial={spatial} (+coils)"
+            )
+        batch_shape = tuple(int(s) for s in data.shape[:ncoils_pos])
+        ncoils = int(data.shape[ncoils_pos])
+        if tuple(int(s) for s in data.shape[ncoils_pos + 1:]) != spatial:
+            raise ValueError(
+                f"data spatial dims {data.shape[ncoils_pos + 1:]} != plan {spatial}"
+            )
 
-        # Flatten all source points: data → (C, N), plan → (N, kw)
-        data_flat = data.reshape(ncoils, -1)  # (C, N)
-        N = data_flat.shape[1]
-        target_flat = target_idx.reshape(-1, kw)  # (N, kw)
-        idx_flat = interp_idx.reshape(-1, kw)  # (N, kw)
+        B = int(np.prod(batch_shape)) if batch_shape else 1
+        N = int(np.prod(spatial))
 
-        # Replicate each source → kw copies: (C, N*kw)
-        data_rep = data_flat.unsqueeze(-1).expand(-1, -1, kw).reshape(ncoils, N * kw)
+        # (B, C, N) → (B*C, N, kw) → (N*kw, B*C) for the in-place C++ kernel,
+        # which expects (N, B, C) layout.
+        data_bcn = data.reshape(B * ncoils, N)
+        data_rep = (
+            data_bcn.unsqueeze(-1).expand(-1, -1, kw).reshape(B * ncoils, N * kw)
+        )
+        # (N*kw, B*C) — interpret B*C as the (batch, coil) flattened axis
+        data_interp = data_rep.T.reshape(N * kw, B, ncoils).contiguous()
 
-        # Flatten indexes
-        idx_1d = idx_flat.reshape(-1)  # (N*kw,)
-        target_1d = target_flat.reshape(-1)  # (N*kw,)
-
-        # Apply GRAPPA kernels: (N*kw, 1, C)
-        data_interp = data_rep.T.unsqueeze(1).contiguous()  # (N*kw, 1, C)
+        idx_1d = interp_idx.reshape(-1)  # (N*kw,)
         _interpolate(data_interp, idx_1d, kernel)
-        data_interp = data_interp[:, 0, :]  # (N*kw, C)
 
-        valid = target_1d >= 0
-        if not valid.any():
-            return torch.zeros(ncoils, 0, dtype=data.dtype, device=data.device)
-
-        # Return raw unweighted sparse samples.  The caller is responsible for
-        # pre-multiplying by sqrt_weights before feeding to SparseFFT.
-        return data_interp[valid].T.contiguous()
+        # (N*kw, B, C) → (B, C, N, kw) → (*batch, C, *spatial, kw)
+        out = data_interp.permute(1, 2, 0).contiguous().reshape(
+            *batch_shape, ncoils, *spatial, kw
+        )
+        return out
 
     def _grid_shot(self, data: torch.Tensor, shot_index: tuple) -> torch.Tensor:
         """Grid a single shot and return its contribution."""
@@ -443,11 +475,18 @@ class GrogInterpolator:
 def _attach_fft_plan(plan, image_shape=None):
     """Compute and attach FFT-related fields to an existing plan namespace.
 
-    Adds: ``image_shape``, ``grid_size``, ``n_samples``, ``indices``,
-    ``sqrt_weights``, ``sort_perm``, ``inv_perm``.
+    Adds: ``image_shape``, ``grid_size``, ``n_samples``, ``natural_shape``,
+    ``indices``, ``sqrt_weights``, ``sort_perm``, ``inv_perm``.
 
-    ``pre_weights`` is a :class:`GrogPlan` ``@property`` (not stored here)
-    that returns ``sqrt_weights[inv_perm]`` on access.
+    Shape-preserving: ALL entries (including those whose ``target_idx == -1``
+    fell outside the GROG validity window) are kept.  Invalid indices are
+    clamped to ``0`` and their weight is set to ``0`` so that scatter writes
+    a harmless zero into grid cell 0.  ``n_samples`` therefore equals
+    ``prod(natural_shape) = prod(*spatial) * kw``.
+
+    ``pre_weights`` is a :class:`GrogPlan` ``@property`` that returns
+    ``sqrt_weights[inv_perm]`` (i.e. weights in natural / interpolate-output
+    order).
     """
     grid_shape = tuple(plan.grid_shape)
     if image_shape is None:
@@ -459,31 +498,36 @@ def _attach_fft_plan(plan, image_shape=None):
 
     grid_size = int(np.prod(grid_shape))
 
-    idx = torch.as_tensor(plan.target_idx).ravel().to(torch.int64)
-    w = torch.as_tensor(plan.weights).ravel().to(torch.float32)
-    sqrt_w = torch.sqrt(w)
+    target_idx = torch.as_tensor(plan.target_idx)
+    weights = torch.as_tensor(plan.weights)
+    natural_shape = tuple(int(s) for s in target_idx.shape)  # (*spatial, kw)
 
-    # Identify valid (non-sentinel) entries
-    valid_mask = idx >= 0
-    valid_idx = idx[valid_mask]
-    valid_w = sqrt_w[valid_mask]
-    n_valid = int(valid_mask.sum())
+    idx = target_idx.ravel().to(torch.int64).clone()
+    w = weights.ravel().to(torch.float32).clone()
+    sqrt_w = torch.sqrt(w.clamp(min=0.0))
 
-    # Sort valid entries by grid index for cache-friendly access
-    sort_order = torch.argsort(valid_idx)
-    sorted_idx = valid_idx[sort_order]
-    sorted_w = valid_w[sort_order]
+    # Out-of-window entries: clamp index to 0, force weight to 0.  After
+    # this, the scatter/gather kernels can treat all positions uniformly.
+    invalid = idx < 0
+    if invalid.any():
+        idx[invalid] = 0
+        sqrt_w[invalid] = 0.0
 
-    # sort_perm / inv_perm are permutations of range(n_valid):
-    # sort_perm[i] = which valid-order sample goes to sorted position i
-    sort_perm = sort_order
-    inv_perm = torch.empty(n_valid, dtype=torch.int64)
-    inv_perm[sort_order] = torch.arange(n_valid)
+    n_total = int(idx.numel())
+
+    # Sort by grid index for cache-friendly scatter; invalid entries end up
+    # contiguously at the front (their clamped index is 0) with zero weight.
+    sort_perm = torch.argsort(idx)
+    sorted_idx = idx[sort_perm]
+    sorted_w = sqrt_w[sort_perm]
+
+    inv_perm = torch.empty(n_total, dtype=torch.int64)
+    inv_perm[sort_perm] = torch.arange(n_total)
 
     plan.image_shape = image_shape
     plan.grid_size = grid_size
-    plan.n_samples = n_valid
-    plan.valid_mask = valid_mask  # bool mask into target_idx.ravel()
+    plan.n_samples = n_total
+    plan.natural_shape = natural_shape  # (*spatial, kw)
     plan.indices = sorted_idx
     plan.sqrt_weights = sorted_w
     plan.sort_perm = sort_perm

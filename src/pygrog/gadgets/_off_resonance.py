@@ -93,30 +93,68 @@ class OffResonanceCorrection:
         readout_time_np = _to_np(readout_time, np.float32)
         r2star_np = _to_np(r2star_map, np.float32) if r2star_map is not None else None
 
+        # Preserve the original time-axis layout so we can broadcast B against
+        # ``base.natural_shape`` at apply time without materialising it.
+        self._time_shape = tuple(int(s) for s in readout_time_np.shape)
+
         if mask is None:
             mask = np.ones(field_map_np.shape, dtype=bool)
 
         complex_fmap = get_complex_fieldmap_rad(field_map_np, r2star_np)
 
         factorize = get_orc_factorization(method)
+        # The temporal LS problem depends only on the per-sample time *values*,
+        # not on their tensor shape, so we ravel before factorising.
         B_np, C_np, _ = factorize(
             field_map=complex_fmap,
-            readout_time=readout_time_np,
+            readout_time=readout_time_np.ravel(),
             mask=mask,
             L=n_components,
             n_bins=n_bins,
             lazy=False,
         )
 
-        # B: (n_samples, L) complex64 — temporal basis
+        # B: (prod(time_shape), L) → reshape to (*time_shape, L) for natural-shape
+        #    broadcasting against ``base.natural_shape``.
         # C: (L, *spatial) complex64 — spatial coefficients
-        self._B = torch.as_tensor(np.asarray(B_np, dtype=np.complex64))
+        B_t = torch.as_tensor(np.asarray(B_np, dtype=np.complex64))
+        L = int(B_t.shape[-1])
+        self._B = B_t.reshape(*self._time_shape, L)
         self._C = torch.as_tensor(np.asarray(C_np, dtype=np.complex64))
 
     @property
     def n_components(self) -> int:
         """Number of basis components ``L``."""
-        return self._B.shape[1]
+        return self._B.shape[-1]
+
+    def _b_view(self, B: torch.Tensor) -> torch.Tensor:
+        """Reshape ``B`` to broadcast against ``base.natural_shape``.
+
+        Returns a strided view of shape ``(*nat_with_singletons, L)`` where
+        ``time_shape`` occupies a contiguous slice of ``natural_shape`` and the
+        other axes are singletons.  No memory is materialised.
+        """
+        nat = tuple(int(s) for s in self.sparse_fft.natural_shape)
+        ts = self._time_shape
+        L = int(B.shape[-1])
+        # Find the first contiguous slice of nat that matches ts.
+        start = -1
+        for i in range(len(nat) - len(ts) + 1):
+            if nat[i : i + len(ts)] == ts:
+                start = i
+                break
+        if start < 0:
+            raise ValueError(
+                f"readout_time shape {ts} is not a contiguous slice of "
+                f"base.natural_shape {nat}; cannot broadcast B."
+            )
+        view_shape = (
+            (1,) * start
+            + ts
+            + (1,) * (len(nat) - start - len(ts))
+            + (L,)
+        )
+        return B.view(view_shape)
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         """Forward operator: image → sparse k-space (with off-resonance).
@@ -131,20 +169,23 @@ class OffResonanceCorrection:
         Returns
         -------
         torch.Tensor
-            Shape ``(n_coils, n_samples)``.
+            Shape ``(n_coils, *natural_shape)``.
         """
         device = image.device
-        B = self._B.to(device, dtype=image.dtype)  # (n_samples, L)
+        B = self._B.to(device, dtype=image.dtype)
         C = self._C.to(device, dtype=image.dtype)  # (L, *spatial)
+
+        # Strided view of B → (*nat_with_singletons, L); move L to the front.
+        Bv = self._b_view(B).movedim(-1, 0)         # (L, *nat_with_singletons)
 
         # Pre-weight image per component: (L, n_coils, *spatial)
         weighted = C.unsqueeze(1) * image.unsqueeze(0)
-        # NUFFT per component → (L, n_coils, n_samples)
+        # NUFFT per component → (n_coils, *natural_shape); stack over L.
         ksps = torch.stack(
             [self.sparse_fft.adjoint(weighted[l]) for l in range(self.n_components)]
-        )
-        # Weighted sum: B.T is (L, n_samples), broadcast over coils
-        return (B.T.unsqueeze(1) * ksps).sum(0)
+        )                                            # (L, n_coils, *nat)
+        # Broadcast-multiply by B (strided) and sum over L.
+        return (Bv.unsqueeze(1) * ksps).sum(0)
 
     def adjoint(self, kspace: torch.Tensor) -> torch.Tensor:
         """Adjoint operator: sparse k-space → image (with off-resonance correction).
@@ -154,7 +195,8 @@ class OffResonanceCorrection:
         Parameters
         ----------
         kspace : torch.Tensor
-            Shape ``(n_coils, n_samples)``.
+            Shape ``(n_coils, *natural_shape)`` (or any shape broadcastable to it
+            after reshape).
 
         Returns
         -------
@@ -162,11 +204,15 @@ class OffResonanceCorrection:
             Shape ``(n_coils, *spatial)``.
         """
         device = kspace.device
-        B = self._B.to(device, dtype=kspace.dtype)  # (n_samples, L)
-        C = self._C.to(device, dtype=kspace.dtype)  # (L, *spatial)
+        nat = tuple(int(s) for s in self.sparse_fft.natural_shape)
+        kspace_nat = kspace.reshape(kspace.shape[0], *nat)
 
-        # Pre-weight k-space per component: (L, n_coils, n_samples)
-        weighted = kspace.unsqueeze(0) * B.conj().T.unsqueeze(1)
+        B = self._B.to(device, dtype=kspace.dtype)
+        C = self._C.to(device, dtype=kspace.dtype)  # (L, *spatial)
+        Bv = self._b_view(B).movedim(-1, 0)         # (L, *nat_with_singletons)
+
+        # Pre-weight k-space per component via broadcasting (no expand+contiguous).
+        weighted = kspace_nat.unsqueeze(0) * Bv.conj().unsqueeze(1)  # (L, n_coils, *nat)
         # NUFFT per component → (L, n_coils, *spatial)
         imgs = torch.stack(
             [self.sparse_fft.forward(weighted[l]) for l in range(self.n_components)]
@@ -187,6 +233,8 @@ def with_off_resonance(
     method="svd",
     L=-1,
     n_bins=1024,
+    *,
+    toeplitz=None,
 ):
     """Wrap a SparseFFT operator with B0 inhomogeneity compensation.
 
@@ -245,7 +293,7 @@ def with_off_resonance(
     B = np.asarray(B, dtype=np.complex64)
     C = np.asarray(C, dtype=np.complex64)
 
-    return OffResonanceSparseFFT(base_op, B, C)
+    return OffResonanceSparseFFT(base_op, B, C, toeplitz=toeplitz)
 
 
 class OffResonanceSparseFFT:
@@ -267,9 +315,12 @@ class OffResonanceSparseFFT:
         Temporal basis, shape ``(n_samples, L)``.
     C : torch.Tensor, complex64
         Spatial interpolators, shape ``(L, *image_shape)``.
+    toeplitz : bool | None, optional
+        Use Toeplitz embedding for :meth:`normal`.  ``None`` inherits
+        from ``base_op.toeplitz``.
     """
 
-    def __init__(self, base_op, B, C):
+    def __init__(self, base_op, B, C, *, toeplitz=None):
         self._base = base_op
         self.B = torch.as_tensor(B)  # (n_samples, L)
         self.C = torch.as_tensor(C)  # (L, *image_shape)
@@ -279,6 +330,12 @@ class OffResonanceSparseFFT:
         self.grid_shape = base_op.grid_shape
         self.image_shape = base_op.image_shape
         self.smaps = base_op.smaps
+
+        # Toeplitz flag inherits from base unless overridden.
+        if toeplitz is None:
+            toeplitz = bool(getattr(base_op, "toeplitz", False))
+        self.toeplitz = bool(toeplitz)
+        self._toep_op = None  # lazily built
 
     @property
     def n_samples(self):
@@ -374,6 +431,13 @@ class OffResonanceSparseFFT:
 
     def normal(self, image):
         """Normal operator: ``A^H A x``."""
+        if self.toeplitz:
+            if self._toep_op is None:
+                from .._toep._orc_toep import OffResonanceToeplitzOp
+                self._toep_op = OffResonanceToeplitzOp(
+                    self, device=self._base.device,
+                )
+            return self._toep_op(image)
         return self.forward(self.adjoint(image))
 
     def __call__(self, x, adjoint=False):

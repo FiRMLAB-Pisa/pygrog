@@ -138,12 +138,14 @@ set(SOURCES
     csrc/torch/sparse_ops.cpp
     csrc/torch/sparse_ops_avx2.cpp
     csrc/torch/sparse_ops_avx512.cpp
+    csrc/torch/toep_psf.cpp
 )
 
 if(USE_CUDA)
     list(APPEND SOURCES
         csrc/torch/grog_interp_cuda.cu
         csrc/torch/sparse_ops_cuda.cu
+        csrc/torch/toep_psf_cuda.cu
     )
 endif()
 

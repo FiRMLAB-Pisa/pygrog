@@ -12,8 +12,13 @@ the gradient of a linear operator is its adjoint, so
   backward(measure)      = backproject  (A^H)
   backward(backproject)  = measure      (A)
 
-These functions are the single source of truth for gradient propagation
-used by both the deepinv and mrpro adapters.
+The functions are also compatible with the :mod:`torch.func` transforms
+(``grad``, ``jacrev``, ``vmap``) that mrpro's ``pgd`` and similar
+algorithms rely on.  Because our forward path bottoms out in C++ kernels
+that cannot read from functorch wrapper tensors (``GradTrackingTensor``,
+``BatchedTensor``), the backward unwraps incoming cotangents to plain
+tensors before invoking the kernel and re-wraps the result so the calling
+transform sees the expected layered tensor.
 """
 
 __all__ = ["grog_backproject", "grog_measure"]
@@ -22,32 +27,93 @@ import torch
 from torch.autograd import Function
 
 
+# --- functorch wrapper helpers --------------------------------------------
+def _unwrap_functorch(t: torch.Tensor):
+    """Strip ``GradTrackingTensor`` / ``BatchedTensor`` wrappers from ``t``.
+
+    Returns ``(plain_tensor, layers)`` where ``layers`` is the ordered list
+    of wrappers that were peeled off, suitable for :func:`_rewrap_functorch`.
+    """
+    from torch._C import _functorch as _ft
+
+    layers: list[tuple[str, int, int | None]] = []
+    while True:
+        if _ft.is_gradtrackingtensor(t):
+            level = _ft.maybe_get_level(t)
+            t = _ft._unwrap_for_grad(t, level)
+            layers.append(("grad", level, None))
+        elif _ft.is_batchedtensor(t):
+            level = _ft.maybe_get_level(t)
+            bdim = _ft.maybe_get_bdim(t)
+            t = _ft.get_unwrapped(t)
+            layers.append(("vmap", level, bdim))
+        else:
+            return t, layers
+
+
+def _rewrap_functorch(t: torch.Tensor, layers) -> torch.Tensor:
+    """Re-apply the wrapper stack returned by :func:`_unwrap_functorch`."""
+    from torch._C import _functorch as _ft
+
+    for kind, level, bdim in reversed(layers):
+        if kind == "grad":
+            t = _ft._wrap_for_grad(t, level)
+        else:
+            t = _ft._add_batch_dim(t, bdim, level)
+    return t
+
+
 class _GrogMeasureFn(Function):
     """A: image → k-space.  Backward = A^H (SparseFFT.forward)."""
 
+    generate_vmap_rule = True
+
     @staticmethod
-    def forward(ctx, x: torch.Tensor, op) -> torch.Tensor:
-        ctx.op = op
+    def forward(x: torch.Tensor, op) -> torch.Tensor:
         return op.adjoint(x)  # SparseFFT.adjoint  ≡  forward NUFFT  ≡  A
 
     @staticmethod
+    def setup_context(ctx, inputs, output):
+        _, op = inputs
+        ctx.op = op
+
+    @staticmethod
     def backward(ctx, grad: torch.Tensor):
-        # gradient w.r.t. x; no gradient for op (non-tensor)
-        return ctx.op.forward(grad), None  # A^H = SparseFFT.forward
+        # Unwrap any functorch wrappers (torch.func.grad / vmap) and pop the
+        # interpreter stack so that buffers allocated inside the C++ kernel
+        # are not lifted to the active functorch level.
+        from torch._functorch.pyfunctorch import temporarily_clear_interpreter_stack
+
+        plain, _ = _unwrap_functorch(grad)
+        with temporarily_clear_interpreter_stack():
+            out = ctx.op.forward(plain.contiguous())  # A^H = SparseFFT.forward
+        return out, None
 
 
 class _GrogBackprojectFn(Function):
     """A^H: k-space → image.  Backward = A (SparseFFT.adjoint)."""
 
+    generate_vmap_rule = True
+
     @staticmethod
-    def forward(ctx, y: torch.Tensor, op) -> torch.Tensor:
-        ctx.op = op
+    def forward(y: torch.Tensor, op) -> torch.Tensor:
         return op.forward(y)  # SparseFFT.forward  ≡  adjoint NUFFT  ≡  A^H
 
     @staticmethod
+    def setup_context(ctx, inputs, output):
+        y, op = inputs
+        ctx.op = op
+        ctx.y_shape = y.shape
+
+    @staticmethod
     def backward(ctx, grad: torch.Tensor):
-        # gradient w.r.t. y; no gradient for op (non-tensor)
-        return ctx.op.adjoint(grad), None  # A = SparseFFT.adjoint
+        from torch._functorch.pyfunctorch import temporarily_clear_interpreter_stack
+
+        plain, _ = _unwrap_functorch(grad)
+        with temporarily_clear_interpreter_stack():
+            out = ctx.op._adjoint_flat(plain.contiguous())  # always (..., n_samples) flat
+            out = out.reshape(ctx.y_shape)                  # A = SparseFFT.adjoint
+        return out, None
 
 
 def grog_measure(x: torch.Tensor, op) -> torch.Tensor:

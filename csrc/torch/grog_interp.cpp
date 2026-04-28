@@ -27,21 +27,83 @@ torch::Tensor grog_interpolate_cuda(
 #endif
 
 // ---------------------------------------------------------------------------
-// CPU path: ATen batched matmul (dispatches to BLAS/MKL)
+// CPU path: parallel naive small-C matvec (no (N,C,C) gather, no BLAS call)
+//
+// For typical MRI workloads C ≤ 16 (often ≤ 8 after coil compression), so a
+// single (C, C) × (C,) matvec fits in registers — far faster than calling a
+// BLAS GEMM that pays its dispatch cost per sample.  Each output element
+//   out[n, b, co] = Σ_ci kernel[indexes[n], co, ci] * data[n, b, ci]
+// is computed in-place; no (N, C, C) intermediate from index_select is
+// materialised.
 // ---------------------------------------------------------------------------
+template <typename T>
+static void grog_interpolate_cpu_impl(
+    c10::complex<T>*       out,        // (N, B, C)
+    const c10::complex<T>* inp,        // (N, B, C)
+    const int64_t*         indexes,    // (N,)
+    const c10::complex<T>* kernel,     // (K, C, C)
+    int64_t N, int64_t B, int64_t C, int64_t /*K_count*/)
+{
+    const int64_t CC = C * C;
+    const int64_t NB = N * B;
+
+    #pragma omp parallel for schedule(static)
+    for (int64_t nb = 0; nb < NB; ++nb) {
+        const int64_t n = nb / B;
+        const int64_t k = indexes[n];
+        // indexes are pre-clamped by _attach_fft_plan / calc_interp_table,
+        // so 0 <= k < K_count is guaranteed by construction.
+        const c10::complex<T>* Kmat = kernel + k * CC;       // (C, C) row-major
+        const c10::complex<T>* src  = inp    + nb * C;       // (C,)
+        c10::complex<T>*       dst  = out    + nb * C;       // (C,)
+
+        // Naive (C, C) × (C,) matvec — fully unrolled by the compiler for
+        // small C; for larger C this is still ≤ a few cache lines and beats
+        // a BLAS dispatch per sample.
+        for (int64_t co = 0; co < C; ++co) {
+            const c10::complex<T>* Krow = Kmat + co * C;
+            c10::complex<T> acc(T(0), T(0));
+            #pragma omp simd
+            for (int64_t ci = 0; ci < C; ++ci) {
+                acc += Krow[ci] * src[ci];
+            }
+            dst[co] = acc;
+        }
+    }
+}
+
 static torch::Tensor grog_interpolate_cpu(
     const torch::Tensor& data,      // (N, B, C)
     const torch::Tensor& indexes,   // (N,) int64
     const torch::Tensor& kernel)    // (K, C, C)
 {
-    // Gather per-sample kernels: (N, C, C)
-    auto K = kernel.index_select(0, indexes);
+    auto out = torch::empty_like(data);
 
-    // Batched matmul with broadcasting over B:
-    //   K.unsqueeze(1) : (N, 1, C, C)
-    //   data.unsqueeze(-1) : (N, B, C, 1)
-    //   result : (N, B, C, 1) → squeeze → (N, B, C)
-    return torch::matmul(K.unsqueeze(1), data.unsqueeze(-1)).squeeze(-1);
+    const int64_t N       = data.size(0);
+    const int64_t B       = data.size(1);
+    const int64_t C       = data.size(2);
+    const int64_t K_count = kernel.size(0);
+
+    const auto dtype = data.scalar_type();
+    if (dtype == at::ScalarType::ComplexFloat) {
+        grog_interpolate_cpu_impl<float>(
+            reinterpret_cast<c10::complex<float>*>(out.data_ptr()),
+            reinterpret_cast<const c10::complex<float>*>(data.data_ptr()),
+            indexes.data_ptr<int64_t>(),
+            reinterpret_cast<const c10::complex<float>*>(kernel.data_ptr()),
+            N, B, C, K_count);
+    } else if (dtype == at::ScalarType::ComplexDouble) {
+        grog_interpolate_cpu_impl<double>(
+            reinterpret_cast<c10::complex<double>*>(out.data_ptr()),
+            reinterpret_cast<const c10::complex<double>*>(data.data_ptr()),
+            indexes.data_ptr<int64_t>(),
+            reinterpret_cast<const c10::complex<double>*>(kernel.data_ptr()),
+            N, B, C, K_count);
+    } else {
+        TORCH_CHECK(false,
+            "grog_interpolate_cpu: expected ComplexFloat or ComplexDouble, got ", dtype);
+    }
+    return out;
 }
 
 // ---------------------------------------------------------------------------

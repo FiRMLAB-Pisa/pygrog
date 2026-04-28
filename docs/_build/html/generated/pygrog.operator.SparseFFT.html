@@ -167,7 +167,7 @@
 <li class="toctree-l1 has-children"><a class="reference internal" href="autoexamples/index.html">Examples</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
-<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">Interoperability with mrpro, sigpy and deepinverse</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
 </details></li>
@@ -426,6 +426,7 @@
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._scatter"><code class="docutils literal notranslate"><span class="pre">SparseFFT._scatter()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.forward"><code class="docutils literal notranslate"><span class="pre">SparseFFT.forward()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.adjoint"><code class="docutils literal notranslate"><span class="pre">SparseFFT.adjoint()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._adjoint_flat"><code class="docutils literal notranslate"><span class="pre">SparseFFT._adjoint_flat()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.__call__"><code class="docutils literal notranslate"><span class="pre">SparseFFT.__call__()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._scatter_ifft_crop_batch"><code class="docutils literal notranslate"><span class="pre">SparseFFT._scatter_ifft_crop_batch()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._fft_pad_gather_batch"><code class="docutils literal notranslate"><span class="pre">SparseFFT._fft_pad_gather_batch()</span></code></a></li>
@@ -507,10 +508,11 @@ pipelining is enabled.</p></li>
 <dd><p>Sparse k-space to image.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>sparse_kspace</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – <code class="docutils literal notranslate"><span class="pre">(n_coils,</span> <span class="pre">n_samples)</span></code> complex.</p>
+<dd class="field-odd"><p><strong>sparse_kspace</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – <code class="docutils literal notranslate"><span class="pre">(n_coils,</span> <span class="pre">*natural_shape)</span></code> or <code class="docutils literal notranslate"><span class="pre">(n_coils,</span> <span class="pre">n_samples)</span></code> (legacy),
+or with a leading batch dim. <code class="docutils literal notranslate"><span class="pre">prod(natural_shape)</span> <span class="pre">==</span> <span class="pre">n_samples</span></code>.</p>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">(*image_shape,)</span></code> combined image (complex).</p>
+<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">(*image_shape,)</span></code> or <code class="docutils literal notranslate"><span class="pre">(*lead,</span> <span class="pre">*image_shape)</span></code> combined image.</p>
 </dd>
 <dt class="field-odd">Return type<span class="colon">:</span></dt>
 <dd class="field-odd"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)">torch.Tensor</a></p>
@@ -531,10 +533,12 @@ device.</p>
 <dd><p>Image to sparse k-space.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>image</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – <code class="docutils literal notranslate"><span class="pre">(*image_shape,)</span></code> complex.</p>
+<dd class="field-odd"><p><strong>image</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – <code class="docutils literal notranslate"><span class="pre">(*image_shape,)</span></code> or <code class="docutils literal notranslate"><span class="pre">(T,</span> <span class="pre">*image_shape)</span></code> complex.
+When smaps are absent, single-frame input is <code class="docutils literal notranslate"><span class="pre">(n_coils,</span> <span class="pre">*image_shape)</span></code>
+and batched input is <code class="docutils literal notranslate"><span class="pre">(T,</span> <span class="pre">n_coils,</span> <span class="pre">*image_shape)</span></code>.</p>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">(n_coils,</span> <span class="pre">n_samples)</span></code> complex.</p>
+<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">(n_coils,</span> <span class="pre">*natural_shape)</span></code> (or with leading batch dim).</p>
 </dd>
 <dt class="field-odd">Return type<span class="colon">:</span></dt>
 <dd class="field-odd"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)">torch.Tensor</a></p>
@@ -547,6 +551,27 @@ argument to torch tensors, but will respect the device they are allocated
 on. The outputs will be converted back to the original array module and
 device.</p>
 </div>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="pygrog.operator.SparseFFT._adjoint_flat">
+<span class="sig-name descname"><span class="pre">_adjoint_flat</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/operator/_sparse_fft.html#SparseFFT._adjoint_flat"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.operator.SparseFFT._adjoint_flat" title="Link to this definition">#</a></dt>
+<dd><p>Flat-output adjoint: returns (…, n_samples).</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This function uses <code class="docutils literal notranslate"><span class="pre">torch</span></code> internally, and will convert all its array
+argument to torch tensors, but will respect the device they are allocated
+on. The outputs will be converted back to the original array module and
+device.</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>image</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a></p>
+</dd>
+</dl>
 </dd></dl>
 
 <dl class="py method">
@@ -684,6 +709,7 @@ Reuses the <em>padded</em> buffer to avoid a fresh allocation per coil.</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._scatter"><code class="docutils literal notranslate"><span class="pre">SparseFFT._scatter()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.forward"><code class="docutils literal notranslate"><span class="pre">SparseFFT.forward()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.adjoint"><code class="docutils literal notranslate"><span class="pre">SparseFFT.adjoint()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._adjoint_flat"><code class="docutils literal notranslate"><span class="pre">SparseFFT._adjoint_flat()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.__call__"><code class="docutils literal notranslate"><span class="pre">SparseFFT.__call__()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._scatter_ifft_crop_batch"><code class="docutils literal notranslate"><span class="pre">SparseFFT._scatter_ifft_crop_batch()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._fft_pad_gather_batch"><code class="docutils literal notranslate"><span class="pre">SparseFFT._fft_pad_gather_batch()</span></code></a></li>

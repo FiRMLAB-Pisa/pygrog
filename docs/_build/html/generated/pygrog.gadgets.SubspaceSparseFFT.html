@@ -167,7 +167,7 @@
 <li class="toctree-l1 has-children"><a class="reference internal" href="autoexamples/index.html">Examples</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
-<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">Interoperability with mrpro, sigpy and deepinverse</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
 </details></li>
@@ -423,8 +423,8 @@
                 <ul class="visible nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT.forward"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT.forward()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT.adjoint"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT.adjoint()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT.normal"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT.normal()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._adjoint_impl"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._adjoint_impl()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._forward_impl"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._forward_impl()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT.__call__"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT.__call__()</span></code></a></li>
 </ul>
 </li>
@@ -443,14 +443,35 @@
 <h1>SubspaceSparseFFT<a class="headerlink" href="#subspacesparsefft" title="Link to this heading">#</a></h1>
 <dl class="py class">
 <dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT">
-<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">pygrog.gadgets.</span></span><span class="sig-name descname"><span class="pre">SubspaceSparseFFT</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">base_op</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subspace_basis</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT" title="Link to this definition">#</a></dt>
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">pygrog.gadgets.</span></span><span class="sig-name descname"><span class="pre">SubspaceSparseFFT</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">base_op</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subspace_basis</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">encoding_axis</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">-4</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT" title="Link to this definition">#</a></dt>
 <dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
-<p>SparseFFT with low-rank subspace projection.</p>
+<p>SparseFFT with low-rank subspace projection (loop-fused).</p>
+<dl class="simple">
+<dt>Adjoint (sparse → image), per coil:</dt><dd><ol class="arabic simple">
+<li><p>weight by <code class="docutils literal notranslate"><span class="pre">sqrt_w</span></code> once on the input;</p></li>
+<li><p>for each <code class="docutils literal notranslate"><span class="pre">k</span></code>: multiply by <code class="docutils literal notranslate"><span class="pre">basis[k]</span></code> along the T axis,
+scatter into the per-K oversampled grid;</p></li>
+<li><p>ONE batched K-IFFT + center-crop;</p></li>
+<li><p>fused FMA with <code class="docutils literal notranslate"><span class="pre">smaps[c].conj()</span></code> into the <code class="docutils literal notranslate"><span class="pre">(K,</span> <span class="pre">*image)</span></code> accumulator.</p></li>
+</ol>
+</dd>
+<dt>Forward (image → sparse), per coil:</dt><dd><ol class="arabic simple">
+<li><p>multiply <code class="docutils literal notranslate"><span class="pre">coeffs</span></code> by <code class="docutils literal notranslate"><span class="pre">smaps[c]</span></code>;</p></li>
+<li><p>ONE batched K-FFT + center-pad;</p></li>
+<li><p>for each <code class="docutils literal notranslate"><span class="pre">k</span></code>: gather; accumulate <code class="docutils literal notranslate"><span class="pre">basis.conj()[k]</span> <span class="pre">*</span> <span class="pre">gathered</span></code>
+into the per-coil <code class="docutils literal notranslate"><span class="pre">(*natural)</span></code> accumulator;</p></li>
+<li><p>write into the output coil slot.</p></li>
+</ol>
+</dd>
+</dl>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>base_op</strong> (<em>SparseFFT-like</em>) – Underlying operator.</p></li>
-<li><p><strong>subspace_basis</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – <code class="docutils literal notranslate"><span class="pre">(K,</span> <span class="pre">T)</span></code> basis.  Columns span the temporal subspace.</p></li>
+<li><p><strong>base_op</strong> (<a class="reference internal" href="pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT" title="pygrog.operator.SparseFFT"><em>SparseFFT</em></a>) – Must have a multi-dim <code class="docutils literal notranslate"><span class="pre">natural_shape</span></code> covering the sparse layout
+(e.g. <code class="docutils literal notranslate"><span class="pre">(T,</span> <span class="pre">k1,</span> <span class="pre">k0,</span> <span class="pre">kw)</span></code>) and SENSE maps (<code class="docutils literal notranslate"><span class="pre">smaps</span></code>) attached.</p></li>
+<li><p><strong>subspace_basis</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – <code class="docutils literal notranslate"><span class="pre">(K,</span> <span class="pre">T)</span></code> complex basis.</p></li>
+<li><p><strong>encoding_axis</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Axis (in full sparse layout) of the temporal dimension <code class="docutils literal notranslate"><span class="pre">T</span></code>.
+Default <code class="docutils literal notranslate"><span class="pre">-4</span></code> (last four axes are natural <code class="docutils literal notranslate"><span class="pre">(T,</span> <span class="pre">k1,</span> <span class="pre">k0,</span> <span class="pre">kw)</span></code>).</p></li>
 </ul>
 </dd>
 </dl>
@@ -460,14 +481,14 @@
 <tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></p></td>
 <td><p></p></td>
 </tr>
-<tr class="row-even"><td><p><a class="reference internal" href="#pygrog.gadgets.SubspaceSparseFFT.adjoint" title="pygrog.gadgets.SubspaceSparseFFT.adjoint"><code class="xref py py-obj docutils literal notranslate"><span class="pre">adjoint</span></code></a></p></td>
-<td><p>Subspace coefficient images → time-domain k-space.</p></td>
+<tr class="row-even"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">adjoint</span></code></p></td>
+<td><p></p></td>
 </tr>
 <tr class="row-odd"><td><p><a class="reference internal" href="#pygrog.gadgets.SubspaceSparseFFT.forward" title="pygrog.gadgets.SubspaceSparseFFT.forward"><code class="xref py py-obj docutils literal notranslate"><span class="pre">forward</span></code></a></p></td>
-<td><p>Time-domain k-space → subspace coefficient images.</p></td>
+<td><p>Sparse → subspace coefficient images.</p></td>
 </tr>
-<tr class="row-even"><td><p><a class="reference internal" href="#pygrog.gadgets.SubspaceSparseFFT.normal" title="pygrog.gadgets.SubspaceSparseFFT.normal"><code class="xref py py-obj docutils literal notranslate"><span class="pre">normal</span></code></a></p></td>
-<td><p>Normal operator: <code class="docutils literal notranslate"><span class="pre">A^H</span> <span class="pre">A</span> <span class="pre">x</span></code>.</p></td>
+<tr class="row-even"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">normal</span></code></p></td>
+<td><p></p></td>
 </tr>
 </tbody>
 </table>
@@ -475,41 +496,46 @@
 <dl class="py method">
 <dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT.forward">
 <span class="sig-name descname"><span class="pre">forward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sparse_kspace</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT.forward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT.forward" title="Link to this definition">#</a></dt>
-<dd><p>Time-domain k-space → subspace coefficient images.</p>
+<dd><p>Sparse → subspace coefficient images. (named <code class="docutils literal notranslate"><span class="pre">forward</span></code> to match
+the SparseFFT convention where <code class="docutils literal notranslate"><span class="pre">forward</span></code> is sparse → image.)</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>sparse_kspace</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – <code class="docutils literal notranslate"><span class="pre">(T,</span> <span class="pre">n_coils,</span> <span class="pre">n_samples)</span></code> complex.</p>
+<dd class="field-odd"><p><strong>sparse_kspace</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a>)</p>
 </dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">(K,</span> <span class="pre">*image_shape)</span></code> subspace coefficient images.</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)">torch.Tensor</a></p>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a></p>
 </dd>
 </dl>
 </dd></dl>
 
 <dl class="py method">
-<dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT.adjoint">
-<span class="sig-name descname"><span class="pre">adjoint</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">coeffs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT.adjoint"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT.adjoint" title="Link to this definition">#</a></dt>
-<dd><p>Subspace coefficient images → time-domain k-space.</p>
+<dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT._adjoint_impl">
+<span class="sig-name descname"><span class="pre">_adjoint_impl</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sparse_kspace</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT._adjoint_impl"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT._adjoint_impl" title="Link to this definition">#</a></dt>
+<dd><p>Sparse (…, C, <a href="#id1"><span class="problematic" id="id2">*</span></a>natural) → coefficients (K, <a href="#id3"><span class="problematic" id="id4">*</span></a>image_shape).</p>
+<p>Input may have any number of leading batch dims with product 1
+(we squeeze them).  Output has no batch dim.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>coeffs</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – <code class="docutils literal notranslate"><span class="pre">(K,</span> <span class="pre">*image_shape)</span></code> complex.</p>
+<dd class="field-odd"><p><strong>sparse_kspace</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a>)</p>
 </dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">(T,</span> <span class="pre">n_coils,</span> <span class="pre">n_samples)</span></code> complex.</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)">torch.Tensor</a></p>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a></p>
 </dd>
 </dl>
 </dd></dl>
 
 <dl class="py method">
-<dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT.normal">
-<span class="sig-name descname"><span class="pre">normal</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">coeffs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT.normal"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT.normal" title="Link to this definition">#</a></dt>
-<dd><p>Normal operator: <code class="docutils literal notranslate"><span class="pre">A^H</span> <span class="pre">A</span> <span class="pre">x</span></code>.</p>
+<dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT._forward_impl">
+<span class="sig-name descname"><span class="pre">_forward_impl</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">coeffs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT._forward_impl"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT._forward_impl" title="Link to this definition">#</a></dt>
+<dd><p>Coefficients (K, <a href="#id5"><span class="problematic" id="id6">*</span></a>image_shape) → sparse (1, C, <a href="#id7"><span class="problematic" id="id8">*</span></a>natural).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>coeffs</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a></p>
+</dd>
+</dl>
 </dd></dl>
 
 <dl class="py method">
@@ -571,8 +597,8 @@
     <ul class="visible nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT.forward"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT.forward()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT.adjoint"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT.adjoint()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT.normal"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT.normal()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._adjoint_impl"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._adjoint_impl()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._forward_impl"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._forward_impl()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT.__call__"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT.__call__()</span></code></a></li>
 </ul>
 </li>

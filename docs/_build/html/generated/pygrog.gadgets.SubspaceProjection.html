@@ -167,7 +167,7 @@
 <li class="toctree-l1 has-children"><a class="reference internal" href="autoexamples/index.html">Examples</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
-<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">Interoperability with mrpro, sigpy and deepinverse</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
 </details></li>
@@ -421,13 +421,7 @@
             </div>
             <nav aria-label="Page">
                 <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceProjection"><code class="docutils literal notranslate"><span class="pre">SubspaceProjection</span></code></a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceProjection.fit"><code class="docutils literal notranslate"><span class="pre">SubspaceProjection.fit()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceProjection.basis"><code class="docutils literal notranslate"><span class="pre">SubspaceProjection.basis</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceProjection.forward"><code class="docutils literal notranslate"><span class="pre">SubspaceProjection.forward()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceProjection.adjoint"><code class="docutils literal notranslate"><span class="pre">SubspaceProjection.adjoint()</span></code></a></li>
-</ul>
-</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceProjection"><code class="docutils literal notranslate"><span class="pre">SubspaceProjection</span></code></a></li>
 </ul>
             </nav>
         </div>
@@ -459,14 +453,14 @@ leading <code class="docutils literal notranslate"><span class="pre">n_component
 <tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">__init__</span></code></p></td>
 <td><p></p></td>
 </tr>
-<tr class="row-even"><td><p><a class="reference internal" href="#pygrog.gadgets.SubspaceProjection.adjoint" title="pygrog.gadgets.SubspaceProjection.adjoint"><code class="xref py py-obj docutils literal notranslate"><span class="pre">adjoint</span></code></a></p></td>
-<td><p>Expand subspace coefficients back to frame domain.</p></td>
+<tr class="row-even"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">adjoint</span></code></p></td>
+<td><p></p></td>
 </tr>
-<tr class="row-odd"><td><p><a class="reference internal" href="#pygrog.gadgets.SubspaceProjection.fit" title="pygrog.gadgets.SubspaceProjection.fit"><code class="xref py py-obj docutils literal notranslate"><span class="pre">fit</span></code></a></p></td>
-<td><p>Compute temporal basis from calibration data.</p></td>
+<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">fit</span></code></p></td>
+<td><p></p></td>
 </tr>
-<tr class="row-even"><td><p><a class="reference internal" href="#pygrog.gadgets.SubspaceProjection.forward" title="pygrog.gadgets.SubspaceProjection.forward"><code class="xref py py-obj docutils literal notranslate"><span class="pre">forward</span></code></a></p></td>
-<td><p>Project multi-frame data onto subspace.</p></td>
+<tr class="row-even"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">forward</span></code></p></td>
+<td><p></p></td>
 </tr>
 </tbody>
 </table>
@@ -474,69 +468,12 @@ leading <code class="docutils literal notranslate"><span class="pre">n_component
 <p class="rubric">Attributes</p>
 <div class="pst-scrollable-table-container"><table class="autosummary longtable table">
 <tbody>
-<tr class="row-odd"><td><p><a class="reference internal" href="#pygrog.gadgets.SubspaceProjection.basis" title="pygrog.gadgets.SubspaceProjection.basis"><code class="xref py py-obj docutils literal notranslate"><span class="pre">basis</span></code></a></p></td>
-<td><p>Temporal basis matrix of shape <code class="docutils literal notranslate"><span class="pre">(n_components,</span> <span class="pre">n_frames)</span></code>.</p></td>
+<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">basis</span></code></p></td>
+<td><p></p></td>
 </tr>
 </tbody>
 </table>
 </div>
-<dl class="py method">
-<dt class="sig sig-object py" id="pygrog.gadgets.SubspaceProjection.fit">
-<span class="sig-name descname"><span class="pre">fit</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">calib_data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceProjection.fit"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceProjection.fit" title="Link to this definition">#</a></dt>
-<dd><p>Compute temporal basis from calibration data.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>calib_data</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – Calibration time-series of shape <code class="docutils literal notranslate"><span class="pre">(n_frames,</span> <span class="pre">n_spatial)</span></code>.</p>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>Self, with fitted basis.</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference internal" href="#pygrog.gadgets.SubspaceProjection" title="pygrog.gadgets.SubspaceProjection">SubspaceProjection</a></p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py property">
-<dt class="sig sig-object py" id="pygrog.gadgets.SubspaceProjection.basis">
-<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">basis</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><span class="pre">Tensor</span></a></span><a class="headerlink" href="#pygrog.gadgets.SubspaceProjection.basis" title="Link to this definition">#</a></dt>
-<dd><p>Temporal basis matrix of shape <code class="docutils literal notranslate"><span class="pre">(n_components,</span> <span class="pre">n_frames)</span></code>.</p>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="pygrog.gadgets.SubspaceProjection.forward">
-<span class="sig-name descname"><span class="pre">forward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceProjection.forward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceProjection.forward" title="Link to this definition">#</a></dt>
-<dd><p>Project multi-frame data onto subspace.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>data</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – Shape <code class="docutils literal notranslate"><span class="pre">(n_frames,</span> <span class="pre">*spatial)</span></code>.</p>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>Shape <code class="docutils literal notranslate"><span class="pre">(n_components,</span> <span class="pre">*spatial)</span></code>.</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)">torch.Tensor</a></p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="pygrog.gadgets.SubspaceProjection.adjoint">
-<span class="sig-name descname"><span class="pre">adjoint</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">coefficients</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceProjection.adjoint"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceProjection.adjoint" title="Link to this definition">#</a></dt>
-<dd><p>Expand subspace coefficients back to frame domain.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>coefficients</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – Shape <code class="docutils literal notranslate"><span class="pre">(n_components,</span> <span class="pre">*spatial)</span></code>.</p>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>Shape <code class="docutils literal notranslate"><span class="pre">(n_frames,</span> <span class="pre">*spatial)</span></code>.</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)">torch.Tensor</a></p>
-</dd>
-</dl>
-</dd></dl>
-
 </dd></dl>
 
 </section>
@@ -588,13 +525,7 @@ leading <code class="docutils literal notranslate"><span class="pre">n_component
   </div>
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceProjection"><code class="docutils literal notranslate"><span class="pre">SubspaceProjection</span></code></a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceProjection.fit"><code class="docutils literal notranslate"><span class="pre">SubspaceProjection.fit()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceProjection.basis"><code class="docutils literal notranslate"><span class="pre">SubspaceProjection.basis</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceProjection.forward"><code class="docutils literal notranslate"><span class="pre">SubspaceProjection.forward()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceProjection.adjoint"><code class="docutils literal notranslate"><span class="pre">SubspaceProjection.adjoint()</span></code></a></li>
-</ul>
-</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceProjection"><code class="docutils literal notranslate"><span class="pre">SubspaceProjection</span></code></a></li>
 </ul>
   </nav></div>
 

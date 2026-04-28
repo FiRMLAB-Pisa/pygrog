@@ -211,6 +211,10 @@ class SparseFFT:
     device : str | torch.device | None
         Compute device.  When ``'cuda'`` with CPU data, dual-stream
         pipelining is enabled.
+    toeplitz : bool | None, optional
+        Use Toeplitz embedding (PSF on `grid_shape`) for the self-adjoint
+        operator :meth:`normal`.  ``None`` → auto: enabled on CPU,
+        disabled on CUDA (matches :func:`pygrog.utils.nlinv` policy).
     """
 
     def __init__(
@@ -223,6 +227,7 @@ class SparseFFT:
         device=None,
         *,
         plan=None,
+        toeplitz=None,
     ):
         # --- Accept plan or raw arguments ----------------------------------
         if plan is not None:
@@ -233,6 +238,9 @@ class SparseFFT:
             self.sqrt_weights = plan.sqrt_weights
             self.sort_perm = plan.sort_perm
             self.inv_perm = plan.inv_perm
+            self.natural_shape = tuple(
+                int(s) for s in getattr(plan, "natural_shape", (int(plan.n_samples),))
+            )
         else:
             if grid_shape is None or image_shape is None:
                 raise ValueError(
@@ -254,7 +262,9 @@ class SparseFFT:
             inv_perm = torch.empty_like(sort_perm)
             inv_perm[sort_perm] = torch.arange(len(sort_perm))
             self.inv_perm = inv_perm
+            self.natural_shape = (int(idx.numel()),)
 
+        self.n_samples = int(self.indices.numel())
         self.ndim = len(self.grid_shape)
         self.fft_axes = tuple(range(-self.ndim, 0))
 
@@ -277,6 +287,15 @@ class SparseFFT:
         )
 
         self.device = torch.device(device) if device is not None else None
+
+        # --- Toeplitz acceleration -----------------------------------------
+        # Auto-toggle: ON when target compute is CPU, OFF on CUDA (mirrors
+        # `pygrog.utils.nlinv` policy).  User can force True/False.
+        if toeplitz is None:
+            target = self.device if self.device is not None else torch.device("cpu")
+            toeplitz = target.type == "cpu"
+        self.toeplitz = bool(toeplitz)
+        self._toep_op = None  # lazily built on first .normal() call
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -313,13 +332,24 @@ class SparseFFT:
         Parameters
         ----------
         sparse_kspace : torch.Tensor
-            ``(n_coils, n_samples)`` complex.
+            ``(n_coils, *natural_shape)`` or ``(n_coils, n_samples)`` (legacy),
+            or with a leading batch dim. ``prod(natural_shape) == n_samples``.
 
         Returns
         -------
         torch.Tensor
-            ``(*image_shape,)`` combined image (complex).
+            ``(*image_shape,)`` or ``(*lead, *image_shape)`` combined image.
         """
+        # Natural-shape (multi-dim) input → fold trailing dims into n_samples.
+        nat = self.natural_shape
+        if len(nat) > 1 and tuple(int(s) for s in sparse_kspace.shape[-len(nat):]) == nat:
+            flat_shape = tuple(int(s) for s in sparse_kspace.shape[:-len(nat)]) + (self.n_samples,)
+            sparse_kspace = sparse_kspace.reshape(flat_shape)
+        if sparse_kspace.ndim == 3:  # (T, n_coils, n_samples) → (T, *image_shape)
+            return torch.stack(
+                [self.forward(sparse_kspace[t]) for t in range(sparse_kspace.shape[0])],
+                dim=0,
+            )
         n_coils = sparse_kspace.shape[0]
         src_device = sparse_kspace.device
         comp_device = self.device if self.device is not None else src_device
@@ -375,13 +405,31 @@ class SparseFFT:
         Parameters
         ----------
         image : torch.Tensor
-            ``(*image_shape,)`` complex.
+            ``(*image_shape,)`` or ``(T, *image_shape)`` complex.
+            When smaps are absent, single-frame input is ``(n_coils, *image_shape)``
+            and batched input is ``(T, n_coils, *image_shape)``.
 
         Returns
         -------
         torch.Tensor
-            ``(n_coils, n_samples)`` complex.
+            ``(n_coils, *natural_shape)`` (or with leading batch dim).
         """
+        out = self._adjoint_flat(image)
+        nat = self.natural_shape
+        if len(nat) > 1:
+            out = out.reshape(*out.shape[:-1], *nat)
+        return out
+
+    @with_torch
+    def _adjoint_flat(self, image: torch.Tensor) -> torch.Tensor:
+        """Flat-output adjoint: returns (..., n_samples)."""
+        # Batch detection: one extra leading dim beyond the expected single-frame ndim.
+        single_frame_ndim = len(self.image_shape) if self.smaps is not None else len(self.image_shape) + 1
+        if image.ndim == single_frame_ndim + 1:  # (T, ...) batched
+            return torch.stack(
+                [self._adjoint_flat(image[t]) for t in range(image.shape[0])],
+                dim=0,
+            )
         src_device = image.device
         comp_device = self.device if self.device is not None else src_device
         use_pipeline = comp_device.type == "cuda" and src_device.type == "cpu"
@@ -433,6 +481,36 @@ class SparseFFT:
         if adjoint:
             return self.adjoint(x)
         return self.forward(x)
+
+    # ------------------------------------------------------------------
+    # Normal operator: A^H A
+    # ------------------------------------------------------------------
+    @with_torch
+    def normal(self, image: torch.Tensor) -> torch.Tensor:
+        """Self-adjoint application: ``A^H A image``.
+
+        When ``self.toeplitz`` is True, uses a pre-computed PSF on
+        ``grid_shape`` (built lazily on first call) and applies
+        pad / FFT / PSF / IFFT / crop per coil.  Otherwise falls back to
+        ``forward(adjoint(image))``.
+
+        Parameters
+        ----------
+        image : torch.Tensor
+            Same shape as the output of :meth:`forward`.
+
+        Returns
+        -------
+        torch.Tensor
+            Same shape as input.
+        """
+        if self.toeplitz:
+            if self._toep_op is None:
+                # Local import to avoid circular import at module load.
+                from .._toep._grog_toep import GrogToeplitzOp
+                self._toep_op = GrogToeplitzOp(self, device=self.device)
+            return self._toep_op(image)
+        return self.forward(self.adjoint(image))
 
     # ------------------------------------------------------------------
     # Batch helpers for decorators  (Tier-1 FFT fusion)

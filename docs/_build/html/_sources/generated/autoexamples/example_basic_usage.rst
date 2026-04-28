@@ -258,7 +258,7 @@ adjointness condition throughout.
 
  .. code-block:: none
 
-    PyGROG sparse shape : (16, 36101)
+    PyGROG sparse shape : (16, 48, 600, 3)
 
 
 
@@ -350,7 +350,7 @@ mri-nufft adjoint reference.
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 2.420 seconds)
+   **Total running time of the script:** (0 minutes 2.422 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_basic_usage.py:

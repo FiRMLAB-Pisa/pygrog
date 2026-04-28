@@ -54,7 +54,7 @@ reconstruction using GROG-accelerated sparse FFT operators.
 
 .. raw:: html
 
-    <div class="sphx-glr-thumbcontainer" tooltip="PyGROG ships three thin adapter layers so that SparseFFT (and any gadget stacked on top of it) can be used directly inside third-party reconstruction frameworks:">
+    <div class="sphx-glr-thumbcontainer" tooltip="PyGROG ships native adapters for the full preprocessing chain:">
 
 .. only:: html
 
@@ -65,7 +65,7 @@ reconstruction using GROG-accelerated sparse FFT operators.
 
 .. raw:: html
 
-      <div class="sphx-glr-thumbnail-title">Interoperability with mrpro, sigpy and deepinverse</div>
+      <div class="sphx-glr-thumbnail-title">End-to-end CS reconstruction with sigpy, deepinv and mrpro</div>
     </div>
 
 

@@ -151,22 +151,35 @@ coeff_ref_nufft = np.stack(
 )
 
 # PyGROG subspace path: non-Cartesian -> sparse Cartesian -> SparseFFT + subspace.
-# Pre-multiply by plan.pre_weights once here (caller's responsibility) so the
-# orthonormality condition holds inside SubspaceSparseFFT.
-sqrt_w = grog.plan.pre_weights
-kspace_sparse = []
-for t in range(etl):
-    kspace_t = (
-        kspace_frames[t].astype(np.complex64).reshape(n_coils, *samples.shape[:2])
-    )
-    sparse_t = torch.as_tensor(np.asarray(grog.interpolate(kspace_t, ret_image=False)))
-    kspace_sparse.append(sparse_t * sqrt_w.to(sparse_t.dtype).unsqueeze(0))
-kspace_sparse = torch.stack(kspace_sparse, dim=0)  # (T, n_coils, n_samples)
+#
+# Mirror the MRF benchmark: build ONE GROG plan whose coords embeds T as the
+# leading spatial axis.  For 2D data we add a singleton k2=1 dimension so the
+# layout is (T, 1, k1, k0) matching the MRF pattern (T, spokes, readout).
+# natural_shape = (T, 1, n_shots, n_read, kw), encoding_axis=-5 -> T at nat-axis 0.
+n_shots, n_read = samples.shape[:2]
+coords_sub = np.broadcast_to(
+    coords[np.newaxis, np.newaxis],         # (1, 1, n_shots, n_read, 2)
+    (etl, 1, n_shots, n_read, 2),           # (T, 1, n_shots, n_read, 2)
+).copy()
+grog_sub = GrogInterpolator(shape=shape, coords=coords_sub, kernel_width=2, oversamp=1.25, image_shape=shape)
+grog_sub.calc_interp_table(calib_cart, lamda=0.01, precision=1)
+base_op_sub = SparseFFT(plan=grog_sub.plan, smaps=torch.as_tensor(smaps))
+
+# kspace_frames: (T, C, n_shots*n_read) -> (T, C, 1, n_shots, n_read) -> (1, C, T, 1, n_shots, n_read)
+kspace_sub = (
+    kspace_frames
+    .reshape(etl, n_coils, 1, n_shots, n_read)  # (T, C, 1, n_shots, n_read)
+    .transpose(1, 0, 2, 3, 4)[np.newaxis]        # (1, C, T, 1, n_shots, n_read)
+    .astype(np.complex64)
+)
+sparse_sub = grog_sub.interpolate(
+    torch.as_tensor(kspace_sub)
+)  # (1, C, T, 1, n_shots, n_read, kw)
 
 proj = SubspaceProjection(n_components=rank)
 proj.fit(torch.as_tensor(train, dtype=torch.float32))
-sub_op = SubspaceSparseFFT(base_op, proj.basis.to(torch.complex64))
-coeff_pygrog = sub_op.forward(kspace_sparse).detach().cpu().numpy()
+sub_op = SubspaceSparseFFT(base_op_sub, proj.basis.to(torch.complex64), encoding_axis=-5)
+coeff_pygrog = sub_op.forward(sparse_sub).detach().cpu().numpy()
 
 # Display all coefficients: rows = mri-nufft / PyGROG / error, cols = coefficients
 fig, axes = plt.subplots(3, rank, figsize=(4 * rank, 10))
@@ -202,20 +215,40 @@ plt.show()
 # Gadget 2: OffResonanceCorrection
 # ================================
 
-brain_mask = image > 0.1 * image.max()
-b0_map, _ = make_b0map(shape, b0range=(-120, 120), mask=brain_mask)
-readout_time = (
+# Use a T1-weighted slice for the ORC test (more high-frequency anatomy → the
+# blur from B0 inhomogeneity is much more visible than on the M0 map).
+from brainweb_dl import get_mri
+
+image_orc = np.flip(get_mri(0, "T1"), axis=(0, 1, 2))[90].astype(np.float32)
+# Center-crop / pad to match the GROG plan's image shape.
+def _center_crop_pad(arr, target):
+    out = np.zeros(target, dtype=arr.dtype)
+    s_in = arr.shape
+    # crop / pad each axis
+    src = []
+    dst = []
+    for si, ti in zip(s_in, target):
+        if si >= ti:
+            off = (si - ti) // 2
+            src.append(slice(off, off + ti))
+            dst.append(slice(0, ti))
+        else:
+            off = (ti - si) // 2
+            src.append(slice(0, si))
+            dst.append(slice(off, off + si))
+    out[tuple(dst)] = arr[tuple(src)]
+    return out
+
+image_orc = _center_crop_pad(image_orc, shape)
+image_orc = image_orc / (image_orc.max() + 1e-8)
+brain_mask = image_orc > 0.1 * image_orc.max()
+b0_map, _ = make_b0map(shape, b0range=(-200, 200), mask=brain_mask)
+
+# Per-readout timing — identical for every spiral arm (same as mri-nufft example).
+t_read = (
     np.arange(samples.shape[1], dtype=np.float32) * Acquisition.default.raster_time
 )
-readout_time = np.repeat(readout_time[None, :], samples.shape[0], axis=0)
-
-# Single-coil operator for ORC (no smaps needed)
-nufft_orc = get_operator("finufft")(
-    samples=samples,
-    shape=shape,
-    density=density,
-    squeeze_dims=True,
-)
+readout_time = np.repeat(t_read[None, :], samples.shape[0], axis=0)  # (n_shots, n_read)
 
 orc_nufft = MRIFourierCorrected(
     nufft_ref,
@@ -224,14 +257,28 @@ orc_nufft = MRIFourierCorrected(
     mask=brain_mask,
 )
 
-kspace_off = orc_nufft.op(image.astype(np.complex64))
+kspace_off = orc_nufft.op(image_orc.astype(np.complex64))
 image_no_orc = np.squeeze(np.abs(nufft_ref.adj_op(kspace_off)))
 image_ref_orc = np.squeeze(np.abs(orc_nufft.adj_op(kspace_off)))
 
-# PyGROG ORC: sparse interpolation, then apply ORC-corrected SparseFFT.
-# OffResonanceCorrection.adjoint expects (n_coils, n_samples) -> (n_coils, *image)
-# so we use a no-smaps operator and combine coils manually afterwards.
+# PyGROG ORC: GROG-interpolate then apply ORC-corrected SparseFFT.
+# OffResonanceCorrection takes the same (n_shots, n_read) timing as mri-nufft;
+# it broadcasts the temporal basis B internally against base.natural_shape.
+n_shots, n_read = samples.shape[:2]
+
 base_op_orc = SparseFFT(plan=grog.plan)  # no smaps
+sqrt_w_orc = grog.plan.pre_weights        # (n_shots, n_read, kw)
+
+orc_pygrog = OffResonanceCorrection(
+    base_op_orc,
+    field_map=b0_map.astype(np.float32),
+    readout_time=readout_time,
+    mask=brain_mask,
+    n_components=-1,
+    method="svd",
+)
+
+# GROG-interpolate the off-resonance k-space and pre-weight.
 sparse_off = torch.as_tensor(
     np.asarray(
         grog.interpolate(
@@ -241,25 +288,10 @@ sparse_off = torch.as_tensor(
     ),
     dtype=torch.complex64,
 )
-# Pre-multiply by plan.pre_weights (caller's responsibility before ORC adjoint).
-sparse_off = sparse_off * sqrt_w.to(sparse_off.dtype).unsqueeze(0)
+# Pre-multiply by sqrt density weights (natural shape kept; zero-weight sentinel
+# entries are killed by sqrt_w = 0 inside SparseFFT).
+sparse_off = sparse_off * sqrt_w_orc.to(sparse_off.dtype).unsqueeze(0)
 
-# Derive per-sparse-sample readout times: each original non-Cartesian sample
-# maps to up to kw Cartesian neighbours, so expand readout_time accordingly
-# and filter to the valid (non-sentinel) neighbour entries that match
-# what grog.interpolate() returns.
-_kw = grog.plan.target_idx.shape[-1]
-_valid_np = grog.plan.valid_mask.numpy()
-readout_time_sparse = np.repeat(readout_time.ravel(), _kw)[_valid_np].astype(np.float32)
-
-orc_pygrog = OffResonanceCorrection(
-    base_op_orc,
-    field_map=b0_map.astype(np.float32),
-    readout_time=readout_time_sparse,
-    mask=brain_mask,
-    n_components=8,
-    method="svd",
-)
 # Adjoint returns (n_coils, *image_shape) — combine with smaps
 smaps_t = torch.as_tensor(smaps)
 result_orc = orc_pygrog.adjoint(sparse_off)  # (n_coils, *image_shape)
