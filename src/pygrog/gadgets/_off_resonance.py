@@ -232,6 +232,182 @@ class OffResonanceCorrection:
 # =====================================================================
 # SparseFFT decorator
 # =====================================================================
+def _gridded_orc_basis(
+    B_orig: np.ndarray,
+    C: np.ndarray,
+    readout_time: np.ndarray,
+    field_map_complex: np.ndarray,
+    mask: np.ndarray,
+    coords,
+    dcf,
+    grid_shape: tuple[int, ...],
+    n_bins: int = 1024,
+):
+    """Re-cast the temporal basis on the Cartesian k-space grid.
+
+    Given the original factorisation ``E ≈ B_orig @ C`` produced from
+    ``readout_time`` (per-sample times of the non-Cartesian acquisition), we
+    keep the spatial coefficients ``C`` fixed and refit a per-grid-cell
+    temporal basis ``B_grid`` evaluated at a Cartesian time map ``t_grid``
+    obtained from the adjoint NUFFT of ``readout_time * dcf``.
+
+    The refit is solved in **histogram space** (the same one mri-nufft uses
+    to build ``C``) so the cost is ``O(n_grid · n_bins · L)`` instead of
+    ``O(n_grid · n_voxels · L)``.
+
+    Parameters
+    ----------
+    B_orig : (n_samples, L) complex
+        Temporal basis returned by the factorisation on ``readout_time``
+        (kept only to derive ``L``; not used for refit).
+    C : (L, *spatial) complex
+        Spatial coefficients returned by the factorisation.
+    readout_time : (n_samples,) float
+        Per-sample readout times in seconds (already raveled).
+    field_map_complex : (*spatial,) complex
+        Complex field map in rad/s, ``-Δ = R2* + 2j π Δf``.
+    mask : (*spatial,) bool
+        Object support used at factorisation time.
+    coords : (..., n_samples, ndim) float
+        Original non-Cartesian trajectory.
+    dcf : (n_samples,) float
+        Per-sample density compensation function.
+    grid_shape : tuple[int, ...]
+        Cartesian (oversampled) grid shape.
+    n_bins : int
+        Histogram bins (must match the value used at factorisation).
+
+    Returns
+    -------
+    B_grid : (*grid_shape, L) complex64
+        Temporal basis evaluated on the Cartesian grid.
+    t_grid : (*grid_shape,) float32
+        The recentred Cartesian time map (returned for diagnostics).
+    """
+    from mrinufft.extras.field_map import _create_histogram
+
+    from .._base._nufft import nufft_adjoint
+
+    L = int(B_orig.shape[-1])
+    n_grid = int(np.prod(grid_shape))
+
+    # ----- 1. Adjoint-NUFFT time map ---------------------------------------
+    coords_np = np.asarray(coords, dtype=np.float32)
+    dcf_np = np.asarray(dcf, dtype=np.float32).ravel()
+    t_np = np.asarray(readout_time, dtype=np.float32).ravel()
+    if dcf_np.size != t_np.size:
+        raise ValueError(
+            f"dcf size {dcf_np.size} does not match readout_time size {t_np.size}"
+        )
+    coords_t = torch.as_tensor(
+        coords_np.reshape(-1, coords_np.shape[-1])
+    )  # (n_samples, ndim)
+    if coords_t.shape[0] != t_np.size:
+        raise ValueError(
+            f"coords yields {coords_t.shape[0]} samples but readout_time has "
+            f"{t_np.size}; trajectory and times must match."
+        )
+    weighted_t = torch.as_tensor((t_np * dcf_np).astype(np.complex64))  # (n_samples,)
+
+    # Treat the weighted-time vector as a 1-coil k-space and adjoint-NUFFT
+    # onto the Cartesian grid_shape.
+    t_grid_complex = nufft_adjoint(
+        weighted_t.unsqueeze(0),  # (1, n_samples)
+        coords_t,
+        oshape=tuple(grid_shape),
+    )
+    t_grid = t_grid_complex.real.squeeze(0).to(torch.float32)  # (*grid_shape,)
+
+    # Recenter so that the Cartesian center holds the time at k = 0.
+    center_idx = tuple(s // 2 for s in grid_shape)
+    # Sample whose coordinate is closest to the origin → its readout time.
+    k_norms = np.linalg.norm(coords_np.reshape(-1, coords_np.shape[-1]), axis=-1)
+    k0_sample = int(np.argmin(k_norms))
+    t_at_k0 = float(t_np[k0_sample])
+    t_grid = t_grid - t_grid[center_idx].item() + t_at_k0
+    t_grid_np = t_grid.cpu().numpy().astype(np.float32, copy=False)
+
+    # ----- 2. Recover histogram-space C_small ------------------------------
+    # mri-nufft expands C from (L, n_bins_r * n_bins_i) into the full spatial
+    # array via an index map (idxr, idxi).  We invert that mapping to get
+    # back C_small.  The bin indices are reproducible from field_map + n_bins.
+    h_k, w_k = _create_histogram(field_map_complex, mask, n_bins)
+    hist_shape = h_k.shape  # (n_bins_r, n_bins_i) or (n_bins_r,) for purely-real
+    n_bins_total = int(np.prod(hist_shape))
+    w_k_flat = w_k.ravel()  # (n_bins_total,) complex
+
+    # Replay mri-nufft's _full_C indexing on field_map_complex so the order
+    # matches the spatial-C we have on hand.  We deliberately mirror the
+    # exact arithmetic in :func:`mrinufft.extras.field_map._full_C` (including
+    # its idiosyncrasies) — using anything else here would produce a bin
+    # mapping inconsistent with the spatial ``C`` we received.
+    fr = field_map_complex.real.ravel()
+    fi = field_map_complex.imag.ravel()
+    if len(hist_shape) == 1:
+        n_bins_r, n_bins_i = hist_shape[0], 1
+    else:
+        n_bins_r, n_bins_i = hist_shape
+    # NOTE: mri-nufft's _full_C uses ``maxr = max(fi)`` (see source); we mirror
+    # that here so the bin indices line up with how C was expanded.
+    minr_v, maxr_v = float(fr.min()), float(fi.max())
+    mini_v, maxi_v = float(fi.min()), float(fi.max())
+    dr = (maxr_v - minr_v) / n_bins_r if n_bins_r > 0 else 0.0
+    di = (maxi_v - mini_v) / n_bins_i if n_bins_i > 0 else 0.0
+    idxr = (
+        np.clip(np.around((fr - minr_v) / dr), 0, n_bins_r - 1).astype(int)
+        if dr != 0
+        else np.zeros_like(fr, dtype=int)
+    )
+    idxi = (
+        np.clip(np.around((fi - mini_v) / di), 0, n_bins_i - 1).astype(int)
+        if di != 0
+        else np.zeros_like(fi, dtype=int)
+    )
+
+    # C is (L, *spatial); flatten spatial → (L, n_voxels).  Use mask to take
+    # the mean of C across all voxels falling into the same (idxr, idxi) bin.
+    C_flat = np.asarray(C, dtype=np.complex64).reshape(L, -1)
+    mask_flat = np.asarray(mask, dtype=bool).ravel()
+
+    # Linear bin index per voxel (only inside mask).
+    bin_idx_all = idxr * n_bins_i + idxi  # (n_voxels,)
+    in_mask = np.where(mask_flat)[0]
+    bin_idx = bin_idx_all[in_mask]  # (n_masked,)
+
+    # Average C per bin (un-masked bins remain zero — they are unreachable in
+    # E_grid because their corresponding w_k contribution is also zero).
+    C_small = np.zeros((L, n_bins_total), dtype=np.complex64)
+    counts = np.zeros(n_bins_total, dtype=np.float64)
+    np.add.at(counts, bin_idx, 1.0)
+    for ll in range(L):
+        np.add.at(C_small[ll], bin_idx, C_flat[ll, in_mask])
+    nz = counts > 0
+    C_small[:, nz] /= counts[nz]
+
+    # ----- 3. Build E_grid and solve B_grid in bin space -------------------
+    # Restrict to bins that actually appear in the histogram (h_k > 0) to keep
+    # the LS well-conditioned.  Empty bins have undefined w_k contribution.
+    h_flat = h_k.ravel()
+    active = h_flat > 0
+    if not active.any():
+        raise RuntimeError("Field-map histogram is empty; cannot refit ORC basis.")
+    w_active = w_k_flat[active].astype(np.complex64)  # (n_active,)
+    C_active = C_small[:, active]  # (L, n_active)
+
+    # E_grid[g, b] = exp(t_grid[g] * w_active[b])
+    # For numerical safety in float32 we use complex128 for the lstsq.
+    E_grid = np.exp(
+        np.outer(t_grid_np.ravel(), w_active)
+    ).astype(np.complex128)  # (n_grid, n_active)
+
+    # Want: B_grid (n_grid, L) such that B_grid @ C_active ≈ E_grid.
+    # Solve  C_active.T @ B_grid.T = E_grid.T  →  lstsq.
+    B_grid_T, *_ = np.linalg.lstsq(C_active.T.astype(np.complex128), E_grid.T, rcond=None)
+    B_grid = B_grid_T.T.astype(np.complex64)  # (n_grid, L)
+
+    return B_grid.reshape(*grid_shape, L), t_grid_np
+
+
 def with_off_resonance(
     base_op,
     b0_map,
@@ -243,6 +419,8 @@ def with_off_resonance(
     n_bins=1024,
     *,
     toeplitz=None,
+    coords=None,
+    dcf=None,
 ):
     """Wrap a SparseFFT or MaskedFFT operator with B0 inhomogeneity compensation.
 
@@ -266,6 +444,17 @@ def with_off_resonance(
         Number of basis functions / interpolators.  ``-1`` = auto.
     n_bins : int
         Number of histogram bins for field-map quantisation.
+    coords, dcf : array-like, optional
+        Required when ``base_op`` is a :class:`MaskedFFT`.  ``coords`` is the
+        original non-Cartesian trajectory ``(..., n_samples, ndim)`` and
+        ``dcf`` is the per-sample density compensation.  When omitted,
+        ``base_op._coords`` / ``base_op._dcf`` are used (these are populated
+        automatically by passing them to :class:`MaskedFFT` or
+        :class:`MaskedFFTPlan`).  The temporal basis is then re-evaluated on
+        the Cartesian grid via the adjoint NUFFT of ``readout_time * dcf``,
+        recentered so ``t_grid[center] == readout_time[k=0]``.  Without
+        ``coords``/``dcf`` the gridded ORC silently mis-broadcasts the
+        per-sample basis against gridded k-space and is unreliable.
 
     Returns
     -------
@@ -304,7 +493,30 @@ def with_off_resonance(
     from ..operator._masked_fft import MaskedFFT
 
     if isinstance(base_op, MaskedFFT):
-        return OffResonanceMaskedFFT(base_op, B, C, toeplitz=toeplitz)
+        # Resolve coords/dcf from explicit args or stash on the operator/plan.
+        if coords is None:
+            coords = getattr(base_op, "_coords", None)
+        if dcf is None:
+            dcf = getattr(base_op, "_dcf", None)
+        if coords is None or dcf is None:
+            raise ValueError(
+                "with_off_resonance(MaskedFFT): 'coords' and 'dcf' are required "
+                "(either as kwargs or stored on base_op._coords / base_op._dcf) "
+                "so that the temporal ORC basis can be re-evaluated on the "
+                "Cartesian grid via an adjoint NUFFT."
+            )
+        B_grid, _ = _gridded_orc_basis(
+            B_orig=B,
+            C=C,
+            readout_time=readout_time,
+            field_map_complex=field_map,
+            mask=mask,
+            coords=coords,
+            dcf=dcf,
+            grid_shape=tuple(base_op.grid_shape),
+            n_bins=n_bins,
+        )
+        return OffResonanceMaskedFFT(base_op, B_grid, C, toeplitz=toeplitz)
     return OffResonanceSparseFFT(base_op, B, C, toeplitz=toeplitz)
 
 

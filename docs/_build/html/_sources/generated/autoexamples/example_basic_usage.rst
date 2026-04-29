@@ -523,7 +523,7 @@ a second forward+adjoint FFT pair.
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 5.113 seconds)
+   **Total running time of the script:** (0 minutes 4.815 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_basic_usage.py:

@@ -85,12 +85,22 @@ class MaskedFFTPlan:
         :class:`~pygrog._toep.GrogToeplitzOp`.
     """
 
-    def __init__(self, grid_shape, image_shape, stack_shape, mask, density):
+    def __init__(
+        self, grid_shape, image_shape, stack_shape, mask, density,
+        *, coords=None, dcf=None,
+    ):
         self.grid_shape = tuple(int(s) for s in grid_shape)
         self.image_shape = tuple(int(s) for s in image_shape)
         self.stack_shape = tuple(int(s) for s in stack_shape)
         self.mask = torch.as_tensor(mask).float()
         self.density = torch.as_tensor(density).float()
+        # Optional private metadata consumed by gadgets (e.g. off-resonance):
+        # ``_coords`` is the original non-Cartesian trajectory used to grid the
+        # data, and ``_dcf`` is the per-sample density compensation function.
+        # Together they let ORC re-cast the temporal basis on the Cartesian
+        # grid via an adjoint NUFFT of (readout_time * dcf).
+        self._coords = None if coords is None else torch.as_tensor(coords)
+        self._dcf = None if dcf is None else torch.as_tensor(dcf).float()
 
     def __repr__(self):
         return (
@@ -154,8 +164,12 @@ class MaskedFFT(SolveMixin):
         *,
         toeplitz=None,
         plan=None,
+        coords=None,
+        dcf=None,
     ):
         # --- Accept MaskedFFTPlan or raw arguments -------------------------
+        _plan_coords = None if coords is None else torch.as_tensor(coords)
+        _plan_dcf = None if dcf is None else torch.as_tensor(dcf).float()
         if plan is not None and isinstance(plan, MaskedFFTPlan):
             grid_shape = plan.grid_shape
             image_shape = plan.image_shape
@@ -163,6 +177,10 @@ class MaskedFFT(SolveMixin):
             density = plan.density
             if stack_shape is None:
                 stack_shape = plan.stack_shape
+            if _plan_coords is None:
+                _plan_coords = plan._coords
+            if _plan_dcf is None:
+                _plan_dcf = plan._dcf
         elif plan is not None:
             # Legacy: GrogPlan or other namespace passed as hint — ignore.
             pass
@@ -196,6 +214,11 @@ class MaskedFFT(SolveMixin):
             self.density = torch.as_tensor(density).float()
         else:
             self.density = None
+
+        # Optional private metadata for gadgets (off-resonance correction).
+        # See :class:`MaskedFFTPlan` for semantics.
+        self._coords = _plan_coords
+        self._dcf = _plan_dcf
 
         # natural_shape: for a MaskedFFT the "natural" k-space shape is
         # (*grid_shape,) since input data is already gridded. This attribute

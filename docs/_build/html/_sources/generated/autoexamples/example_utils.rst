@@ -633,7 +633,7 @@ k-space can optionally be averaged across the batch with
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 14.679 seconds)
+   **Total running time of the script:** (0 minutes 13.285 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_utils.py:

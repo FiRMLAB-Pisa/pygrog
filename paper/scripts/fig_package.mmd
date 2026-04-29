@@ -1,0 +1,16 @@
+flowchart LR
+  K["non-Cartesian k-space + trajectory"]
+  U["utils.coil_compress / nlinv_calib"]
+  G["calib.GrogInterpolator"]
+  OP["operator.SparseFFT / MaskedFFT"]
+  GAD["gadgets.OffResonance / Subspace"]
+  CORE["_solve / _toep   (cg / lsmr / pcg, Toeplitz op.normal)"]
+  IO["interop.sigpy / deepinv / mrpro"]
+  OUT["coefficient images / x"]
+
+  K --> U --> G --> OP
+  OP --> GAD
+  OP --> CORE
+  GAD --> CORE
+  CORE --> OUT
+  OP -. wrap .-> IO

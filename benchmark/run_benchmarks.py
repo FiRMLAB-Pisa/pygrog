@@ -829,6 +829,12 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
             "torch_cuda_device_count": (
                 int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
             ),
+            "gpu_name": (
+                torch.cuda.get_device_name(0)
+                if torch.cuda.is_available()
+                else None
+            ),
+            "cpu_count": __import__("os").cpu_count(),
         },
         "steps": {},
     }
