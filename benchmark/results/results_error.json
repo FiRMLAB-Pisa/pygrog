@@ -1,14 +1,14 @@
 {
-  "error": "Missing benchmark dataset files in benchmark/data: benchmark/data/smaps.npy",
-  "traceback": "Traceback (most recent call last):\n  File \"/home/mcencini/pygrog-project/pygrog/benchmark/run_benchmarks.py\", line 1209, in main\n    results = run(cfg, output_dir)\n  File \"/home/mcencini/pygrog-project/pygrog/benchmark/run_benchmarks.py\", line 807, in run\n    inputs = _prepare_real_inputs(cfg, Path(cfg.data_dir))\n  File \"/home/mcencini/pygrog-project/pygrog/benchmark/run_benchmarks.py\", line 82, in _prepare_real_inputs\n    raise FileNotFoundError(\n        \"Missing benchmark dataset files in benchmark/data: \" + \", \".join(missing)\n    )\nFileNotFoundError: Missing benchmark dataset files in benchmark/data: benchmark/data/smaps.npy\n",
+  "error": "The size of tensor a (1622016) must match the size of tensor b (4) at non-singleton dimension 2",
+  "traceback": "Traceback (most recent call last):\n  File \"/home/local/IMAGO7/mcencini/M/ismrmr2026/pygrog/benchmark/run_benchmarks.py\", line 1241, in main\n    results = run(cfg, output_dir)\n  File \"/home/local/IMAGO7/mcencini/M/ismrmr2026/pygrog/benchmark/run_benchmarks.py\", line 1142, in run\n    _build_scaling_suite(cfg, inputs, cufinufft_ok)\n    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/local/IMAGO7/mcencini/M/ismrmr2026/pygrog/benchmark/run_benchmarks.py\", line 762, in _build_scaling_suite\n    _benchmark_scaling_case(\n    ~~~~~~~~~~~~~~~~~~~~~~~^\n        label=f\"Synth-{target_samples // 1000}k\",\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<3 lines>...\n        cufinufft_ok=cufinufft_ok,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/home/local/IMAGO7/mcencini/M/ismrmr2026/pygrog/benchmark/run_benchmarks.py\", line 575, in _benchmark_scaling_case\n    sparse_tcns_cpu, interp_cpu_m = profile(\n                                    ~~~~~~~^\n        _grog_interpolate_all,\n        ^^^^^^^^^^^^^^^^^^^^^^\n    ...<5 lines>...\n        gpu_device=None,\n        ^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/home/local/IMAGO7/mcencini/M/ismrmr2026/pygrog/benchmark/benchmark.py\", line 128, in profile\n    func(*args, **kwargs)\n    ~~~~^^^^^^^^^^^^^^^^^\n  File \"/home/local/IMAGO7/mcencini/M/ismrmr2026/pygrog/benchmark/run_benchmarks.py\", line 267, in _grog_interpolate_all\n    sparse = sparse * pre_w_view  # broadcasts over (T, C, *nat)\n             ~~~~~~~^~~~~~~~~~~~\nRuntimeError: The size of tensor a (1622016) must match the size of tensor b (4) at non-singleton dimension 2\n",
   "config": {
     "max_coeff": null,
     "n_readout": 512,
-    "repeats": 3,
+    "repeats": 5,
     "warmup": 1,
     "gpu_device": 0,
     "require_cufinufft": false,
-    "data_dir": "benchmark/data",
+    "data_dir": "/home/local/IMAGO7/mcencini/M/ismrmr2026/pygrog/benchmark/data",
     "scaling_ratios": [
       0.01,
       0.02,
@@ -18,8 +18,8 @@
       0.4,
       0.7
     ],
-    "no_gpu": true,
-    "accel_k1": 6,
-    "skip_scaling": true
+    "no_gpu": false,
+    "accel_k1": 1,
+    "skip_scaling": false
   }
 }
