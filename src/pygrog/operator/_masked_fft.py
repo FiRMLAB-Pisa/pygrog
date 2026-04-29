@@ -40,7 +40,7 @@ oversampled k-space domain, identical to what :class:`~pygrog._toep.GrogToeplitz
 computes via scatter.
 """
 
-__all__ = ["MaskedFFT"]
+__all__ = ["MaskedFFTPlan", "MaskedFFT"]
 
 import numpy as np
 import torch
@@ -48,6 +48,57 @@ from mrinufft._array_compat import with_torch
 
 from .._base._fftc import fft, ifft
 from .._utils import resize
+
+
+class MaskedFFTPlan:
+    """Plan for :class:`MaskedFFT` — the Cartesian/masked counterpart of
+    :class:`~pygrog.calib.GrogPlan`.
+
+    Returned by :meth:`~pygrog.calib.GrogInterpolator.interpolate` with
+    ``grid=True`` and accepted by :class:`MaskedFFT` via its *plan* argument,
+    giving the same one-liner workflow as the sparse path::
+
+        # Sparse path
+        sparse = grog.interpolate(kspace)
+        op = SparseFFT(plan=grog.plan, smaps=smaps)
+        image = op.forward(sparse * grog.plan.pre_weights)
+
+        # Dense/grid path — symmetric API
+        kgrid, plan = grog.interpolate(kspace, grid=True)
+        op = MaskedFFT(plan=plan, smaps=smaps)
+        image = op.forward(kgrid)
+
+    Parameters
+    ----------
+    grid_shape : tuple[int, ...]
+        Oversampled Cartesian k-space grid shape (per stack element).
+    image_shape : tuple[int, ...]
+        Target image shape (center-crop target).
+    stack_shape : tuple[int, ...]
+        Leading stack axes; ``()`` for unstacked data.
+    mask : torch.Tensor
+        Real float binary sampling mask, shape ``(*stack_shape, *grid_shape)``.
+    density : torch.Tensor
+        Real float density grid (sum of squared GROG weights per cell),
+        same shape as *mask*.  Used as the Toeplitz PSF by
+        :class:`~pygrog._toep.GrogToeplitzOp`.
+    """
+
+    def __init__(self, grid_shape, image_shape, stack_shape, mask, density):
+        self.grid_shape = tuple(int(s) for s in grid_shape)
+        self.image_shape = tuple(int(s) for s in image_shape)
+        self.stack_shape = tuple(int(s) for s in stack_shape)
+        self.mask = torch.as_tensor(mask).float()
+        self.density = torch.as_tensor(density).float()
+
+    def __repr__(self):
+        return (
+            f"MaskedFFTPlan(grid_shape={self.grid_shape}, "
+            f"image_shape={self.image_shape}, "
+            f"stack_shape={self.stack_shape}, "
+            f"mask={tuple(self.mask.shape)}, "
+            f"density={tuple(self.density.shape)})"
+        )
 
 
 class MaskedFFT:
@@ -92,9 +143,9 @@ class MaskedFFT:
 
     def __init__(
         self,
-        grid_shape,
-        image_shape,
-        mask,
+        grid_shape=None,
+        image_shape=None,
+        mask=None,
         density=None,
         smaps=None,
         stack_shape=None,
@@ -103,6 +154,24 @@ class MaskedFFT:
         toeplitz=None,
         plan=None,
     ):
+        # --- Accept MaskedFFTPlan or raw arguments -------------------------
+        if plan is not None and isinstance(plan, MaskedFFTPlan):
+            grid_shape = plan.grid_shape
+            image_shape = plan.image_shape
+            mask = plan.mask
+            density = plan.density
+            if stack_shape is None:
+                stack_shape = plan.stack_shape
+        elif plan is not None:
+            # Legacy: GrogPlan or other namespace passed as hint — ignore.
+            pass
+
+        if grid_shape is None or image_shape is None or mask is None:
+            raise ValueError(
+                "Either 'plan' (MaskedFFTPlan) or explicit 'grid_shape', "
+                "'image_shape', and 'mask' are required."
+            )
+
         self.grid_shape = tuple(int(s) for s in grid_shape)
         self.image_shape = tuple(int(s) for s in image_shape)
         self.ndim = len(self.grid_shape)

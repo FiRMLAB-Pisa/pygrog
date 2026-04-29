@@ -277,10 +277,11 @@ class GrogInterpolator(_GrogInterpolatorBase):
         out = super().interpolate(kspace, **kwargs)
         grid = kwargs.get("grid", False)
         if grid:
-            grid_kspace, mask, density = (torch.as_tensor(t) for t in out)
+            grid_kspace, masked_plan = out
+            grid_kspace = torch.as_tensor(grid_kspace)
             if return_plan:
-                return grid_kspace, mask, density, self.plan
-            return grid_kspace, mask, density
+                return grid_kspace, masked_plan, self.plan
+            return grid_kspace, masked_plan
         out_t = torch.as_tensor(out)
         # Reshape from flat (*batch, C, n_samples) → (*batch, C, *natural_shape)
         out_t = out_t.reshape(*out_t.shape[:-1], *self.plan.natural_shape)

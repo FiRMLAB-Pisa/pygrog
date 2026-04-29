@@ -23,7 +23,7 @@ from mrinufft import display_2D_trajectory, get_operator, initialize_2D_spiral
 from mrinufft.density import voronoi
 
 from pygrog.calib import GrogInterpolator
-from pygrog.operator import SparseFFT
+from pygrog.operator import MaskedFFT, MaskedFFTPlan, SparseFFT
 
 
 def _synthetic_smaps(shape, n_coils=4):
@@ -262,3 +262,75 @@ for i in range(B):
 fig.suptitle("Multi-slice batched PyGROG reconstruction")
 plt.tight_layout()
 plt.show()
+
+
+# %%
+# Dense-grid path: ``interpolate(grid=True)`` + ``MaskedFFT``
+# ===========================================================
+#
+# ``grid=True`` scatters the density-compensated sparse samples onto the
+# full oversampled Cartesian grid and returns a triple
+# ``(gridded_kspace, mask, density)`` instead of the sparse flat tensor.
+# This is useful when you want to work with a standard Cartesian FFT
+# operator — e.g. :class:`~pygrog.operator.MaskedFFT` — rather than the
+# NUFFT-style scatter/gather of :class:`~pygrog.operator.SparseFFT`.
+#
+# The ``mask`` and ``density`` tensors can be passed directly to
+# :class:`~pygrog.operator.MaskedFFT`, which performs density-compensated
+# reconstruction using masked FFTs instead of NUFFT operators.
+
+grid_kspace, masked_plan = grog.interpolate(kspace_nc_shaped, grid=True)
+
+print(f"gridded k-space shape : {grid_kspace.shape}")
+print(f"masked_plan           : {masked_plan}")
+print(f"fraction of mask set  : {masked_plan.mask.float().mean().item():.1%}")
+
+# Build the MaskedFFT operator from the plan — same one-liner as SparseFFT:
+#   sparse = grog.interpolate(kspace)
+#   op = SparseFFT(plan=grog.plan, smaps=smaps)
+#
+#   kgrid, plan = grog.interpolate(kspace, grid=True)
+#   op = MaskedFFT(plan=plan, smaps=smaps)
+masked_fft = MaskedFFT(plan=masked_plan, smaps=torch.as_tensor(smaps))
+
+# Forward pass: gridded k-space → SENSE-combined image.
+# MaskedFFT.forward expects (*batch, *stack, C, *grid_shape).
+image_masked = masked_fft.forward(grid_kspace).abs().cpu().numpy()
+
+image_masked /= image_masked.max() + 1e-12
+ref_norm = ref_abs  # already normalised above
+
+nmse_masked = ((image_masked - ref_norm) ** 2).mean() / (ref_norm**2).mean()
+print(f"NMSE MaskedFFT path   : {nmse_masked:.3e}")
+
+fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+axes[0].imshow(ref_norm, cmap="gray", origin="lower")
+axes[0].set_title("mri-nufft (reference)")
+axes[0].axis("off")
+
+axes[1].imshow(image_masked, cmap="gray", origin="lower")
+axes[1].set_title("PyGROG MaskedFFT path")
+axes[1].axis("off")
+
+err_masked = 100.0 * (image_masked - ref_norm) / (ref_norm.max() + 1e-12)
+im = axes[2].imshow(err_masked, cmap="bwr", origin="lower", vmin=-10, vmax=10)
+axes[2].set_title(f"error [%]  MAE={np.abs(err_masked).mean():.2f}%")
+axes[2].axis("off")
+fig.colorbar(im, ax=axes[2], fraction=0.046, pad=0.04)
+
+plt.tight_layout()
+plt.show()
+
+# %%
+# MaskedFFT normal operator (Toeplitz-based)
+# ==========================================
+#
+# :class:`~pygrog.operator.MaskedFFT` exposes a ``.normal()`` method that
+# uses the density as a pre-computed PSF so the ``A^H A`` operation avoids
+# a second forward+adjoint FFT pair.
+
+x0 = torch.zeros(shape, dtype=torch.complex64)
+Ax = masked_fft.forward(grid_kspace)         # A^H applied by .forward internally
+AHAx = masked_fft.normal(Ax)                  # Toeplitz A^H A
+
+print(f"normal() output shape : {AHAx.shape}")

@@ -506,15 +506,19 @@ class GrogInterpolator:
             return out
 
         if grid:
-            grid_kspace, mask, density = self._grid_kspace(sparse_flat, plan)
+            grid_kspace, masked_plan = self._grid_kspace(sparse_flat, plan)
             gc.collect()
             if is_numpy:
-                return (
-                    np.asarray(grid_kspace),
-                    np.asarray(mask),
-                    np.asarray(density),
+                import numpy as _np
+                numpy_plan = masked_plan.__class__(
+                    grid_shape=masked_plan.grid_shape,
+                    image_shape=masked_plan.image_shape,
+                    stack_shape=masked_plan.stack_shape,
+                    mask=_np.asarray(masked_plan.mask),
+                    density=_np.asarray(masked_plan.density),
                 )
-            return grid_kspace, mask, density
+                return _np.asarray(grid_kspace), numpy_plan
+            return grid_kspace, masked_plan
 
         gc.collect()
 
@@ -815,7 +819,15 @@ class GrogInterpolator:
         if not batch_prefix:
             grid_kspace = grid_kspace.reshape(*s_shape, n_coils, *grid_shape)
 
-        return grid_kspace, mask, density
+        from ..operator._masked_fft import MaskedFFTPlan
+        masked_plan = MaskedFFTPlan(
+            grid_shape=grid_shape,
+            image_shape=tuple(plan.image_shape),
+            stack_shape=s_shape,
+            mask=mask,
+            density=density,
+        )
+        return grid_kspace, masked_plan
 
     def collect_shots(self) -> torch.Tensor:
         """Sum accumulated shot contributions and return gridded data."""

@@ -264,10 +264,10 @@ class GrogInterpolator(_GrogInterpolatorBase):
         grid = kwargs.get("grid", False)
         out = super().interpolate(np.asarray(kspace), **kwargs)
         if grid:
-            grid_kspace, mask, density = (np.asarray(t) for t in out)
+            grid_kspace, masked_plan = out
             if return_plan:
-                return grid_kspace, mask, density, self.plan
-            return grid_kspace, mask, density
+                return np.asarray(grid_kspace), masked_plan, self.plan
+            return np.asarray(grid_kspace), masked_plan
         out = np.asarray(out)
         # Reshape from flat (*batch, C, n_samples) → (*batch, C, *natural_shape)
         out = out.reshape(*out.shape[:-1], *self.plan.natural_shape)

@@ -437,15 +437,27 @@ class GrogInterpolator(_GrogInterpolatorBase):
             K-space data sharing the trajectory/encoding used at
             construction.
         return_plan : bool, optional
-            If ``True`` (default) return ``(KData, GrogPlan)``; if
-            ``False`` return the ``KData`` only.
+            If ``True`` (default) return the plan alongside the output.
+        grid : bool, optional
+            If ``True``, scatter the interpolated samples onto a dense
+            oversampled Cartesian grid and return
+            ``(KData, mask, density[, plan])``.  The returned ``KData``
+            carries a regular Cartesian ``KTrajectory`` and has shape
+            ``(*other, n_coils, k2, k1, k0)`` matching ``grid_shape``
+            (``k2=1`` for 2D plans).  ``mask`` and ``density`` have shape
+            ``(*stack, *grid_shape)`` and can be passed directly to
+            :class:`~pygrog.operator.MaskedFFT`.
 
         Returns
         -------
         KData (or (KData, GrogPlan))
-            ``data`` shape ``(*other, n_coils, k2', k1', k0')`` with the
-            GROG kernel width fused into ``k0'``; ``traj`` updated to the
-            gridded sample positions; ``header`` carried over.
+            When ``grid=False`` (default): ``data`` shape
+            ``(*other, n_coils, k2', k1', k0')`` with the GROG kernel width
+            fused into ``k0'``; ``traj`` updated to the gridded sample
+            positions; ``header`` carried over.
+        (KData, mask, density[, plan])
+            When ``grid=True``: dense Cartesian KData with Cartesian
+            trajectory, plus real-valued ``mask`` and ``density`` tensors.
         """
         from mrpro.data import KData, KTrajectory, SpatialDimension
 
@@ -461,9 +473,40 @@ class GrogInterpolator(_GrogInterpolatorBase):
         if grid:
             out = super().interpolate(data_for_interp, grid=True)
             grid_kspace, mask, density = (torch.as_tensor(t) for t in out)
+            # grid_kspace: (*batch, *stack, C, *grid_shape)
+            # Re-insert singleton k2 for 2D → (*batch, *stack, C, 1, gy, gx)
+            grid_data = _spatial_to_kdata(grid_kspace, self._ndim)
+
+            # Build a regular Cartesian KTrajectory covering the oversampled grid.
+            plan = self.plan
+            grid_shape = tuple(int(s) for s in plan.grid_shape)
+            traj_1d = []
+            for d, gs in enumerate(grid_shape):
+                origin = float(-(enc_shape[d] // 2))
+                step = (enc_shape[d] - 1) / (gs - 1) if gs > 1 else 1.0
+                traj_1d.append(
+                    origin + torch.arange(gs, dtype=torch.float32) * step
+                )
+            # meshgrid → each tensor has shape (*grid_shape)
+            grids = torch.meshgrid(*traj_1d, indexing="ij")
+
+            if self._ndim == 2:
+                # 2D: grids[0]=ky, grids[1]=kx, each (gy, gx)
+                # mrpro KTrajectory layout: (*other, coil_singleton=1, k2, k1, k0)
+                kz_new = torch.zeros(1, 1, 1, *grid_shape, dtype=torch.float32)
+                ky_new = grids[0].unsqueeze(0).unsqueeze(0).unsqueeze(0)  # (1,1,1,gy,gx)
+                kx_new = grids[1].unsqueeze(0).unsqueeze(0).unsqueeze(0)
+            else:
+                # 3D: grids[0]=kz, grids[1]=ky, grids[2]=kx, each (gz,gy,gx)
+                kz_new = grids[0].unsqueeze(0).unsqueeze(0)  # (1,1,gz,gy,gx)
+                ky_new = grids[1].unsqueeze(0).unsqueeze(0)
+                kx_new = grids[2].unsqueeze(0).unsqueeze(0)
+
+            new_traj = KTrajectory(kz=kz_new, ky=ky_new, kx=kx_new)
+            new_kdata = KData(header=kdata.header, data=grid_data, traj=new_traj)
             if return_plan:
-                return grid_kspace, mask, density, self.plan
-            return grid_kspace, mask, density
+                return new_kdata, mask, density, plan
+            return new_kdata, mask, density
         sparse = super().interpolate(data_for_interp)
         # Reshape from flat (*other, coils, n_samples) → (*other, coils, *spatial, kw)
         sparse = torch.as_tensor(sparse)
