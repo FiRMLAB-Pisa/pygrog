@@ -260,11 +260,10 @@ def _grog_interpolate_all(
     """
     kspace_t = torch.as_tensor(kspace_tcns, dtype=torch.complex64)
     kspace_for_grog = kspace_t[0].permute(1, 0, 2, 3)  # (T, C, n_spokes, n_readout)
-    sparse = grog.interpolate(kspace_for_grog)  # (T, C, n_spokes, n_readout, kw)
+    sparse = grog.interpolate(kspace_for_grog)  # (T, C, n_flat)
     pre_w_t = torch.as_tensor(sqrt_weights, dtype=torch.float32)
-    nat = grog.plan.natural_shape  # (n_spokes, n_readout, kw)
-    pre_w_view = pre_w_t.view(*nat).to(sparse.dtype)
-    sparse = sparse * pre_w_view  # broadcasts over (T, C, *nat)
+    pre_w_view = pre_w_t.reshape(1, 1, -1).to(sparse.dtype)  # broadcast over (T, C, n_flat)
+    sparse = sparse * pre_w_view
     return sparse.cpu().numpy()
 
 
