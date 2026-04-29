@@ -278,6 +278,15 @@ class SparseFFT(SolveMixin):
         # GPU binning — computed lazily on first use
         self._bin_starts = None
         self._bin_size = 0
+        # Hot-cell scatter acceleration (CUDA). The k-space sampling
+        # frequently has a few cells (e.g. DC for radial trajectories)
+        # that absorb most samples; doing those via a sum-reduction avoids
+        # severe atomicAdd contention.  Computed lazily.
+        self._hot_uidx = None         # (n_hot,) int64 grid indices
+        self._hot_starts = None       # list[int] starts in sorted sample order
+        self._hot_ends = None         # list[int] ends   in sorted sample order
+        self._cold_seg_starts = None  # list[int] cold range starts
+        self._cold_seg_ends = None    # list[int] cold range ends
 
         # Packed-stack arrays — built lazily on first stacked op (see
         # ``_packed_arrays``).  Cached per compute device.
@@ -312,7 +321,18 @@ class SparseFFT(SolveMixin):
     # Internal helpers
     # ------------------------------------------------------------------
     def _ensure_bins(self, device):
-        """Compute GPU bins on first use for the given device."""
+        """Compute CUDA scatter acceleration metadata on first use.
+
+        Two strategies are prepared:
+
+        * Hot-cell handling — identifies grid cells that receive a large
+          number of samples (typically DC for radial / MRF trajectories,
+          where >65% of samples can map to a single voxel).  These cells
+          would otherwise serialize ``atomicAdd`` and dominate the scatter
+          runtime.  We instead reduce them via per-segment sums.
+        * Bin layout for the binned-shmem kernel (legacy fallback; only
+          used when no hot cells are detected).
+        """
         if device.type != "cuda" or self._bin_starts is not None:
             return
         if self.stack_shape:
@@ -320,22 +340,98 @@ class SparseFFT(SolveMixin):
             # rebuilding inside the forward loop).  This only affects CUDA
             # micro-optimisation; correctness is unchanged.
             return
+
+        sorted_idx = self.indices.to(device)
+
+        # --- hot-cell detection -------------------------------------------
+        unique_idx, counts = torch.unique_consecutive(
+            sorted_idx, return_counts=True
+        )
+        ends = torch.cumsum(counts, 0)
+        starts = ends - counts
+        # Threshold: cells with > sqrt(n_samples) entries are "hot".
+        # In practice this catches the DC peak and a handful of high-density
+        # cells that would otherwise serialise atomicAdd.
+        threshold = max(1024, int(self.n_samples ** 0.5))
+        hot_mask = counts > threshold
+        n_hot = int(hot_mask.sum().item())
+        if n_hot > 0:
+            hot_starts = starts[hot_mask]
+            hot_ends = ends[hot_mask]
+            hot_uidx = unique_idx[hot_mask]
+            # Sort hot ranges by start so the cold segments between them
+            # are well-defined contiguous slices.
+            order = torch.argsort(hot_starts)
+            hot_starts = hot_starts[order]
+            hot_ends = hot_ends[order]
+            hot_uidx = hot_uidx[order].contiguous()
+            hs = hot_starts.cpu().tolist()
+            he = hot_ends.cpu().tolist()
+            cold_s, cold_e = [], []
+            prev = 0
+            for s, e in zip(hs, he):
+                if s > prev:
+                    cold_s.append(prev)
+                    cold_e.append(s)
+                prev = e
+            if prev < self.n_samples:
+                cold_s.append(prev)
+                cold_e.append(self.n_samples)
+            self._hot_uidx = hot_uidx
+            self._hot_starts = hs
+            self._hot_ends = he
+            self._cold_seg_starts = cold_s
+            self._cold_seg_ends = cold_e
+            # Sentinel: mark scatter setup as done (keeps the
+            # ``self._bin_starts is not None`` early-out working).
+            self._bin_starts = hot_uidx
+            self._bin_size = -1  # negative => hot-cell path active
+            return
+
+        # --- legacy binned shared-memory path (no hot cells) --------------
         self._bin_size = 256
         n_bins = (self.grid_size + self._bin_size - 1) // self._bin_size
         bin_edges = torch.arange(n_bins + 1, dtype=torch.int64) * self._bin_size
         bin_edges[-1] = self.grid_size
-        sorted_idx = self.indices.to(device)
         self._bin_starts = torch.searchsorted(sorted_idx, bin_edges.to(device))
 
     def _scatter(self, grid, data, indices, sqrt_w):
-        """Weighted scatter-add using binned kernel when available."""
+        """Weighted scatter-add ``grid[idx[i]] += sqrt_w[i] * data[i]``.
+
+        Routes to:
+          * hot-cell + atomic path (CUDA, when hot cells were detected and
+            the caller is using the cached sorted plan ``self.indices``);
+          * binned shared-memory kernel (CUDA, no hot cells);
+          * plain atomic scatter (CPU and stacked / per-stack callers).
+        """
+        ext = _get_torch_ext()
+        # Fast path: hot-cell handling.  Only valid when called with the
+        # cached sorted plan indices (true for all non-stacked uses; stacked
+        # plans skip ``_ensure_bins`` and therefore have ``_hot_uidx is None``).
+        if (
+            self._hot_uidx is not None
+            and indices.device == self._hot_uidx.device
+            and indices.numel() == self.n_samples
+        ):
+            # Cold segments — contiguous slices, low-contention atomic.
+            for s, e in zip(self._cold_seg_starts, self._cold_seg_ends):
+                ext.scatter_add(grid, data[s:e], indices[s:e], sqrt_w[s:e])
+            # Hot segments — sum-reduce each, then a single index_add.
+            hot_sums = torch.empty(
+                len(self._hot_starts), dtype=data.dtype, device=data.device
+            )
+            for i, (s, e) in enumerate(zip(self._hot_starts, self._hot_ends)):
+                hot_sums[i] = (data[s:e] * sqrt_w[s:e]).sum()
+            grid.index_add_(0, self._hot_uidx, hot_sums)
+            return
+
         _scatter_add(
             grid,
             data,
             indices,
             sqrt_w,
-            bin_starts=self._bin_starts,
-            bin_size=self._bin_size,
+            bin_starts=self._bin_starts if self._bin_size > 0 else None,
+            bin_size=self._bin_size if self._bin_size > 0 else 0,
         )
 
     # ------------------------------------------------------------------

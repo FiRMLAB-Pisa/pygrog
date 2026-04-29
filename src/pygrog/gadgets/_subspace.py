@@ -121,21 +121,23 @@ def with_subspace(base_op, subspace_basis, encoding_axis: int = -4, *, toeplitz=
 
 
 class SubspaceSparseFFT(SolveMixin):
-    """SparseFFT with low-rank subspace projection (loop-fused).
+    """SparseFFT with low-rank subspace projection.
 
-    Adjoint (sparse → image), per coil:
+    Adjoint (sparse → image), per coil, per ``k`` (default ``k_chunk=1``):
         1. weight by ``sqrt_w`` once on the input;
-        2. for each ``k``: multiply by ``basis[k]`` along the T axis,
-           scatter into the per-K oversampled grid;
-        3. ONE batched K-IFFT + center-crop;
-        4. fused FMA with ``smaps[c].conj()`` into the ``(K, *image)`` accumulator.
+        2. multiply by ``basis[k]`` along the T axis;
+        3. scatter into a single reused oversampled grid, IFFT, center-crop;
+        4. fused FMA with ``smaps[c].conj()`` into ``output[k]``.
 
-    Forward (image → sparse), per coil:
-        1. multiply ``coeffs`` by ``smaps[c]``;
-        2. ONE batched K-FFT + center-pad;
-        3. for each ``k``: gather; accumulate ``basis.conj()[k] * gathered``
-           into the per-coil ``(*natural)`` accumulator;
-        4. write into the output coil slot.
+    Forward (image → sparse), per coil, per ``k``:
+        1. multiply ``coeffs[k]`` by ``smaps[c]``;
+        2. zero-pad into a single reused oversampled buffer, FFT, gather;
+        3. accumulate ``basis.conj()[k] * gathered`` into ``ksp_c``;
+        4. write ``ksp_c * sqrt_w`` into the output coil slot.
+
+    Setting ``k_chunk > 1`` routes the inner loop through batched
+    ``_scatter_ifft_crop_batch`` / ``_fft_pad_gather_batch`` helpers (one
+    FFT call over ``k_chunk`` planes), trading VRAM for FFT throughput.
 
     Parameters
     ----------
@@ -147,15 +149,31 @@ class SubspaceSparseFFT(SolveMixin):
     encoding_axis : int
         Axis (in full sparse layout) of the temporal dimension ``T``.
         Default ``-4`` (last four axes are natural ``(T, k1, k0, kw)``).
+    k_chunk : int, optional
+        Number of subspace components processed per batched FFT.  Default
+        ``1`` (lowest VRAM, one grid/padded buffer reused across all
+        ``(coil, k)`` pairs).
     """
 
     def __init__(
-        self, base_op, subspace_basis, encoding_axis: int = -4, *, toeplitz=None
+        self,
+        base_op,
+        subspace_basis,
+        encoding_axis: int = -4,
+        *,
+        toeplitz=None,
+        k_chunk: int = 1,
     ):
         self._base = base_op
         self.basis = torch.as_tensor(subspace_basis)  # (K, T)
         self.K, self.T = self.basis.shape
         self.encoding_axis = encoding_axis
+        # K-batching factor for the inner (FFT, scatter/gather) loop.
+        # Default 1 = one grid/padded buffer reused across the K subspace
+        # components (lowest VRAM, restores pre-regression behaviour).
+        # Larger values trade memory for batched FFT throughput by routing
+        # through `_scatter_ifft_crop_batch` / `_fft_pad_gather_batch`.
+        self.k_chunk = max(1, int(k_chunk))
 
         self.grid_shape = base_op.grid_shape
         self.image_shape = base_op.image_shape
@@ -185,6 +203,41 @@ class SubspaceSparseFFT(SolveMixin):
             toeplitz = bool(getattr(base_op, "toeplitz", False))
         self.toeplitz = bool(toeplitz)
         self._toep_op = None  # lazily built
+
+        # Cache for sort-hoisted T-index lookup (per stack element + device).
+        # ``t_idx[i] = T-coordinate of natural sample i``;
+        # ``t_idx_sorted = t_idx[sort_perm]`` indexes basis rows in the
+        # sorted sample order used by the scatter kernel.  Avoids a
+        # 1.3 GB random-access gather per (coil, k) iteration.
+        self._t_idx_cache: dict = {}
+
+    def _get_t_idx_sorted(self, sort_perm: torch.Tensor, s_flat_idx: int):
+        """Return cached sorted T-index for the current stack & device."""
+        key = (s_flat_idx, sort_perm.device, int(sort_perm.numel()))
+        cached = self._t_idx_cache.get(key)
+        if cached is not None:
+            return cached
+        nat = self._base.natural_shape
+        nat_ndim = len(nat)
+        T = self.T
+        # PyTorch indexing requires long/int32 (no int16) → pick int32 when
+        # T fits, else int64.
+        if T <= 2_147_483_647:
+            idx_dtype = torch.int32
+        else:
+            idx_dtype = torch.int64
+        view_shape = [1] * nat_ndim
+        view_shape[self._t_axis_in_nat] = T
+        t_axis = (
+            torch.arange(T, dtype=idx_dtype, device=sort_perm.device)
+            .view(view_shape)
+            .expand(nat)
+            .reshape(-1)
+        )
+        # Materialise then permute (small one-shot cost; cached afterwards).
+        t_idx_sorted = t_axis[sort_perm].contiguous()
+        self._t_idx_cache[key] = t_idx_sorted
+        return t_idx_sorted
 
     # ------------------------------------------------------------------
     # adjoint: sparse k-space → subspace coefficient images  (A^H)
@@ -262,7 +315,7 @@ class SubspaceSparseFFT(SolveMixin):
 
         # Dispatch to dual-stream pipeline when input lives on CPU but the
         # base operator computes on CUDA.  Overlaps per-coil H2D with the
-        # K-batched scatter+IFFT compute.
+        # per-K scatter+IFFT compute.
         if self._use_dual_stream(sparse_kspace):
             return self._adjoint_single_dual(sparse_kspace, s_flat_idx)
 
@@ -285,16 +338,51 @@ class SubspaceSparseFFT(SolveMixin):
 
         output = torch.zeros(K, *base.image_shape, dtype=dtype, device=device)
 
-        # Per-stack pre-weights via the operator's _stack_arrays.
-        _idx_s, sqw_s, _, ip_s = base._stack_arrays(s_flat_idx)
+        # Per-stack arrays + natural-order pre-weights.
+        idx_s, sqw_s, sp_s, ip_s = base._stack_arrays(s_flat_idx)
+        indices = idx_s.to(device)
+        sqrt_w = sqw_s.to(device)
+        sort_perm = sp_s.to(device)
         pre_w = sqw_s[ip_s].to(device=device, dtype=dtype).view(*nat)
+        base._ensure_bins(device)
 
-        for c in range(n_coils):
-            sw_c = sparse_kspace[c] * pre_w  # (*nat) pre-weighted
-            weighted = basis.view(K, *phi_shape) * sw_c.unsqueeze(0)
-            weighted_flat = weighted.reshape(K, -1)  # (K, n_samples)
-            imgs = base._scatter_ifft_crop_batch(weighted_flat, s_flat_idx=s_flat_idx)
-            output.addcmul_(imgs, smaps[c].conj().unsqueeze(0))
+        k_chunk = self.k_chunk
+        if k_chunk <= 1:
+            # Lowest-VRAM path: one reused grid buffer across all (c, k).
+            # Sort hoisting: the heavy ``flat[sort_perm]`` (1.3 GB random
+            # gather) is done ONCE per coil; per-k work is a small T-indexed
+            # basis lookup + element-wise multiply on the already-sorted
+            # data.  Brings adjoint cost in line with forward.
+            grid = torch.empty(base.grid_size, dtype=dtype, device=device)
+            t_idx_sorted = self._get_t_idx_sorted(sort_perm, s_flat_idx)
+            for c in range(n_coils):
+                # ``sw_c_sorted`` is in scatter-sorted order (no per-k gather).
+                sw_c_sorted = (
+                    (sparse_kspace[c] * pre_w).reshape(-1)[sort_perm]
+                )
+                smap_conj_c = smaps[c].conj()
+                for k in range(K):
+                    # T-indexed lookup → (n_samples,) basis values, then
+                    # element-wise multiply with the sorted weighted samples.
+                    weighted_sorted = basis[k][t_idx_sorted] * sw_c_sorted
+                    img_k = base._scatter_ifft_crop(
+                        weighted_sorted, indices, sqrt_w, grid, dtype
+                    )
+                    output[k].addcmul_(img_k, smap_conj_c)
+        else:
+            # K-batched path (high VRAM, batched FFT): chunk over k.
+            for c in range(n_coils):
+                sw_c = sparse_kspace[c] * pre_w
+                smap_conj_c = smaps[c].conj().unsqueeze(0)
+                for k0 in range(0, K, k_chunk):
+                    k1 = min(k0 + k_chunk, K)
+                    kb = k1 - k0
+                    weighted = basis[k0:k1].view(kb, *phi_shape) * sw_c.unsqueeze(0)
+                    weighted_flat = weighted.reshape(kb, -1)
+                    imgs = base._scatter_ifft_crop_batch(
+                        weighted_flat, s_flat_idx=s_flat_idx
+                    )
+                    output[k0:k1].addcmul_(imgs, smap_conj_c)
 
         return output
 
@@ -378,15 +466,47 @@ class SubspaceSparseFFT(SolveMixin):
 
         output = torch.empty(n_coils, *nat, dtype=dtype, device=device)
 
-        _idx_s, sqw_s, _, ip_s = base._stack_arrays(s_flat_idx)
+        idx_s, sqw_s, _, ip_s = base._stack_arrays(s_flat_idx)
+        indices = idx_s.to(device)
+        sqrt_w = sqw_s.to(device)
+        inv_perm = ip_s.to(device)
         pre_w = sqw_s[ip_s].to(device=device, dtype=dtype).view(*nat)
 
-        for c in range(n_coils):
-            coil_imgs = coeffs * smaps[c].unsqueeze(0)  # (K, *image)
-            gathered = base._fft_pad_gather_batch(coil_imgs, s_flat_idx=s_flat_idx)
-            gathered_nat = gathered.reshape(K, *nat)
-            ksp_c = (basis_conj.view(K, *phi_shape) * gathered_nat).sum(dim=0)
-            output[c] = ksp_c * pre_w
+        k_chunk = self.k_chunk
+        if k_chunk <= 1:
+            # Lowest-VRAM path: one reused padded buffer across all (c, k).
+            padded = torch.empty(*base.grid_shape, dtype=dtype, device=device)
+            for c in range(n_coils):
+                smap_c = smaps[c]
+                ksp_c = torch.zeros(*nat, dtype=dtype, device=device)
+                for k in range(K):
+                    coil_img_k = coeffs[k] * smap_c  # (*image)
+                    gathered_k = base._fft_pad_gather(
+                        coil_img_k, indices, sqrt_w, inv_perm, padded, dtype
+                    )
+                    ksp_c.add_(
+                        basis_conj[k].view(*phi_shape) * gathered_k.reshape(*nat)
+                    )
+                output[c] = ksp_c * pre_w
+        else:
+            # K-batched path (high VRAM, batched FFT): chunk over k.
+            for c in range(n_coils):
+                smap_c = smaps[c]
+                ksp_c = torch.zeros(*nat, dtype=dtype, device=device)
+                for k0 in range(0, K, k_chunk):
+                    k1 = min(k0 + k_chunk, K)
+                    kb = k1 - k0
+                    coil_imgs = coeffs[k0:k1] * smap_c.unsqueeze(0)
+                    gathered = base._fft_pad_gather_batch(
+                        coil_imgs, s_flat_idx=s_flat_idx
+                    )
+                    gathered_nat = gathered.reshape(kb, *nat)
+                    ksp_c.add_(
+                        (basis_conj[k0:k1].view(kb, *phi_shape) * gathered_nat).sum(
+                            dim=0
+                        )
+                    )
+                output[c] = ksp_c * pre_w
 
         return output
 
@@ -410,7 +530,7 @@ class SubspaceSparseFFT(SolveMixin):
         self, sparse_kspace: torch.Tensor, s_flat_idx: int = 0
     ) -> torch.Tensor:
         """Coil-pipelined adjoint: H2D of next coil overlapped with the
-        K-batched scatter+IFFT+FMA of the current coil.
+        per-K scatter+IFFT+FMA of the current coil.
 
         Input: ``(C, *natural)`` on CPU.  Output: ``(K, *image_shape)`` on CPU
         (mirrors the synchronous fast-path return device)."""
@@ -430,10 +550,14 @@ class SubspaceSparseFFT(SolveMixin):
 
         # Pre-stage constants once on the compute device.
         basis_gpu = self.basis.to(comp_device, dtype=dtype)  # (K, T)
-        _idx_s, sqw_s, _, ip_s = base._stack_arrays(s_flat_idx)
+        idx_s, sqw_s, sp_s, ip_s = base._stack_arrays(s_flat_idx)
+        indices = idx_s.to(comp_device)
+        sqrt_w = sqw_s.to(comp_device)
+        sort_perm = sp_s.to(comp_device)
         pre_w_gpu = (
             sqw_s[ip_s].to(device=comp_device, dtype=dtype).view(*nat)
         )  # (*nat)
+        base._ensure_bins(comp_device)
 
         smaps_cpu = base.smaps.to(dtype=dtype)
         if not smaps_cpu.is_pinned() and smaps_cpu.device.type == "cpu":
@@ -457,6 +581,13 @@ class SubspaceSparseFFT(SolveMixin):
 
         s_data = torch.cuda.Stream(device=comp_device)
         s_comp = torch.cuda.Stream(device=comp_device)
+
+        # Single grid buffer reused across all (c, k) on the compute stream.
+        k_chunk = self.k_chunk
+        if k_chunk <= 1:
+            grid = torch.empty(base.grid_size, dtype=dtype, device=comp_device)
+        else:
+            grid = None
 
         # Double-buffer the per-coil sparse + smaps slabs on the data stream.
         buf_sparse: list[torch.Tensor | None] = [None, None]
@@ -485,15 +616,38 @@ class SubspaceSparseFFT(SolveMixin):
             # Compute on s_comp; ensure cur transfer is visible there.
             s_comp.wait_stream(s_data)
             with torch.cuda.stream(s_comp):
-                sw_c = buf_sparse[cur] * pre_w_gpu  # (*nat)
-                weighted = basis_gpu.view(K, *phi_shape) * sw_c.unsqueeze(0)
-                weighted_flat = weighted.reshape(K, -1)
-                # Input is already on comp_device, so the helper's .to(...)
-                # is a no-op and the IFFT executes on s_comp.
-                imgs = base._scatter_ifft_crop_batch(
-                    weighted_flat, s_flat_idx=s_flat_idx
-                )
-                output_gpu.addcmul_(imgs, buf_smaps[cur].conj().unsqueeze(0))
+                smap_conj_c = buf_smaps[cur].conj()
+                if k_chunk <= 1:
+                    # Sort hoisting: one big gather per coil; per-k is a
+                    # T-indexed basis lookup + element-wise multiply.
+                    t_idx_sorted = self._get_t_idx_sorted(
+                        sort_perm, s_flat_idx
+                    )
+                    sw_c_sorted = (
+                        (buf_sparse[cur] * pre_w_gpu).reshape(-1)[sort_perm]
+                    )
+                    for k in range(K):
+                        weighted_sorted = (
+                            basis_gpu[k][t_idx_sorted] * sw_c_sorted
+                        )
+                        img_k = base._scatter_ifft_crop(
+                            weighted_sorted, indices, sqrt_w, grid, dtype
+                        )
+                        output_gpu[k].addcmul_(img_k, smap_conj_c)
+                else:
+                    sw_c = buf_sparse[cur] * pre_w_gpu  # (*nat)
+                    smap_conj_b = smap_conj_c.unsqueeze(0)
+                    for k0 in range(0, K, k_chunk):
+                        k1 = min(k0 + k_chunk, K)
+                        kb = k1 - k0
+                        weighted = basis_gpu[k0:k1].view(
+                            kb, *phi_shape
+                        ) * sw_c.unsqueeze(0)
+                        weighted_flat = weighted.reshape(kb, -1)
+                        imgs = base._scatter_ifft_crop_batch(
+                            weighted_flat, s_flat_idx=s_flat_idx
+                        )
+                        output_gpu[k0:k1].addcmul_(imgs, smap_conj_b)
 
         torch.cuda.synchronize(comp_device)
         return output_gpu.to(sparse_kspace.device)
@@ -501,7 +655,7 @@ class SubspaceSparseFFT(SolveMixin):
     def _forward_single_dual(
         self, coeffs: torch.Tensor, s_flat_idx: int = 0
     ) -> torch.Tensor:
-        """Coil-pipelined forward: per-coil K-batched FFT+gather on the
+        """Coil-pipelined forward: per-coil per-K FFT+gather on the
         compute stream, async D2H of the result on the data stream.
 
         Input: ``(K, *image_shape)`` on CPU.  Output: ``(C, *natural)`` on CPU."""
@@ -519,7 +673,10 @@ class SubspaceSparseFFT(SolveMixin):
         phi_shape[self._t_axis_in_nat] = T
 
         basis_conj_gpu = self.basis.conj().to(comp_device, dtype=dtype)
-        _idx_s, sqw_s, _, ip_s = base._stack_arrays(s_flat_idx)
+        idx_s, sqw_s, _, ip_s = base._stack_arrays(s_flat_idx)
+        indices = idx_s.to(comp_device)
+        sqrt_w = sqw_s.to(comp_device)
+        inv_perm = ip_s.to(comp_device)
         pre_w_gpu = sqw_s[ip_s].to(device=comp_device, dtype=dtype).view(*nat)
 
         # Coeffs are constant across coils — stage once.
@@ -544,6 +701,15 @@ class SubspaceSparseFFT(SolveMixin):
         s_data = torch.cuda.Stream(device=comp_device)
         s_comp = torch.cuda.Stream(device=comp_device)
 
+        # Single padded buffer reused across all (c, k) on the compute stream.
+        k_chunk = self.k_chunk
+        if k_chunk <= 1:
+            padded = torch.empty(
+                *base.grid_shape, dtype=dtype, device=comp_device
+            )
+        else:
+            padded = None
+
         buf_smaps: list[torch.Tensor | None] = [None, None]
         ksp_buf: list[torch.Tensor | None] = [None, None]
 
@@ -563,15 +729,34 @@ class SubspaceSparseFFT(SolveMixin):
 
             s_comp.wait_stream(s_data)
             with torch.cuda.stream(s_comp):
-                coil_imgs = coeffs_gpu * buf_smaps[cur].unsqueeze(0)
-                gathered = base._fft_pad_gather_batch(
-                    coil_imgs, s_flat_idx=s_flat_idx
-                )
-                gathered_nat = gathered.reshape(K, *nat)
-                ksp_c = (
-                    basis_conj_gpu.view(K, *phi_shape) * gathered_nat
-                ).sum(dim=0) * pre_w_gpu
-                ksp_buf[cur] = ksp_c
+                smap_c = buf_smaps[cur]
+                ksp_c = torch.zeros(*nat, dtype=dtype, device=comp_device)
+                if k_chunk <= 1:
+                    for k in range(K):
+                        coil_img_k = coeffs_gpu[k] * smap_c
+                        gathered_k = base._fft_pad_gather(
+                            coil_img_k, indices, sqrt_w, inv_perm, padded, dtype
+                        )
+                        ksp_c.add_(
+                            basis_conj_gpu[k].view(*phi_shape)
+                            * gathered_k.reshape(*nat)
+                        )
+                else:
+                    for k0 in range(0, K, k_chunk):
+                        k1 = min(k0 + k_chunk, K)
+                        kb = k1 - k0
+                        coil_imgs = coeffs_gpu[k0:k1] * smap_c.unsqueeze(0)
+                        gathered = base._fft_pad_gather_batch(
+                            coil_imgs, s_flat_idx=s_flat_idx
+                        )
+                        gathered_nat = gathered.reshape(kb, *nat)
+                        ksp_c.add_(
+                            (
+                                basis_conj_gpu[k0:k1].view(kb, *phi_shape)
+                                * gathered_nat
+                            ).sum(dim=0)
+                        )
+                ksp_buf[cur] = ksp_c * pre_w_gpu
 
             # Async D2H on the data stream while the next coil computes.
             s_data.wait_stream(s_comp)
