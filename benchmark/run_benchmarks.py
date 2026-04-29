@@ -11,11 +11,32 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import traceback
 import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+# --------------------------------------------------------------------- #
+# Cap CPU thread pools BEFORE importing numpy/torch/mrinufft.  Without
+# this, on a 96-core box each of MKL/OpenBLAS/OpenMP/torch spawns ~96
+# workers and the per-coil C++ scatter/gather kernels collapse under
+# cache-line contention.  Default: min(16, cpu_count).  Override with
+# the env var ``PYGROG_BENCH_THREADS=N`` (must be set before launch to
+# affect numpy/MKL).
+# --------------------------------------------------------------------- #
+_DEFAULT_THREAD_CAP = min(16, os.cpu_count() or 1)
+_thread_cap_env = os.environ.get("PYGROG_BENCH_THREADS")
+_THREAD_CAP = int(_thread_cap_env) if _thread_cap_env else _DEFAULT_THREAD_CAP
+for _v in (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+):
+    os.environ.setdefault(_v, str(_THREAD_CAP))
 
 # Suppress mrinufft's noisy trajectory-rescaling UserWarning.
 warnings.filterwarnings(
@@ -26,6 +47,8 @@ warnings.filterwarnings(
 
 import numpy as np
 import torch
+
+torch.set_num_threads(_THREAD_CAP)
 
 from benchmark import profile
 
@@ -60,6 +83,7 @@ class BenchmarkConfig:
     no_gpu: bool = False
     accel_k1: int = 1
     skip_scaling: bool = False
+    thread_cap: int = _THREAD_CAP
 
 
 @dataclass
@@ -837,7 +861,9 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 if torch.cuda.is_available()
                 else None
             ),
-            "cpu_count": __import__("os").cpu_count(),
+            "cpu_count": os.cpu_count(),
+            "thread_cap": int(cfg.thread_cap),
+            "torch_num_threads": int(torch.get_num_threads()),
         },
         "steps": {},
     }
@@ -986,9 +1012,14 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 sparse_fft_gpu_full, basis_kt, encoding_axis=-4
             )
             _gpu_subspace = subspace_gpu_full
+            # Full-GPU contract: inputs already live on the compute device
+            # so the timed call only measures kernels (no per-coil H2D).
+            _gpu_dev = f"cuda:{cfg.gpu_device}"
+            sparse_natural_t_gpu = sparse_natural_t.to(_gpu_dev)
+            coeff_nufft_t_gpu = coeff_nufft_t.to(_gpu_dev)
             _, grog_adj_gpu_full_m = profile(
                 _grog_subspace_adjoint,
-                sparse_natural_t,
+                sparse_natural_t_gpu,
                 subspace_gpu_full,
                 warmup=cfg.warmup,
                 repeat=cfg.repeats,
@@ -996,7 +1027,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
             )
             _, grog_fwd_gpu_full_m = profile(
                 _grog_subspace_forward,
-                coeff_nufft_t,
+                coeff_nufft_t_gpu,
                 subspace_gpu_full,
                 warmup=cfg.warmup,
                 repeat=cfg.repeats,
@@ -1193,6 +1224,16 @@ def parse_args() -> argparse.Namespace:
         help="Fail if CUFINUFFT GPU NUFFT benchmark cannot run.",
     )
     parser.add_argument(
+        "--threads",
+        type=int,
+        default=None,
+        help=(
+            "Cap CPU thread pools (OMP/MKL/OpenBLAS/torch). Defaults to "
+            "min(16, os.cpu_count()).  For full effect on numpy/MKL set "
+            "PYGROG_BENCH_THREADS=N in the environment before launching."
+        ),
+    )
+    parser.add_argument(
         "--scaling-ratios",
         type=str,
         default=",".join(str(v) for v in DEFAULT_SCALING_RATIOS),
@@ -1233,7 +1274,10 @@ def main() -> None:
         no_gpu=args.no_gpu,
         accel_k1=args.accel_k1,
         skip_scaling=args.skip_scaling,
+        thread_cap=int(args.threads) if args.threads else _THREAD_CAP,
     )
+    if args.threads:
+        torch.set_num_threads(int(args.threads))
 
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)

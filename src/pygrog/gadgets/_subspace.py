@@ -259,6 +259,13 @@ class SubspaceSparseFFT(SolveMixin):
     def _adjoint_single(self, sparse_kspace: torch.Tensor, s_flat_idx: int = 0):
         """Single-frame, single-stack-element adjoint.  Input: ``(C, *natural)``."""
         base = self._base
+
+        # Dispatch to dual-stream pipeline when input lives on CPU but the
+        # base operator computes on CUDA.  Overlaps per-coil H2D with the
+        # K-batched scatter+IFFT compute.
+        if self._use_dual_stream(sparse_kspace):
+            return self._adjoint_single_dual(sparse_kspace, s_flat_idx)
+
         nat = base.natural_shape
         nat_ndim = len(nat)
         device = sparse_kspace.device
@@ -340,6 +347,10 @@ class SubspaceSparseFFT(SolveMixin):
         """Single-frame, single-stack-element forward.  Input: ``(K, *image_shape)``,
         Output: ``(C, *natural)``."""
         base = self._base
+
+        if self._use_dual_stream(coeffs):
+            return self._forward_single_dual(coeffs, s_flat_idx)
+
         nat = base.natural_shape
         nat_ndim = len(nat)
 
@@ -378,6 +389,197 @@ class SubspaceSparseFFT(SolveMixin):
             output[c] = ksp_c * pre_w
 
         return output
+
+    # ------------------------------------------------------------------
+    # Dual-stream GPU pipeline (CPU input -> GPU compute, overlapped)
+    # ------------------------------------------------------------------
+    def _use_dual_stream(self, x: torch.Tensor) -> bool:
+        """Return True when ``x`` lives on CPU and the base operator
+        computes on a CUDA device — the only configuration where coil-level
+        stream overlap pays off."""
+        base = self._base
+        comp = getattr(base, "device", None)
+        return (
+            comp is not None
+            and getattr(comp, "type", None) == "cuda"
+            and x.device.type == "cpu"
+            and torch.cuda.is_available()
+        )
+
+    def _adjoint_single_dual(
+        self, sparse_kspace: torch.Tensor, s_flat_idx: int = 0
+    ) -> torch.Tensor:
+        """Coil-pipelined adjoint: H2D of next coil overlapped with the
+        K-batched scatter+IFFT+FMA of the current coil.
+
+        Input: ``(C, *natural)`` on CPU.  Output: ``(K, *image_shape)`` on CPU
+        (mirrors the synchronous fast-path return device)."""
+        base = self._base
+        nat = base.natural_shape
+        nat_ndim = len(nat)
+        comp_device = base.device
+        n_coils = int(sparse_kspace.shape[0])
+        K, T = self.K, self.T
+        dtype = sparse_kspace.dtype
+
+        if base.smaps is None:
+            raise NotImplementedError("SubspaceSparseFFT requires base_op.smaps")
+
+        phi_shape = [1] * nat_ndim
+        phi_shape[self._t_axis_in_nat] = T
+
+        # Pre-stage constants once on the compute device.
+        basis_gpu = self.basis.to(comp_device, dtype=dtype)  # (K, T)
+        _idx_s, sqw_s, _, ip_s = base._stack_arrays(s_flat_idx)
+        pre_w_gpu = (
+            sqw_s[ip_s].to(device=comp_device, dtype=dtype).view(*nat)
+        )  # (*nat)
+
+        smaps_cpu = base.smaps.to(dtype=dtype)
+        if not smaps_cpu.is_pinned() and smaps_cpu.device.type == "cpu":
+            try:
+                smaps_cpu = smaps_cpu.pin_memory()
+            except RuntimeError:
+                pass
+        sparse_pin = sparse_kspace
+        if (
+            sparse_pin.device.type == "cpu"
+            and not sparse_pin.is_pinned()
+        ):
+            try:
+                sparse_pin = sparse_pin.pin_memory()
+            except RuntimeError:
+                pass
+
+        output_gpu = torch.zeros(
+            K, *base.image_shape, dtype=dtype, device=comp_device
+        )
+
+        s_data = torch.cuda.Stream(device=comp_device)
+        s_comp = torch.cuda.Stream(device=comp_device)
+
+        # Double-buffer the per-coil sparse + smaps slabs on the data stream.
+        buf_sparse: list[torch.Tensor | None] = [None, None]
+        buf_smaps: list[torch.Tensor | None] = [None, None]
+
+        with torch.cuda.stream(s_data):
+            buf_sparse[0] = sparse_pin[0].to(
+                comp_device, dtype=dtype, non_blocking=True
+            )
+            buf_smaps[0] = smaps_cpu[0].to(
+                comp_device, dtype=dtype, non_blocking=True
+            )
+
+        for c in range(n_coils):
+            cur = c % 2
+            nxt = 1 - cur
+            if c + 1 < n_coils:
+                with torch.cuda.stream(s_data):
+                    buf_sparse[nxt] = sparse_pin[c + 1].to(
+                        comp_device, dtype=dtype, non_blocking=True
+                    )
+                    buf_smaps[nxt] = smaps_cpu[c + 1].to(
+                        comp_device, dtype=dtype, non_blocking=True
+                    )
+
+            # Compute on s_comp; ensure cur transfer is visible there.
+            s_comp.wait_stream(s_data)
+            with torch.cuda.stream(s_comp):
+                sw_c = buf_sparse[cur] * pre_w_gpu  # (*nat)
+                weighted = basis_gpu.view(K, *phi_shape) * sw_c.unsqueeze(0)
+                weighted_flat = weighted.reshape(K, -1)
+                # Input is already on comp_device, so the helper's .to(...)
+                # is a no-op and the IFFT executes on s_comp.
+                imgs = base._scatter_ifft_crop_batch(
+                    weighted_flat, s_flat_idx=s_flat_idx
+                )
+                output_gpu.addcmul_(imgs, buf_smaps[cur].conj().unsqueeze(0))
+
+        torch.cuda.synchronize(comp_device)
+        return output_gpu.to(sparse_kspace.device)
+
+    def _forward_single_dual(
+        self, coeffs: torch.Tensor, s_flat_idx: int = 0
+    ) -> torch.Tensor:
+        """Coil-pipelined forward: per-coil K-batched FFT+gather on the
+        compute stream, async D2H of the result on the data stream.
+
+        Input: ``(K, *image_shape)`` on CPU.  Output: ``(C, *natural)`` on CPU."""
+        base = self._base
+        nat = base.natural_shape
+        nat_ndim = len(nat)
+        comp_device = base.device
+        K, T = self.K, self.T
+        dtype = coeffs.dtype
+
+        if base.smaps is None:
+            raise NotImplementedError("SubspaceSparseFFT requires base_op.smaps")
+
+        phi_shape = [1] * nat_ndim
+        phi_shape[self._t_axis_in_nat] = T
+
+        basis_conj_gpu = self.basis.conj().to(comp_device, dtype=dtype)
+        _idx_s, sqw_s, _, ip_s = base._stack_arrays(s_flat_idx)
+        pre_w_gpu = sqw_s[ip_s].to(device=comp_device, dtype=dtype).view(*nat)
+
+        # Coeffs are constant across coils — stage once.
+        coeffs_gpu = coeffs.to(comp_device, dtype=dtype, non_blocking=True)
+
+        smaps_cpu = base.smaps.to(dtype=dtype)
+        if smaps_cpu.device.type == "cpu" and not smaps_cpu.is_pinned():
+            try:
+                smaps_cpu = smaps_cpu.pin_memory()
+            except RuntimeError:
+                pass
+        n_coils = int(smaps_cpu.shape[0])
+
+        # Pinned destination so D2H copy_(non_blocking=True) is truly async.
+        try:
+            output_cpu = torch.empty(
+                n_coils, *nat, dtype=dtype, pin_memory=True
+            )
+        except RuntimeError:
+            output_cpu = torch.empty(n_coils, *nat, dtype=dtype)
+
+        s_data = torch.cuda.Stream(device=comp_device)
+        s_comp = torch.cuda.Stream(device=comp_device)
+
+        buf_smaps: list[torch.Tensor | None] = [None, None]
+        ksp_buf: list[torch.Tensor | None] = [None, None]
+
+        with torch.cuda.stream(s_data):
+            buf_smaps[0] = smaps_cpu[0].to(
+                comp_device, dtype=dtype, non_blocking=True
+            )
+
+        for c in range(n_coils):
+            cur = c % 2
+            nxt = 1 - cur
+            if c + 1 < n_coils:
+                with torch.cuda.stream(s_data):
+                    buf_smaps[nxt] = smaps_cpu[c + 1].to(
+                        comp_device, dtype=dtype, non_blocking=True
+                    )
+
+            s_comp.wait_stream(s_data)
+            with torch.cuda.stream(s_comp):
+                coil_imgs = coeffs_gpu * buf_smaps[cur].unsqueeze(0)
+                gathered = base._fft_pad_gather_batch(
+                    coil_imgs, s_flat_idx=s_flat_idx
+                )
+                gathered_nat = gathered.reshape(K, *nat)
+                ksp_c = (
+                    basis_conj_gpu.view(K, *phi_shape) * gathered_nat
+                ).sum(dim=0) * pre_w_gpu
+                ksp_buf[cur] = ksp_c
+
+            # Async D2H on the data stream while the next coil computes.
+            s_data.wait_stream(s_comp)
+            with torch.cuda.stream(s_data):
+                output_cpu[c].copy_(ksp_buf[cur], non_blocking=True)
+
+        torch.cuda.synchronize(comp_device)
+        return output_cpu.to(coeffs.device)
 
     @with_torch
     def normal(self, coeffs):
