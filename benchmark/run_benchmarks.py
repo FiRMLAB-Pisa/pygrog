@@ -296,7 +296,7 @@ def _grog_subspace_adjoint(
     subspace_op: SubspaceSparseFFT,
 ) -> torch.Tensor:
     """Sparse natural-shape → (K, *image_shape) coefficient images."""
-    return subspace_op.forward(sparse_natural)
+    return subspace_op.adjoint(sparse_natural)
 
 
 def _grog_subspace_forward(
@@ -304,7 +304,7 @@ def _grog_subspace_forward(
     subspace_op: SubspaceSparseFFT,
 ) -> torch.Tensor:
     """(K, *image_shape) coefficient images → sparse natural-shape."""
-    return subspace_op.adjoint(coeffs)
+    return subspace_op.forward(coeffs)
 
 
 def _grog_adjoint_from_sparse(
