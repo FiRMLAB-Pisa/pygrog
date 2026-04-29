@@ -23,9 +23,15 @@ carries the temporal/contrast dimension ``T``; the gadget broadcasts the
 basis along that axis.
 """
 
-__all__ = ["SubspaceProjection", "SubspaceSparseFFT", "with_subspace"]
+__all__ = [
+    "SubspaceProjection",
+    "SubspaceSparseFFT",
+    "SubspaceMaskedFFT",
+    "with_subspace",
+]
 
 import torch
+import numpy as np
 
 
 # =====================================================================
@@ -76,11 +82,11 @@ class SubspaceProjection:
 # =====================================================================
 def with_subspace(base_op, subspace_basis, encoding_axis: int = -4,
                   *, toeplitz=None):
-    """Wrap a SparseFFT operator with subspace projection.
+    """Wrap a SparseFFT or MaskedFFT operator with subspace projection.
 
     Parameters
     ----------
-    base_op : SparseFFT
+    base_op : SparseFFT | MaskedFFT
         Underlying operator with a multi-dim ``natural_shape`` containing
         the temporal axis.
     subspace_basis : array-like, complex
@@ -92,6 +98,11 @@ def with_subspace(base_op, subspace_basis, encoding_axis: int = -4,
         Use Toeplitz embedding for :meth:`normal`.  ``None`` inherits
         from ``base_op.toeplitz``.
     """
+    from ..operator._masked_fft import MaskedFFT
+    if isinstance(base_op, MaskedFFT):
+        return SubspaceMaskedFFT(
+            base_op, subspace_basis, encoding_axis=encoding_axis, toeplitz=toeplitz,
+        )
     return SubspaceSparseFFT(
         base_op, subspace_basis, encoding_axis=encoding_axis, toeplitz=toeplitz,
     )
@@ -180,29 +191,60 @@ class SubspaceSparseFFT:
     # implementation
     # ==================================================================
     def _adjoint_impl(self, sparse_kspace: torch.Tensor) -> torch.Tensor:
-        """Sparse (..., C, *natural) → coefficients (K, *image_shape).
+        """Sparse → coefficients.
 
-        Input may have any number of leading batch dims with product 1
-        (we squeeze them).  Output has no batch dim.
+        Accepted layouts:
+
+        - ``(*B, *S, C, *natural)``  (general)
+        - ``(C, *natural)``          (single frame, no batch / stack)
+
+        Output: ``(*B, *S, K, *image_shape)`` (or ``(K, *image_shape)``
+        for the no-batch / no-stack case).
         """
         base = self._base
         nat = base.natural_shape
         nat_ndim = len(nat)
+        s_shape = tuple(getattr(base, "stack_shape", ()) or ())
+        s_ndim = len(s_shape)
 
-        # Squeeze leading batch dims to simplify (assume product=1, typical use).
-        if sparse_kspace.ndim > 1 + nat_ndim:
-            lead = sparse_kspace.shape[:-(1 + nat_ndim)]
-            if any(int(s) != 1 for s in lead):
-                raise NotImplementedError(
-                    "Multi-element leading batch not supported in "
-                    f"SubspaceSparseFFT (got lead={lead})"
+        # Identify leading prefix (*B, *S) before (C, *natural).
+        prefix = tuple(int(s) for s in sparse_kspace.shape[: sparse_kspace.ndim - (1 + nat_ndim)])
+        if s_ndim:
+            if len(prefix) < s_ndim or tuple(prefix[-s_ndim:]) != s_shape:
+                raise ValueError(
+                    f"sparse_kspace prefix {prefix} must end with stack_shape {s_shape}"
                 )
-            sparse_kspace = sparse_kspace.reshape(*sparse_kspace.shape[-(1 + nat_ndim):])
-        if sparse_kspace.ndim != 1 + nat_ndim:
+            B_shape = prefix[:-s_ndim]
+        else:
+            B_shape = prefix
+        if sparse_kspace.ndim < 1 + nat_ndim:
             raise ValueError(
-                f"Expected (C, *natural)={('C',) + tuple(nat)}; got {tuple(sparse_kspace.shape)}"
+                f"Expected (...{(1 + nat_ndim)}D)=(C, *natural)={('C',) + tuple(nat)}; "
+                f"got {tuple(sparse_kspace.shape)}"
             )
 
+        # No batch, no stack → single-frame fast path.
+        if not prefix:
+            return self._adjoint_single(sparse_kspace, 0)
+
+        B_total = int(np.prod(B_shape)) if B_shape else 1
+        S_total = int(np.prod(s_shape)) if s_shape else 1
+        flat = sparse_kspace.reshape(
+            B_total, S_total, *sparse_kspace.shape[-(1 + nat_ndim):]
+        )
+        outs = []
+        for b in range(B_total):
+            for s in range(S_total):
+                outs.append(self._adjoint_single(flat[b, s], s))
+        # outs[i]: (K, *image_shape)
+        stacked = torch.stack(outs, dim=0)
+        return stacked.reshape(*B_shape, *s_shape, self.K, *base.image_shape)
+
+    def _adjoint_single(self, sparse_kspace: torch.Tensor, s_flat_idx: int = 0):
+        """Single-frame, single-stack-element adjoint.  Input: ``(C, *natural)``."""
+        base = self._base
+        nat = base.natural_shape
+        nat_ndim = len(nat)
         device = sparse_kspace.device
         dtype = sparse_kspace.dtype
         n_coils = int(sparse_kspace.shape[0])
@@ -215,35 +257,70 @@ class SubspaceSparseFFT:
         T = self.T
         K = self.K
 
-        # Broadcast view of basis along T axis inside natural space.
-        # basis (K, T) → (K, *phi_shape) so it lines up with (K, *nat).
         phi_shape = [1] * nat_ndim
         phi_shape[self._t_axis_in_nat] = T
 
         output = torch.zeros(K, *base.image_shape, dtype=dtype, device=device)
 
-        # Full density compensation w = sqrt_w**2:
-        # _scatter_ifft_crop_batch applies sqrt_w internally, so we apply
-        # the matching pre_w (= sqrt_w in natural / interpolate-output order)
-        # on the sparse side.
-        pre_w = base.sqrt_weights[base.inv_perm].to(device=device, dtype=dtype).view(*nat)
+        # Per-stack pre-weights via the operator's _stack_arrays.
+        idx_s, sqw_s, _, ip_s = base._stack_arrays(s_flat_idx)
+        pre_w = sqw_s[ip_s].to(device=device, dtype=dtype).view(*nat)
 
         for c in range(n_coils):
             sw_c = sparse_kspace[c] * pre_w  # (*nat) pre-weighted
-            # Build (K, *nat): basis[k, t] * sw_c[..., t, ...]
             weighted = basis.view(K, *phi_shape) * sw_c.unsqueeze(0)
             weighted_flat = weighted.reshape(K, -1)  # (K, n_samples)
-
-            # ONE batched K-IFFT + center-crop (uses scatter with sqrt_w internally).
-            imgs = base._scatter_ifft_crop_batch(weighted_flat)  # (K, *image)
-
-            # Fused multiply-accumulate into output.
+            imgs = base._scatter_ifft_crop_batch(weighted_flat, s_flat_idx=s_flat_idx)
             output.addcmul_(imgs, smaps[c].conj().unsqueeze(0))
 
         return output
 
     def _forward_impl(self, coeffs: torch.Tensor) -> torch.Tensor:
-        """Coefficients (K, *image_shape) → sparse (1, C, *natural)."""
+        """Coefficients → sparse.
+
+        Accepted layouts:
+
+        - ``(*B, *S, K, *image_shape)`` (general)
+        - ``(K, *image_shape)``         (single frame, no batch / stack)
+
+        Output: ``(*B, *S, C, *natural)`` (or ``(C, *natural)`` for the
+        no-batch / no-stack case).
+        """
+        base = self._base
+        nat = base.natural_shape
+        s_shape = tuple(getattr(base, "stack_shape", ()) or ())
+        s_ndim = len(s_shape)
+
+        img_ndim = len(base.image_shape)
+        single_ndim = 1 + img_ndim  # K + *image_shape
+        prefix = tuple(int(s) for s in coeffs.shape[: coeffs.ndim - single_ndim])
+        if s_ndim:
+            if len(prefix) < s_ndim or tuple(prefix[-s_ndim:]) != s_shape:
+                raise ValueError(
+                    f"coeffs prefix {prefix} must end with stack_shape {s_shape}"
+                )
+            B_shape = prefix[:-s_ndim]
+        else:
+            B_shape = prefix
+
+        if not prefix:
+            return self._forward_single(coeffs, 0)
+
+        B_total = int(np.prod(B_shape)) if B_shape else 1
+        S_total = int(np.prod(s_shape)) if s_shape else 1
+        flat = coeffs.reshape(B_total, S_total, *coeffs.shape[-single_ndim:])
+        outs = []
+        for b in range(B_total):
+            for s in range(S_total):
+                outs.append(self._forward_single(flat[b, s], s))
+        # outs[i]: (C, *nat)
+        n_coils = outs[0].shape[0]
+        stacked = torch.stack(outs, dim=0)
+        return stacked.reshape(*B_shape, *s_shape, n_coils, *nat)
+
+    def _forward_single(self, coeffs: torch.Tensor, s_flat_idx: int = 0) -> torch.Tensor:
+        """Single-frame, single-stack-element forward.  Input: ``(K, *image_shape)``,
+        Output: ``(C, *natural)``."""
         base = self._base
         nat = base.natural_shape
         nat_ndim = len(nat)
@@ -270,23 +347,17 @@ class SubspaceSparseFFT:
         phi_shape = [1] * nat_ndim
         phi_shape[self._t_axis_in_nat] = T
 
-        # Output: (1, C, *natural) — leading batch dim of size 1 to match
-        # the (1, C, T, k1, k0, kw) input convention used by the adjoint.
-        output = torch.empty(1, n_coils, *nat, dtype=dtype, device=device)
+        output = torch.empty(n_coils, *nat, dtype=dtype, device=device)
 
-        # Symmetric density compensation (matches _adjoint_impl).
-        pre_w = base.sqrt_weights[base.inv_perm].to(device=device, dtype=dtype).view(*nat)
+        idx_s, sqw_s, _, ip_s = base._stack_arrays(s_flat_idx)
+        pre_w = sqw_s[ip_s].to(device=device, dtype=dtype).view(*nat)
 
         for c in range(n_coils):
             coil_imgs = coeffs * smaps[c].unsqueeze(0)  # (K, *image)
-
-            # ONE batched K-FFT + pad + gather (sqrt_w applied internally).
-            gathered = base._fft_pad_gather_batch(coil_imgs)  # (K, n_samples)
+            gathered = base._fft_pad_gather_batch(coil_imgs, s_flat_idx=s_flat_idx)
             gathered_nat = gathered.reshape(K, *nat)
-
-            # Reduce K dim weighted by basis_conj broadcast over T axis.
             ksp_c = (basis_conj.view(K, *phi_shape) * gathered_nat).sum(dim=0)
-            output[0, c] = ksp_c * pre_w
+            output[c] = ksp_c * pre_w
 
         return output
 
@@ -297,6 +368,248 @@ class SubspaceSparseFFT:
                 self._toep_op = SubspaceToeplitzOp(
                     self, device=self._base.device,
                 )
+            return self._toep_op(coeffs)
+        return self._adjoint_impl(self._forward_impl(coeffs))
+
+    def __call__(self, x, adjoint=False):
+        if adjoint:
+            return self.adjoint(x)
+        return self.forward(x)
+
+
+# =====================================================================
+# MaskedFFT decorator
+# =====================================================================
+class SubspaceMaskedFFT:
+    """MaskedFFT with low-rank subspace projection (loop-fused).
+
+    Mirrors :class:`SubspaceSparseFFT` but operates on pre-gridded
+    k-space data via :class:`~pygrog.operator.MaskedFFT`.
+
+    Adjoint (gridded k-space → subspace coefficients), per coil:
+        1. for each ``k``: multiply by ``basis[k]`` along the T axis;
+        2. ONE batched K-IFFT + mask + center-crop;
+        3. fused FMA with ``smaps[c].conj()`` into the accumulator.
+
+    Forward (subspace coefficients → gridded k-space), per coil:
+        1. multiply coefficients by ``smaps[c]``;
+        2. ONE batched K-FFT + center-pad + mask;
+        3. for each ``k``: accumulate ``basis.conj()[k] * masked_grid``.
+
+    Parameters
+    ----------
+    base_op : MaskedFFT
+        Must have sensitivity maps (``smaps``) attached and a multi-dim
+        ``natural_shape`` covering the grid layout (e.g. ``(T, gy, gx)``
+        for a 2D+T acquisition).
+    subspace_basis : torch.Tensor
+        ``(K, T)`` complex basis.
+    encoding_axis : int
+        Axis (in full grid layout) of the temporal dimension ``T``.
+        Default ``-3`` (last three axes are ``(T, gy, gx)`` for 2D).
+    """
+
+    def __init__(self, base_op, subspace_basis, encoding_axis: int = -3,
+                 *, toeplitz=None):
+        self._base = base_op
+        self.basis = torch.as_tensor(subspace_basis)  # (K, T)
+        self.K, self.T = self.basis.shape
+        self.encoding_axis = encoding_axis
+
+        self.grid_shape = base_op.grid_shape
+        self.image_shape = base_op.image_shape
+        self.smaps = getattr(base_op, "smaps", None)
+
+        # Position of T inside natural_shape (i.e. grid_shape for MaskedFFT).
+        nat_ndim = len(base_op.natural_shape)
+        ax = encoding_axis if encoding_axis >= 0 else encoding_axis + (1 + nat_ndim)
+        self._t_axis_in_nat = ax - 1
+        if not (0 <= self._t_axis_in_nat < nat_ndim):
+            raise ValueError(
+                f"encoding_axis={encoding_axis} does not land inside natural_shape "
+                f"{base_op.natural_shape} (computed nat-axis {self._t_axis_in_nat})"
+            )
+        if base_op.natural_shape[self._t_axis_in_nat] != self.T:
+            raise ValueError(
+                f"basis T={self.T} does not match natural_shape"
+                f"[{self._t_axis_in_nat}]={base_op.natural_shape[self._t_axis_in_nat]}"
+            )
+
+        if toeplitz is None:
+            toeplitz = bool(getattr(base_op, "toeplitz", False))
+        self.toeplitz = bool(toeplitz)
+        self._toep_op = None
+
+    # ------------------------------------------------------------------
+    # forward: gridded k-space → subspace coefficient images
+    # ------------------------------------------------------------------
+    def forward(self, kspace_grid: torch.Tensor) -> torch.Tensor:
+        """Gridded k-space → subspace coefficient images."""
+        return self._adjoint_impl(kspace_grid)
+
+    def adjoint(self, coeffs: torch.Tensor) -> torch.Tensor:
+        """Subspace coefficient images → gridded k-space."""
+        return self._forward_impl(coeffs)
+
+    # ==================================================================
+    # implementation
+    # ==================================================================
+    def _adjoint_impl(self, kspace_grid: torch.Tensor) -> torch.Tensor:
+        """Gridded k-space → subspace coefficients.
+
+        Accepted layouts:
+        - ``(*B, *S, C, *grid_shape)``
+        - ``(C, *grid_shape)`` (single frame)
+
+        Output: ``(*B, *S, K, *image_shape)``.
+        """
+        base = self._base
+        nat = base.natural_shape   # == grid_shape for MaskedFFT
+        nat_ndim = len(nat)
+        s_shape = tuple(getattr(base, "stack_shape", ()) or ())
+        s_ndim = len(s_shape)
+
+        expected_trailing = 1 + nat_ndim  # (C, *grid_shape)
+        prefix = tuple(int(s) for s in kspace_grid.shape[:-expected_trailing])
+        if s_ndim:
+            if len(prefix) < s_ndim or tuple(prefix[-s_ndim:]) != s_shape:
+                raise ValueError(
+                    f"kspace_grid prefix {prefix} must end with stack_shape {s_shape}"
+                )
+            B_shape = prefix[:-s_ndim]
+        else:
+            B_shape = prefix
+
+        if not prefix:
+            return self._adjoint_single(kspace_grid, 0)
+
+        B_total = int(np.prod(B_shape)) if B_shape else 1
+        S_total = int(np.prod(s_shape)) if s_shape else 1
+        flat = kspace_grid.reshape(B_total, S_total, *kspace_grid.shape[-expected_trailing:])
+        outs = []
+        for b in range(B_total):
+            for s in range(S_total):
+                outs.append(self._adjoint_single(flat[b, s], s))
+        stacked = torch.stack(outs, dim=0)
+        return stacked.reshape(*B_shape, *s_shape, self.K, *base.image_shape)
+
+    def _adjoint_single(self, kspace_grid: torch.Tensor, s_flat_idx: int = 0):
+        """Single-frame adjoint.  Input: ``(C, *grid_shape)``."""
+        base = self._base
+        nat = base.natural_shape   # == grid_shape
+        nat_ndim = len(nat)
+        device = kspace_grid.device
+        dtype = kspace_grid.dtype
+        n_coils = int(kspace_grid.shape[0])
+
+        if base.smaps is None:
+            raise NotImplementedError("SubspaceMaskedFFT requires base_op.smaps")
+        smaps = base.smaps.to(device, dtype=dtype)
+        basis = self.basis.to(device, dtype=dtype)  # (K, T)
+        K = self.K
+
+        phi_shape = [1] * nat_ndim
+        phi_shape[self._t_axis_in_nat] = self.T
+
+        output = torch.zeros(K, *base.image_shape, dtype=dtype, device=device)
+
+        for c in range(n_coils):
+            # kspace_grid[c]: (*grid_shape), expand with K-basis along T axis
+            kg_c = kspace_grid[c]  # (*grid_shape)
+            # (K, *grid_shape): multiply each basis vector against the grid
+            weighted = basis.view(K, *phi_shape) * kg_c.unsqueeze(0)
+            # weighted: (K, *grid_shape) — already on the grid
+            imgs = base._mask_ifft_crop_batch(weighted, s_flat_idx=s_flat_idx)
+            output.addcmul_(imgs, smaps[c].conj().unsqueeze(0))
+
+        return output
+
+    def _forward_impl(self, coeffs: torch.Tensor) -> torch.Tensor:
+        """Subspace coefficients → gridded k-space.
+
+        Accepted layouts:
+        - ``(*B, *S, K, *image_shape)``
+        - ``(K, *image_shape)`` (single frame)
+
+        Output: ``(*B, *S, C, *grid_shape)``.
+        """
+        base = self._base
+        nat = base.natural_shape
+        s_shape = tuple(getattr(base, "stack_shape", ()) or ())
+        s_ndim = len(s_shape)
+
+        img_ndim = len(base.image_shape)
+        single_ndim = 1 + img_ndim
+        prefix = tuple(int(s) for s in coeffs.shape[: coeffs.ndim - single_ndim])
+        if s_ndim:
+            if len(prefix) < s_ndim or tuple(prefix[-s_ndim:]) != s_shape:
+                raise ValueError(
+                    f"coeffs prefix {prefix} must end with stack_shape {s_shape}"
+                )
+            B_shape = prefix[:-s_ndim]
+        else:
+            B_shape = prefix
+
+        if not prefix:
+            return self._forward_single(coeffs, 0)
+
+        B_total = int(np.prod(B_shape)) if B_shape else 1
+        S_total = int(np.prod(s_shape)) if s_shape else 1
+        flat = coeffs.reshape(B_total, S_total, *coeffs.shape[-single_ndim:])
+        outs = []
+        for b in range(B_total):
+            for s in range(S_total):
+                outs.append(self._forward_single(flat[b, s], s))
+        n_coils = outs[0].shape[0]
+        stacked = torch.stack(outs, dim=0)
+        return stacked.reshape(*B_shape, *s_shape, n_coils, *nat)
+
+    def _forward_single(self, coeffs: torch.Tensor, s_flat_idx: int = 0):
+        """Single-frame forward.  Input: ``(K, *image_shape)``, output: ``(C, *grid_shape)``."""
+        base = self._base
+        nat = base.natural_shape   # == grid_shape
+        nat_ndim = len(nat)
+
+        if coeffs.shape[0] != self.K:
+            raise ValueError(f"coeffs.shape[0]={coeffs.shape[0]} != K={self.K}")
+        if tuple(int(s) for s in coeffs.shape[1:]) != tuple(base.image_shape):
+            raise ValueError(
+                f"coeffs spatial {tuple(coeffs.shape[1:])} != image_shape {base.image_shape}"
+            )
+
+        device = coeffs.device
+        dtype = coeffs.dtype
+
+        if base.smaps is None:
+            raise NotImplementedError("SubspaceMaskedFFT requires base_op.smaps")
+        smaps = base.smaps.to(device, dtype=dtype)
+        n_coils = int(smaps.shape[0])
+
+        basis_conj = self.basis.conj().to(device, dtype=dtype)  # (K, T)
+        K = self.K
+
+        phi_shape = [1] * nat_ndim
+        phi_shape[self._t_axis_in_nat] = self.T
+
+        output = torch.empty(n_coils, *nat, dtype=dtype, device=device)
+
+        for c in range(n_coils):
+            coil_imgs = coeffs * smaps[c].unsqueeze(0)  # (K, *image_shape)
+            # FFT + pad + mask → (K, *grid_shape)
+            kgrids = base._fft_pad_mask_batch(coil_imgs, s_flat_idx=s_flat_idx)
+            # Accumulate over K: sum_k basis_conj[k, T-dim] * kgrids[k]
+            # basis_conj: (K, T) reshaped to (K, *phi_shape)
+            ksp_c = (basis_conj.view(K, *phi_shape) * kgrids).sum(dim=0)
+            output[c] = ksp_c
+
+        return output
+
+    def normal(self, coeffs):
+        """Normal operator: ``A^H A x``."""
+        if self.toeplitz:
+            if self._toep_op is None:
+                from .._toep._sub_toep import SubspaceToeplitzOp
+                self._toep_op = SubspaceToeplitzOp(self, device=self._base.device)
             return self._toep_op(coeffs)
         return self._adjoint_impl(self._forward_impl(coeffs))
 

@@ -555,7 +555,7 @@ zero-filled vs NLINV-synthesized central k-space patch.
    ``cal_width`` when only the synthesized k-space patch and fast coil
    estimates are needed (e.g.\ as input to GROG/GRAPPA kernel training).
 
-.. GENERATED FROM PYTHON SOURCE LINES 343-345
+.. GENERATED FROM PYTHON SOURCE LINES 343-347
 
 .. code-block:: Python
 
@@ -569,9 +569,77 @@ zero-filled vs NLINV-synthesized central k-space patch.
 
 
 
+
+.. GENERATED FROM PYTHON SOURCE LINES 348-356
+
+Multi-slice batched NLINV calibration
+=====================================
+
+:func:`~pygrog.utils.nlinv_calib` accepts a leading batch axis and runs
+the calibration once per batch element.  Sensitivity maps and image
+reconstructions are returned per-slice; the synthesized GRAPPA training
+k-space can optionally be averaged across the batch with
+``train_reduce='mean'`` to produce a single shared kernel.
+
+.. GENERATED FROM PYTHON SOURCE LINES 356-385
+
+.. code-block:: Python
+
+
+    batch_slices = np.stack([kspace_us, kspace_us[:, ::-1, :]], axis=0)
+    print(f"\n[Multi-slice] batched k-space shape : {batch_slices.shape}")
+
+    # Per-slice smaps + shared (mean-reduced) GRAPPA training k-space.
+    smaps_b, train_b_mean, image_b = nlinv_calib(
+        batch_slices,
+        cal_width=cal_width,
+        ndim=2,
+        ret_cal=True,
+        ret_image=True,
+        train_reduce="mean",
+    )
+    print(f"[Multi-slice] smaps shape           : {tuple(smaps_b.shape)}")
+    print(f"[Multi-slice] image shape           : {tuple(image_b.shape)}")
+    print(f"[Multi-slice] mean-train shape      : {tuple(train_b_mean.shape)}")
+
+    fig, axes = plt.subplots(2, ncols_show, figsize=(3 * ncols_show, 5.5))
+    for i in range(ncols_show):
+        axes[0, i].imshow(np.abs(smaps_b[0, i]), cmap="magma", origin="lower", vmin=0)
+        axes[0, i].set_title(f"slice 0 — smap {i + 1}")
+        axes[0, i].axis("off")
+        axes[1, i].imshow(np.abs(smaps_b[1, i]), cmap="magma", origin="lower", vmin=0)
+        axes[1, i].set_title(f"slice 1 — smap {i + 1}")
+        axes[1, i].axis("off")
+
+    plt.suptitle("Batched NLINV — per-slice smaps (shared GRAPPA training kernel)")
+    plt.tight_layout()
+    plt.show()
+
+
+
+.. image-sg:: /generated/autoexamples/images/sphx_glr_example_utils_006.png
+   :alt: Batched NLINV — per-slice smaps (shared GRAPPA training kernel), slice 0 — smap 1, slice 0 — smap 2, slice 0 — smap 3, slice 0 — smap 4, slice 1 — smap 1, slice 1 — smap 2, slice 1 — smap 3, slice 1 — smap 4
+   :srcset: /generated/autoexamples/images/sphx_glr_example_utils_006.png
+   :class: sphx-glr-single-img
+
+
+.. rst-class:: sphx-glr-script-out
+
+ .. code-block:: none
+
+
+    [Multi-slice] batched k-space shape : (2, 16, 217, 181)
+    [Multi-slice] smaps shape           : (2, 16, 217, 181)
+    [Multi-slice] image shape           : (2, 24, 24)
+    [Multi-slice] mean-train shape      : (16, 24, 24)
+
+
+
+
+
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 13.793 seconds)
+   **Total running time of the script:** (0 minutes 10.048 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_utils.py:

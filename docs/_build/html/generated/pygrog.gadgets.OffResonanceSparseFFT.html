@@ -168,6 +168,7 @@
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
 </details></li>
@@ -423,7 +424,9 @@
                 <ul class="visible nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.OffResonanceSparseFFT"><code class="docutils literal notranslate"><span class="pre">OffResonanceSparseFFT</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.OffResonanceSparseFFT.forward"><code class="docutils literal notranslate"><span class="pre">OffResonanceSparseFFT.forward()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.OffResonanceSparseFFT._forward_single"><code class="docutils literal notranslate"><span class="pre">OffResonanceSparseFFT._forward_single()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.OffResonanceSparseFFT.adjoint"><code class="docutils literal notranslate"><span class="pre">OffResonanceSparseFFT.adjoint()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.OffResonanceSparseFFT._adjoint_single"><code class="docutils literal notranslate"><span class="pre">OffResonanceSparseFFT._adjoint_single()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.OffResonanceSparseFFT.normal"><code class="docutils literal notranslate"><span class="pre">OffResonanceSparseFFT.normal()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.OffResonanceSparseFFT.__call__"><code class="docutils literal notranslate"><span class="pre">OffResonanceSparseFFT.__call__()</span></code></a></li>
 </ul>
@@ -443,7 +446,7 @@
 <h1>OffResonanceSparseFFT<a class="headerlink" href="#offresonancesparsefft" title="Link to this heading">#</a></h1>
 <dl class="py class">
 <dt class="sig sig-object py" id="pygrog.gadgets.OffResonanceSparseFFT">
-<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">pygrog.gadgets.</span></span><span class="sig-name descname"><span class="pre">OffResonanceSparseFFT</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">base_op</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">B</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">C</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_off_resonance.html#OffResonanceSparseFFT"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.OffResonanceSparseFFT" title="Link to this definition">#</a></dt>
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">pygrog.gadgets.</span></span><span class="sig-name descname"><span class="pre">OffResonanceSparseFFT</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">base_op</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">B</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">C</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">toeplitz</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_off_resonance.html#OffResonanceSparseFFT"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.OffResonanceSparseFFT" title="Link to this definition">#</a></dt>
 <dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
 <p>SparseFFT with multi-frequency B0 correction.</p>
 <p>Implements:</p>
@@ -459,6 +462,8 @@
 <li><p><strong>base_op</strong> (<a class="reference internal" href="pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT" title="pygrog.operator.SparseFFT"><em>SparseFFT</em></a>) – The underlying sparse FFT operator (with smaps, etc.).</p></li>
 <li><p><strong>B</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a><em>, </em><em>complex64</em>) – Temporal basis, shape <code class="docutils literal notranslate"><span class="pre">(n_samples,</span> <span class="pre">L)</span></code>.</p></li>
 <li><p><strong>C</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a><em>, </em><em>complex64</em>) – Spatial interpolators, shape <code class="docutils literal notranslate"><span class="pre">(L,</span> <span class="pre">*image_shape)</span></code>.</p></li>
+<li><p><strong>toeplitz</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a><em> | </em><em>None</em><em>, </em><em>optional</em>) – Use Toeplitz embedding for <a class="reference internal" href="#pygrog.gadgets.OffResonanceSparseFFT.normal" title="pygrog.gadgets.OffResonanceSparseFFT.normal"><code class="xref py py-meth docutils literal notranslate"><span class="pre">normal()</span></code></a>.  <code class="docutils literal notranslate"><span class="pre">None</span></code> inherits
+from <code class="docutils literal notranslate"><span class="pre">base_op.toeplitz</span></code>.</p></li>
 </ul>
 </dd>
 </dl>
@@ -493,15 +498,29 @@
 <dt class="sig sig-object py" id="pygrog.gadgets.OffResonanceSparseFFT.forward">
 <span class="sig-name descname"><span class="pre">forward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sparse_kspace</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_off_resonance.html#OffResonanceSparseFFT.forward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.OffResonanceSparseFFT.forward" title="Link to this definition">#</a></dt>
 <dd><p>B0-corrected sparse k-space → image.</p>
+<p>Accepted layouts:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">(*B,</span> <span class="pre">*S,</span> <span class="pre">n_coils,</span> <span class="pre">n_samples)</span></code> with optional batch <code class="docutils literal notranslate"><span class="pre">*B</span></code> and,
+for stacked plans, leading <code class="docutils literal notranslate"><span class="pre">*S</span></code> axes.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">(n_coils,</span> <span class="pre">n_samples)</span></code> (single frame, no batch / stack)</p></li>
+</ul>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><code class="docutils literal notranslate"><span class="pre">(*B,</span> <span class="pre">*S,</span> <span class="pre">*image_shape)</span></code> (or <code class="docutils literal notranslate"><span class="pre">(*image_shape,)</span></code>).</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)">torch.Tensor</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="pygrog.gadgets.OffResonanceSparseFFT._forward_single">
+<span class="sig-name descname"><span class="pre">_forward_single</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sparse_kspace</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">s_flat_idx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_off_resonance.html#OffResonanceSparseFFT._forward_single"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.OffResonanceSparseFFT._forward_single" title="Link to this definition">#</a></dt>
+<dd><p>Single-frame ORC forward.  <code class="docutils literal notranslate"><span class="pre">sparse_kspace</span></code> shape: <code class="docutils literal notranslate"><span class="pre">(n_coils,</span> <span class="pre">n_samples)</span></code>.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>sparse_kspace</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – <code class="docutils literal notranslate"><span class="pre">(n_coils,</span> <span class="pre">n_samples)</span></code> complex.</p>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">(*image_shape,)</span></code> combined image.</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)">torch.Tensor</a></p>
+<dd class="field-odd"><p><strong>s_flat_idx</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p>
 </dd>
 </dl>
 </dd></dl>
@@ -510,15 +529,29 @@
 <dt class="sig sig-object py" id="pygrog.gadgets.OffResonanceSparseFFT.adjoint">
 <span class="sig-name descname"><span class="pre">adjoint</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_off_resonance.html#OffResonanceSparseFFT.adjoint"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.OffResonanceSparseFFT.adjoint" title="Link to this definition">#</a></dt>
 <dd><p>B0-corrected image → sparse k-space.</p>
+<p>Accepted layouts:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">(*B,</span> <span class="pre">*S,</span> <span class="pre">*image_shape)</span></code> (smaps path)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">(*B,</span> <span class="pre">*S,</span> <span class="pre">n_coils,</span> <span class="pre">*image_shape)</span></code> (no-smaps path)</p></li>
+<li><p>single-frame variants without leading prefix.</p></li>
+</ul>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><code class="docutils literal notranslate"><span class="pre">(*B,</span> <span class="pre">*S,</span> <span class="pre">n_coils,</span> <span class="pre">n_samples)</span></code>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)">torch.Tensor</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="pygrog.gadgets.OffResonanceSparseFFT._adjoint_single">
+<span class="sig-name descname"><span class="pre">_adjoint_single</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">s_flat_idx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_off_resonance.html#OffResonanceSparseFFT._adjoint_single"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.OffResonanceSparseFFT._adjoint_single" title="Link to this definition">#</a></dt>
+<dd><p>Single-frame ORC adjoint.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>image</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – <code class="docutils literal notranslate"><span class="pre">(*image_shape,)</span></code> complex.</p>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">(n_coils,</span> <span class="pre">n_samples)</span></code> complex.</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)">torch.Tensor</a></p>
+<dd class="field-odd"><p><strong>s_flat_idx</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p>
 </dd>
 </dl>
 </dd></dl>
@@ -588,7 +621,9 @@
     <ul class="visible nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.OffResonanceSparseFFT"><code class="docutils literal notranslate"><span class="pre">OffResonanceSparseFFT</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.OffResonanceSparseFFT.forward"><code class="docutils literal notranslate"><span class="pre">OffResonanceSparseFFT.forward()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.OffResonanceSparseFFT._forward_single"><code class="docutils literal notranslate"><span class="pre">OffResonanceSparseFFT._forward_single()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.OffResonanceSparseFFT.adjoint"><code class="docutils literal notranslate"><span class="pre">OffResonanceSparseFFT.adjoint()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.OffResonanceSparseFFT._adjoint_single"><code class="docutils literal notranslate"><span class="pre">OffResonanceSparseFFT._adjoint_single()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.OffResonanceSparseFFT.normal"><code class="docutils literal notranslate"><span class="pre">OffResonanceSparseFFT.normal()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.OffResonanceSparseFFT.__call__"><code class="docutils literal notranslate"><span class="pre">OffResonanceSparseFFT.__call__()</span></code></a></li>
 </ul>

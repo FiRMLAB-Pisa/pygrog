@@ -14,7 +14,12 @@ Both paths use the same mri-nufft field-map factorisation
 ``'svd'`` (default), ``'mti'``, and ``'mfi'``.
 """
 
-__all__ = ["OffResonanceCorrection", "OffResonanceSparseFFT", "with_off_resonance"]
+__all__ = [
+    "OffResonanceCorrection",
+    "OffResonanceSparseFFT",
+    "OffResonanceMaskedFFT",
+    "with_off_resonance",
+]
 
 import numpy as np
 import torch
@@ -236,12 +241,12 @@ def with_off_resonance(
     *,
     toeplitz=None,
 ):
-    """Wrap a SparseFFT operator with B0 inhomogeneity compensation.
+    """Wrap a SparseFFT or MaskedFFT operator with B0 inhomogeneity compensation.
 
     Parameters
     ----------
-    base_op : SparseFFT
-        Base sparse FFT operator.
+    base_op : SparseFFT | MaskedFFT
+        Base sparse or gridded FFT operator.
     b0_map : array-like, float32
         Static B0 field map in **Hz**, shape ``(*image_shape)``.
     readout_time : array-like, float32
@@ -261,7 +266,7 @@ def with_off_resonance(
 
     Returns
     -------
-    OffResonanceSparseFFT
+    OffResonanceSparseFFT | OffResonanceMaskedFFT
     """
     from mrinufft.extras.field_map import (
         get_orc_factorization,
@@ -293,6 +298,9 @@ def with_off_resonance(
     B = np.asarray(B, dtype=np.complex64)
     C = np.asarray(C, dtype=np.complex64)
 
+    from ..operator._masked_fft import MaskedFFT
+    if isinstance(base_op, MaskedFFT):
+        return OffResonanceMaskedFFT(base_op, B, C, toeplitz=toeplitz)
     return OffResonanceSparseFFT(base_op, B, C, toeplitz=toeplitz)
 
 
@@ -344,19 +352,50 @@ class OffResonanceSparseFFT:
     def forward(self, sparse_kspace):
         """B0-corrected sparse k-space → image.
 
-        Parameters
-        ----------
-        sparse_kspace : torch.Tensor
-            ``(n_coils, n_samples)`` complex.
+        Accepted layouts:
+
+        - ``(*B, *S, n_coils, n_samples)`` with optional batch ``*B`` and,
+          for stacked plans, leading ``*S`` axes.
+        - ``(n_coils, n_samples)`` (single frame, no batch / stack)
 
         Returns
         -------
         torch.Tensor
-            ``(*image_shape,)`` combined image.
+            ``(*B, *S, *image_shape)`` (or ``(*image_shape,)``).
         """
+        s_shape = tuple(getattr(self._base, "stack_shape", ()) or ())
+        s_ndim = len(s_shape)
+        prefix = tuple(int(s) for s in sparse_kspace.shape[:-2])
+        if s_ndim:
+            if len(prefix) < s_ndim or tuple(prefix[-s_ndim:]) != s_shape:
+                raise ValueError(
+                    f"sparse_kspace prefix {prefix} must end with stack_shape {s_shape}"
+                )
+            B_shape = prefix[:-s_ndim]
+        else:
+            B_shape = prefix
+        if not prefix:
+            return self._forward_single(sparse_kspace, 0)
+        B_total = int(np.prod(B_shape)) if B_shape else 1
+        S_total = int(np.prod(s_shape)) if s_shape else 1
+        flat = sparse_kspace.reshape(B_total, S_total, *sparse_kspace.shape[-2:])
+        outs = [
+            self._forward_single(flat[b, s], s)
+            for b in range(B_total) for s in range(S_total)
+        ]
+        stacked = torch.stack(outs, dim=0)
+        return stacked.reshape(*B_shape, *s_shape, *self.image_shape)
+
+    def _forward_single(self, sparse_kspace, s_flat_idx: int = 0):
+        """Single-frame ORC forward.  ``sparse_kspace`` shape: ``(n_coils, n_samples)``."""
         device = sparse_kspace.device
         B = self.B.to(device, dtype=sparse_kspace.dtype)
         C = self.C.to(device, dtype=sparse_kspace.dtype)
+        # Allow per-stack B/C: shape (*S, n_samples, L) or (*S, L, *image).
+        if B.ndim > 2:
+            B = B.reshape(-1, B.shape[-2], B.shape[-1])[s_flat_idx]
+        if C.ndim > 1 + len(self.image_shape):
+            C = C.reshape(-1, C.shape[-1 - len(self.image_shape)], *self.image_shape)[s_flat_idx]
         n_coils = sparse_kspace.shape[0]
 
         use_batch = self._base.smaps is not None and hasattr(
@@ -368,7 +407,9 @@ class OffResonanceSparseFFT:
             weighted = (sparse_kspace.unsqueeze(0) * B.conj().T.unsqueeze(1)).reshape(
                 -1, self.n_samples
             )
-            imgs_flat = self._base._scatter_ifft_crop_batch(weighted)
+            imgs_flat = self._base._scatter_ifft_crop_batch(
+                weighted, s_flat_idx=s_flat_idx,
+            )
             imgs = (
                 imgs_flat.reshape(self.L, n_coils, *self.image_shape)
                 * conj_smaps.unsqueeze(0)
@@ -376,12 +417,9 @@ class OffResonanceSparseFFT:
         else:
             weighted = sparse_kspace.unsqueeze(0) * B.conj().T.unsqueeze(1)
             imgs = torch.stack(
-                [self._base.forward(weighted[ll]) for ll in range(self.L)]
+                [self._base._forward_single(weighted[ll], s_flat_idx) for ll in range(self.L)]
             )
 
-        # C: (L, *image_shape).  imgs may be (L, *image_shape) [smaps path]
-        # or (L, n_coils, *image_shape) [no-smaps loop path].  Insert
-        # singleton coil dims on C so broadcasting always works.
         n_extra = imgs.ndim - C.ndim
         c = C.conj().view(*C.shape[:1], *([1] * n_extra), *C.shape[1:])
         return (c * imgs).sum(0)
@@ -389,23 +427,52 @@ class OffResonanceSparseFFT:
     def adjoint(self, image):
         """B0-corrected image → sparse k-space.
 
-        Parameters
-        ----------
-        image : torch.Tensor
-            ``(*image_shape,)`` complex.
+        Accepted layouts:
+
+        - ``(*B, *S, *image_shape)`` (smaps path)
+        - ``(*B, *S, n_coils, *image_shape)`` (no-smaps path)
+        - single-frame variants without leading prefix.
 
         Returns
         -------
         torch.Tensor
-            ``(n_coils, n_samples)`` complex.
+            ``(*B, *S, n_coils, n_samples)``.
         """
+        s_shape = tuple(getattr(self._base, "stack_shape", ()) or ())
+        s_ndim = len(s_shape)
+        single_ndim = len(self.image_shape) + (0 if self._base.smaps is not None else 1)
+        prefix = tuple(int(s) for s in image.shape[: image.ndim - single_ndim])
+        if s_ndim:
+            if len(prefix) < s_ndim or tuple(prefix[-s_ndim:]) != s_shape:
+                raise ValueError(
+                    f"image prefix {prefix} must end with stack_shape {s_shape}"
+                )
+            B_shape = prefix[:-s_ndim]
+        else:
+            B_shape = prefix
+        if not prefix:
+            return self._adjoint_single(image, 0)
+        B_total = int(np.prod(B_shape)) if B_shape else 1
+        S_total = int(np.prod(s_shape)) if s_shape else 1
+        flat = image.reshape(B_total, S_total, *image.shape[image.ndim - single_ndim:])
+        outs = [
+            self._adjoint_single(flat[b, s], s)
+            for b in range(B_total) for s in range(S_total)
+        ]
+        n_coils = outs[0].shape[0]
+        stacked = torch.stack(outs, dim=0)
+        return stacked.reshape(*B_shape, *s_shape, n_coils, self.n_samples)
+
+    def _adjoint_single(self, image, s_flat_idx: int = 0):
+        """Single-frame ORC adjoint."""
         device = image.device
         B = self.B.to(device, dtype=image.dtype)
         C = self.C.to(device, dtype=image.dtype)
+        if B.ndim > 2:
+            B = B.reshape(-1, B.shape[-2], B.shape[-1])[s_flat_idx]
+        if C.ndim > 1 + len(self.image_shape):
+            C = C.reshape(-1, C.shape[-1 - len(self.image_shape)], *self.image_shape)[s_flat_idx]
 
-        # C: (L, *image_shape).  image may be (*image_shape,) [smaps path]
-        # or (n_coils, *image_shape) [no-smaps loop path].  Reshape C so it
-        # broadcasts correctly against the leading coil dimension if present.
         n_extra = image.ndim - len(self.image_shape)
         c = C.view(self.L, *([1] * n_extra), *self.image_shape)
         weighted = c * image.unsqueeze(0)
@@ -420,14 +487,241 @@ class OffResonanceSparseFFT:
             all_imgs = (weighted.unsqueeze(1) * smaps.unsqueeze(0)).reshape(
                 -1, *self.image_shape
             )
-            all_ksps = self._base._fft_pad_gather_batch(all_imgs)
+            all_ksps = self._base._fft_pad_gather_batch(
+                all_imgs, s_flat_idx=s_flat_idx,
+            )
             ksps = all_ksps.reshape(self.L, n_coils, self.n_samples)
         else:
             ksps = torch.stack(
-                [self._base.adjoint(weighted[ll]) for ll in range(self.L)]
+                [self._base._adjoint_single(weighted[ll], s_flat_idx) for ll in range(self.L)]
             )
 
         return (B.T.unsqueeze(1) * ksps).sum(0)
+
+    def normal(self, image):
+        """Normal operator: ``A^H A x``."""
+        if self.toeplitz:
+            if self._toep_op is None:
+                from .._toep._orc_toep import OffResonanceToeplitzOp
+                self._toep_op = OffResonanceToeplitzOp(
+                    self, device=self._base.device,
+                )
+            return self._toep_op(image)
+        return self.forward(self.adjoint(image))
+
+    def __call__(self, x, adjoint=False):
+        if adjoint:
+            return self.adjoint(x)
+        return self.forward(x)
+
+
+# =====================================================================
+# MaskedFFT decorator
+# =====================================================================
+class OffResonanceMaskedFFT:
+    """MaskedFFT with multi-frequency B0 correction.
+
+    Mirrors :class:`OffResonanceSparseFFT` but operates on pre-gridded
+    k-space data via :class:`~pygrog.operator.MaskedFFT`.
+
+    Implements:
+
+    - **forward** (gridded k-space → image):
+      ``img = sum_l  conj(C_l) * base.forward(conj(B_l[T_grid]) * kspace_grid)``
+
+    - **adjoint** (image → gridded k-space):
+      ``kgrid = sum_l  B_l[T_grid] * base.adjoint(C_l * img)``
+
+    where ``B_l[T_grid]`` is the temporal basis vector reshaped to broadcast
+    over the temporal axis of the gridded k-space ``(*grid_shape)``.
+
+    Parameters
+    ----------
+    base_op : MaskedFFT
+        The underlying gridded FFT operator (with smaps, etc.).
+    B : torch.Tensor, complex64
+        Temporal basis, shape ``(n_samples, L)`` or ``(*grid_shape, L)``
+        if already gridded.
+    C : torch.Tensor, complex64
+        Spatial interpolators, shape ``(L, *image_shape)``.
+    toeplitz : bool | None, optional
+        Use Toeplitz embedding for :meth:`normal`.  ``None`` inherits
+        from ``base_op.toeplitz``.
+    """
+
+    def __init__(self, base_op, B, C, *, toeplitz=None):
+        self._base = base_op
+        # B may arrive as (n_samples, L) — reshape to (*grid_shape, L) for
+        # broadcasting against gridded k-space axes.
+        B_t = torch.as_tensor(B)
+        grid_size = int(np.prod(base_op.grid_shape))
+        if B_t.shape[0] == grid_size and B_t.ndim == 2:
+            B_t = B_t.reshape(*base_op.grid_shape, B_t.shape[-1])
+        self.B = B_t   # (*grid_shape, L)
+        self.C = torch.as_tensor(C)  # (L, *image_shape)
+        self.L = int(self.B.shape[-1])
+
+        self.grid_shape = base_op.grid_shape
+        self.image_shape = base_op.image_shape
+        self.smaps = base_op.smaps
+
+        if toeplitz is None:
+            toeplitz = bool(getattr(base_op, "toeplitz", False))
+        self.toeplitz = bool(toeplitz)
+        self._toep_op = None
+
+    @property
+    def n_samples(self):
+        return int(np.prod(self.grid_shape))
+
+    def forward(self, kspace_grid):
+        """B0-corrected gridded k-space → image.
+
+        Parameters
+        ----------
+        kspace_grid : torch.Tensor
+            ``(*B, *S, n_coils, *grid_shape)``
+
+        Returns
+        -------
+        torch.Tensor
+            ``(*B, *S, *image_shape)`` (SENSE combined).
+        """
+        s_shape = tuple(getattr(self._base, "stack_shape", ()) or ())
+        s_ndim = len(s_shape)
+        grid_ndim = len(self.grid_shape)
+        prefix = tuple(int(s) for s in kspace_grid.shape[:kspace_grid.ndim - (1 + grid_ndim)])
+        if s_ndim:
+            if len(prefix) < s_ndim or tuple(prefix[-s_ndim:]) != s_shape:
+                raise ValueError(
+                    f"kspace_grid prefix {prefix} must end with stack_shape {s_shape}"
+                )
+            B_shape = prefix[:-s_ndim]
+        else:
+            B_shape = prefix
+        if not prefix:
+            return self._forward_single(kspace_grid, 0)
+        B_total = int(np.prod(B_shape)) if B_shape else 1
+        S_total = int(np.prod(s_shape)) if s_shape else 1
+        n_coils = int(kspace_grid.shape[-grid_ndim - 1])
+        flat = kspace_grid.reshape(B_total, S_total, n_coils, *self.grid_shape)
+        outs = [
+            self._forward_single(flat[b, s], s)
+            for b in range(B_total) for s in range(S_total)
+        ]
+        stacked = torch.stack(outs, dim=0)
+        return stacked.reshape(*B_shape, *s_shape, *self.image_shape)
+
+    def _forward_single(self, kspace_grid, s_flat_idx: int = 0):
+        """Single-frame ORC forward.  Input: ``(n_coils, *grid_shape)``."""
+        device = kspace_grid.device
+        B = self.B.to(device, dtype=kspace_grid.dtype)  # (*grid_shape, L)
+        C = self.C.to(device, dtype=kspace_grid.dtype)  # (L, *image_shape)
+
+        use_batch = self._base.smaps is not None and hasattr(
+            self._base, "_mask_ifft_crop_batch"
+        )
+
+        if use_batch:
+            conj_smaps = self._base._conj_smaps.to(device, dtype=kspace_grid.dtype)
+            n_coils = kspace_grid.shape[0]
+            # Expand kspace_grid over L: (L, n_coils, *grid_shape)
+            # B.conj(): (*grid_shape, L) → movedim → (L, *grid_shape)
+            B_conj = B.conj().movedim(-1, 0)   # (L, *grid_shape)
+            # (L, n_coils, *grid_shape)
+            weighted = B_conj.unsqueeze(1) * kspace_grid.unsqueeze(0)
+            # Flatten L and coils: (L*n_coils, *grid_shape)
+            weighted_flat = weighted.reshape(-1, *self.grid_shape)
+            imgs_flat = self._base._mask_ifft_crop_batch(weighted_flat, s_flat_idx=s_flat_idx)
+            # (L, n_coils, *image_shape)
+            imgs = imgs_flat.reshape(self.L, n_coils, *self.image_shape)
+            # Apply C.conj() (L,*image) and smaps (C,*image), sum over L
+            # result: (n_coils, *image)  then SENSE combine via smaps.conj()
+            imgs_weighted = (C.conj().unsqueeze(1) * imgs).sum(0)   # (n_coils, *image)
+            # SENSE combine
+            return (imgs_weighted * conj_smaps).sum(0)
+        else:
+            B_conj = B.conj().movedim(-1, 0)  # (L, *grid_shape)
+            weighted = B_conj.unsqueeze(1) * kspace_grid.unsqueeze(0)  # (L, C, *grid_shape)
+            imgs = torch.stack(
+                [self._base._forward_single(weighted[ll], s_flat_idx) for ll in range(self.L)]
+            )
+            n_extra = imgs.ndim - C.ndim
+            c = C.conj().view(*C.shape[:1], *([1] * n_extra), *C.shape[1:])
+            return (c * imgs).sum(0)
+
+    def adjoint(self, image):
+        """B0-corrected image → gridded k-space.
+
+        Parameters
+        ----------
+        image : torch.Tensor
+            ``(*B, *S, *image_shape)`` (smaps path) or
+            ``(*B, *S, n_coils, *image_shape)``.
+
+        Returns
+        -------
+        torch.Tensor
+            ``(*B, *S, n_coils, *grid_shape)``.
+        """
+        s_shape = tuple(getattr(self._base, "stack_shape", ()) or ())
+        s_ndim = len(s_shape)
+        single_ndim = len(self.image_shape) + (0 if self._base.smaps is not None else 1)
+        prefix = tuple(int(s) for s in image.shape[: image.ndim - single_ndim])
+        if s_ndim:
+            if len(prefix) < s_ndim or tuple(prefix[-s_ndim:]) != s_shape:
+                raise ValueError(
+                    f"image prefix {prefix} must end with stack_shape {s_shape}"
+                )
+            B_shape = prefix[:-s_ndim]
+        else:
+            B_shape = prefix
+        if not prefix:
+            return self._adjoint_single(image, 0)
+        B_total = int(np.prod(B_shape)) if B_shape else 1
+        S_total = int(np.prod(s_shape)) if s_shape else 1
+        flat = image.reshape(B_total, S_total, *image.shape[image.ndim - single_ndim:])
+        outs = [
+            self._adjoint_single(flat[b, s], s)
+            for b in range(B_total) for s in range(S_total)
+        ]
+        n_coils = outs[0].shape[0]
+        stacked = torch.stack(outs, dim=0)
+        return stacked.reshape(*B_shape, *s_shape, n_coils, *self.grid_shape)
+
+    def _adjoint_single(self, image, s_flat_idx: int = 0):
+        """Single-frame ORC adjoint."""
+        device = image.device
+        B = self.B.to(device, dtype=image.dtype)    # (*grid_shape, L)
+        C = self.C.to(device, dtype=image.dtype)    # (L, *image_shape)
+        B_moved = B.movedim(-1, 0)                  # (L, *grid_shape)
+
+        n_extra = image.ndim - len(self.image_shape)
+        c = C.view(self.L, *([1] * n_extra), *self.image_shape)
+        weighted = c * image.unsqueeze(0)  # (L, *image)
+
+        use_batch = self._base.smaps is not None and hasattr(
+            self._base, "_fft_pad_mask_batch"
+        )
+
+        if use_batch:
+            smaps = self._base.smaps.to(device, dtype=image.dtype)
+            n_coils = smaps.shape[0]
+            # (L, n_coils, *image_shape)
+            all_imgs = weighted.unsqueeze(1) * smaps.unsqueeze(0)
+            # Flatten to (L*n_coils, *image_shape)
+            all_imgs_flat = all_imgs.reshape(-1, *self.image_shape)
+            all_kgrids = self._base._fft_pad_mask_batch(
+                all_imgs_flat, s_flat_idx=s_flat_idx,
+            )  # (L*n_coils, *grid_shape)
+            kgrids = all_kgrids.reshape(self.L, n_coils, *self.grid_shape)
+            # Multiply by B and sum over L: (n_coils, *grid_shape)
+            return (B_moved.unsqueeze(1) * kgrids).sum(0)
+        else:
+            kgrids = torch.stack(
+                [self._base._adjoint_single(weighted[ll], s_flat_idx) for ll in range(self.L)]
+            )  # (L, n_coils, *grid_shape)
+            return (B_moved.unsqueeze(1) * kgrids).sum(0)
 
     def normal(self, image):
         """Normal operator: ``A^H A x``."""

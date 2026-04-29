@@ -168,7 +168,10 @@ grog_s = pg_sigpy.GrogInterpolator(
 grog_s.calc_interp_table(calib_s, lamda=0.01, precision=1)
 sparse_s, plan_s = grog_s.interpolate(ksp_s_arms)
 sparse_s_t = torch.as_tensor(np.asarray(sparse_s))
-sparse_s_t = sparse_s_t * plan_s.pre_weights.to(sparse_s_t.dtype).unsqueeze(0)
+# pre_weights is flat (n_samples,); reshape to natural to align with the
+# natural-shape sparse output ``(n_coils, *natural_shape)``.
+pre_w = plan_s.pre_weights.reshape(*plan_s.natural_shape).to(sparse_s_t.dtype)
+sparse_s_t = sparse_s_t * pre_w
 
 # 4. SparseFFT + sigpy linop wrapper.
 op_s = SparseFFT(plan=plan_s, smaps=torch.as_tensor(smaps_s))
@@ -233,9 +236,9 @@ smaps_d, calib_d = pg_deepinv.nlinv_calib(
 grog_d = pg_deepinv.GrogInterpolator(
     coords, shape, kernel_width=2, oversamp=1.25, image_shape=shape
 )
-grog_d.calc_interp_table(calib_d, lamda=0.01, precision=1)
+grog_d.calc_interp_table(calib_d[0], lamda=0.01, precision=1)
 sparse_d, plan_d = grog_d.interpolate(ksp_d_arms)  # (1, n_v, *natural, kw)
-sparse_d = sparse_d * plan_d.pre_weights.to(sparse_d.dtype)
+sparse_d = sparse_d * plan_d.pre_weights.reshape(*plan_d.natural_shape).to(sparse_d.dtype)
 
 # 4. SparseFFT + deepinv physics wrapper.
 op_d = SparseFFT(plan=plan_d, smaps=smaps_d[0])

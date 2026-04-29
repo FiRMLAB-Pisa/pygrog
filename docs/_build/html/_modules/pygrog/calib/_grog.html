@@ -167,6 +167,7 @@
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
 </details></li>
@@ -390,26 +391,146 @@
 <span class="sd">    Behaves exactly like :class:`types.SimpleNamespace` (attributes can be set</span>
 <span class="sd">    freely) but exposes :attr:`pre_weights` as a computed ``@property`` so it</span>
 <span class="sd">    is always consistent with ``sqrt_weights`` and ``inv_perm``.</span>
+
+<span class="sd">    Plan-level stacking</span>
+<span class="sd">    -------------------</span>
+<span class="sd">    A plan may carry a leading ``stack_shape = (*S,)`` prefix on every</span>
+<span class="sd">    *trajectory-bound* field (``target_idx``, ``weights``, ``time_map``,</span>
+<span class="sd">    ``indices``, ``sqrt_weights``, ``sort_perm``, ``inv_perm``).  Scalar</span>
+<span class="sd">    fields (``grid_shape``, ``image_shape``, ``grid_size``, ``n_samples``,</span>
+<span class="sd">    ``natural_shape``, …) remain global — they describe one stack element.</span>
+
+<span class="sd">    Default ``stack_shape == ()`` means a single, unstacked trajectory and</span>
+<span class="sd">    every field has exactly today&#39;s shape.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
 
     <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">stack_shape</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Tuple of leading stack axes; ``()`` if the plan is unstacked.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;_stack_shape&quot;</span><span class="p">,</span> <span class="p">()))</span>
+
+    <span class="nd">@stack_shape</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">stack_shape</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_stack_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="p">(</span><span class="n">value</span> <span class="ow">or</span> <span class="p">()))</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">is_stacked</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">stack_shape</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span>
+
+    <span class="nd">@property</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">pre_weights</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;torch.Tensor&quot;</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;``sqrt_weights`` reordered and reshaped to ``natural_shape``.</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;``sqrt_weights`` reordered to match :meth:`~pygrog.calib.GrogInterpolator.interpolate` output.</span>
 
-<span class="sd">        Returns a tensor of shape ``natural_shape`` (i.e. ``(*spatial, kw)``)</span>
-<span class="sd">        so that it broadcasts directly against the output of</span>
-<span class="sd">        :meth:`~pygrog.calib.GrogInterpolator.interpolate` (shape</span>
-<span class="sd">        ``(..., C, *spatial, kw)``) with a single ``unsqueeze(0)``::</span>
-
-<span class="sd">            sqrt_w = grog.plan.pre_weights          # (*spatial, kw)</span>
-<span class="sd">            kspace_weighted = kspace_sparse * sqrt_w.unsqueeze(0)</span>
+<span class="sd">        Returns a tensor of shape ``(*stack_shape, n_samples)`` (or just</span>
+<span class="sd">        ``(n_samples,)`` when unstacked).</span>
 
 <span class="sd">        Multiply sparse k-space by this factor **once** before an iterative</span>
 <span class="sd">        reconstruction loop so that</span>
 <span class="sd">        :class:`~pygrog.operator.SparseFFT` ``.forward`` / ``.adjoint`` satisfy</span>
 <span class="sd">        the adjointness condition (i.e. cumulative weighting equals 1/count).</span>
 <span class="sd">        &quot;&quot;&quot;</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">sqrt_weights</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">inv_perm</span><span class="p">]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">natural_shape</span><span class="p">)</span>
+        <span class="n">sw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sqrt_weights</span>
+        <span class="n">ip</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">inv_perm</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">is_stacked</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">sw</span><span class="p">[</span><span class="n">ip</span><span class="p">]</span>
+        <span class="c1"># Per-stack gather (vectorised).</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="n">sw</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">ip</span><span class="p">)</span>
+
+    <span class="c1"># ------------------------------------------------------------------</span>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_stack</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">plans</span><span class="p">:</span> <span class="nb">list</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;GrogPlan&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Assemble per-element plans into a single stacked plan.</span>
+
+<span class="sd">        Internal helper.  Most users should pass an already-stacked</span>
+<span class="sd">        ``coords`` array (with leading stack axes) to</span>
+<span class="sd">        :class:`GrogInterpolator`; auto-detection turns those leading axes</span>
+<span class="sd">        into a stacked plan with no need to call this method directly.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        plans : list[GrogPlan]</span>
+<span class="sd">            One plan per stack element; all must share ``shape``,</span>
+<span class="sd">            ``oversamp``, ``grid_shape``, ``kernel_width``, ``kernel_shape``,</span>
+<span class="sd">            ``radius``, ``image_shape``, ``grid_size``, ``n_samples``, and</span>
+<span class="sd">            ``natural_shape``.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        GrogPlan</span>
+<span class="sd">            New plan with ``stack_shape = (len(plans),)`` and trajectory</span>
+<span class="sd">            fields stacked along axis 0.</span>
+
+<span class="sd">        Notes</span>
+<span class="sd">        -----</span>
+<span class="sd">        Every input plan must be unstacked (``stack_shape == ()``) — nested</span>
+<span class="sd">        stacking is not supported.  Distances are dropped from the stacked</span>
+<span class="sd">        plan since they are released after FFT-plan attachment.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">plans</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Cannot stack an empty list of plans.&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="s2">&quot;stack_shape&quot;</span><span class="p">,</span> <span class="p">())</span> <span class="o">!=</span> <span class="p">():</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="s2">&quot;GrogPlan.stack requires unstacked input plans.&quot;</span>
+                <span class="p">)</span>
+        <span class="n">ref</span> <span class="o">=</span> <span class="n">plans</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">global_fields</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="s2">&quot;shape&quot;</span><span class="p">,</span> <span class="s2">&quot;oversamp&quot;</span><span class="p">,</span> <span class="s2">&quot;grid_shape&quot;</span><span class="p">,</span> <span class="s2">&quot;kernel_width&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;kernel_shape&quot;</span><span class="p">,</span> <span class="s2">&quot;radius&quot;</span><span class="p">,</span> <span class="s2">&quot;image_shape&quot;</span><span class="p">,</span> <span class="s2">&quot;grid_size&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;n_samples&quot;</span><span class="p">,</span> <span class="s2">&quot;natural_shape&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">global_fields</span><span class="p">:</span>
+            <span class="n">ref_v</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">ref</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">[</span><span class="mi">1</span><span class="p">:]:</span>
+                <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="o">!=</span> <span class="n">ref_v</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;GrogPlan.stack: field &#39;</span><span class="si">{</span><span class="n">f</span><span class="si">}</span><span class="s2">&#39; differs across plans&quot;</span>
+                    <span class="p">)</span>
+
+        <span class="n">out</span> <span class="o">=</span> <span class="bp">cls</span><span class="p">(</span>
+            <span class="n">shape</span><span class="o">=</span><span class="n">ref</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span>
+            <span class="n">oversamp</span><span class="o">=</span><span class="n">ref</span><span class="o">.</span><span class="n">oversamp</span><span class="p">,</span>
+            <span class="n">grid_shape</span><span class="o">=</span><span class="n">ref</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">,</span>
+            <span class="n">kernel_width</span><span class="o">=</span><span class="n">ref</span><span class="o">.</span><span class="n">kernel_width</span><span class="p">,</span>
+            <span class="n">kernel_shape</span><span class="o">=</span><span class="n">ref</span><span class="o">.</span><span class="n">kernel_shape</span><span class="p">,</span>
+            <span class="n">radius</span><span class="o">=</span><span class="n">ref</span><span class="o">.</span><span class="n">radius</span><span class="p">,</span>
+            <span class="n">image_shape</span><span class="o">=</span><span class="n">ref</span><span class="o">.</span><span class="n">image_shape</span><span class="p">,</span>
+            <span class="n">grid_size</span><span class="o">=</span><span class="n">ref</span><span class="o">.</span><span class="n">grid_size</span><span class="p">,</span>
+            <span class="n">n_samples</span><span class="o">=</span><span class="n">ref</span><span class="o">.</span><span class="n">n_samples</span><span class="p">,</span>
+            <span class="n">natural_shape</span><span class="o">=</span><span class="n">ref</span><span class="o">.</span><span class="n">natural_shape</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">stack_shape</span> <span class="o">=</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">plans</span><span class="p">),)</span>
+
+        <span class="c1"># Stacked trajectory-bound tensors.</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">target_idx</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">target_idx</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">weights</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">weights</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="c1"># distances is needed by calc_interp_table; preserve when present</span>
+        <span class="k">if</span> <span class="nb">all</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="s2">&quot;distances&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">):</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">distances</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
+                <span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">distances</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">distances</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">time_map</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">):</span>
+            <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">time_map</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="s2">&quot;GrogPlan.stack: all plans must agree on time_map presence&quot;</span>
+                <span class="p">)</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">time_map</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
+                <span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">time_map</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">time_map</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="c1"># Stacked sorted/permutation fields produced by _attach_fft_plan.</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">indices</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">p</span><span class="o">.</span><span class="n">indices</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">sqrt_weights</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">p</span><span class="o">.</span><span class="n">sqrt_weights</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">sort_perm</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">p</span><span class="o">.</span><span class="n">sort_perm</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">inv_perm</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">p</span><span class="o">.</span><span class="n">inv_perm</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">out</span>
 
 <span class="c1"># ---------------------------------------------------------------------------</span>
 <span class="c1"># Torch C++ extension (lazy, cached)</span>
@@ -540,9 +661,11 @@
         <span class="n">kernel_shape</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;circle&quot;</span><span class="p">,</span>
         <span class="n">time_map</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">image_shape</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">stack_shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
     <span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">plan</span> <span class="o">=</span> <span class="n">_create_plan</span><span class="p">(</span>
-            <span class="n">shape</span><span class="p">,</span> <span class="n">coords</span><span class="p">,</span> <span class="n">oversamp</span><span class="p">,</span> <span class="n">kernel_width</span><span class="p">,</span> <span class="n">kernel_shape</span><span class="p">,</span> <span class="n">time_map</span>
+            <span class="n">shape</span><span class="p">,</span> <span class="n">coords</span><span class="p">,</span> <span class="n">oversamp</span><span class="p">,</span> <span class="n">kernel_width</span><span class="p">,</span> <span class="n">kernel_shape</span><span class="p">,</span> <span class="n">time_map</span><span class="p">,</span>
+            <span class="n">stack_shape</span><span class="o">=</span><span class="n">stack_shape</span><span class="p">,</span>
         <span class="p">)</span>
         <span class="c1"># Attach FFT plan fields to self.plan for SparseFFT consumption</span>
         <span class="n">_attach_fft_plan</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">plan</span><span class="p">,</span> <span class="n">image_shape</span><span class="p">)</span>
@@ -707,29 +830,44 @@
 
         <span class="c1"># Shape-preserving interpolation: route everything through</span>
         <span class="c1"># ``_sparse_full``.  It detects how many leading batch dims sit in</span>
-        <span class="c1"># front of (coils, *spatial) using ``plan.target_idx.shape``.</span>
+        <span class="c1"># front of (*stack, coils, *spatial) using ``plan.stack_shape`` and</span>
+        <span class="c1"># ``plan.target_idx.shape``.</span>
         <span class="n">sparse</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sparse_full</span><span class="p">(</span><span class="n">data_t</span><span class="p">)</span>
+
+        <span class="c1"># Flatten from (*batch, *stack, C, *natural_shape) → (*batch, *stack,</span>
+        <span class="c1"># C, n_samples).  Public API contract: no-batch / no-stack input →</span>
+        <span class="c1"># (n_coils, n_samples).</span>
+        <span class="n">plan</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">plan</span>
+        <span class="n">s_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">plan</span><span class="o">.</span><span class="n">stack_shape</span><span class="p">)</span>
+        <span class="n">nat_ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">plan</span><span class="o">.</span><span class="n">natural_shape</span><span class="p">)</span>
+        <span class="n">n_coils</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">sparse</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="p">(</span><span class="n">nat_ndim</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)])</span>
+        <span class="c1"># batch_prefix = leading dims BEFORE *S; stack prefix is fixed = s_shape</span>
+        <span class="n">batch_prefix</span> <span class="o">=</span> <span class="n">sparse</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span> <span class="n">sparse</span><span class="o">.</span><span class="n">ndim</span> <span class="o">-</span> <span class="p">(</span><span class="n">nat_ndim</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">s_shape</span><span class="p">)]</span>
+        <span class="n">sparse_flat</span> <span class="o">=</span> <span class="n">sparse</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span>
+            <span class="o">*</span><span class="n">batch_prefix</span><span class="p">,</span> <span class="o">*</span><span class="n">s_shape</span><span class="p">,</span> <span class="n">n_coils</span><span class="p">,</span> <span class="n">plan</span><span class="o">.</span><span class="n">n_samples</span><span class="p">,</span>
+        <span class="p">)</span>
 
         <span class="k">if</span> <span class="n">ret_image</span><span class="p">:</span>
             <span class="kn">from</span><span class="w"> </span><span class="nn">..operator._sparse_fft</span><span class="w"> </span><span class="kn">import</span> <span class="n">SparseFFT</span>
 
             <span class="n">op</span> <span class="o">=</span> <span class="n">SparseFFT</span><span class="p">(</span><span class="n">plan</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">plan</span><span class="p">)</span>
-            <span class="c1"># Pre-multiply by plan.pre_weights so that SparseFFT.forward applies</span>
-            <span class="c1"># the second sqrt_w factor → full density compensation w = 1/count.</span>
-            <span class="n">pre_w</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">plan</span><span class="o">.</span><span class="n">pre_weights</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">sparse</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
-            <span class="c1"># sparse: (..., C, *spatial, kw) — pre_w broadcasts over the last</span>
-            <span class="c1"># ``len(natural_shape)`` dims.</span>
-            <span class="n">nat_ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">plan</span><span class="o">.</span><span class="n">natural_shape</span><span class="p">)</span>
-            <span class="n">shape_pre</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span><span class="p">,)</span> <span class="o">*</span> <span class="p">(</span><span class="n">sparse</span><span class="o">.</span><span class="n">ndim</span> <span class="o">-</span> <span class="n">nat_ndim</span><span class="p">)</span> <span class="o">+</span> <span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">plan</span><span class="o">.</span><span class="n">natural_shape</span><span class="p">)</span>
-            <span class="n">img_coils</span> <span class="o">=</span> <span class="n">op</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">sparse</span> <span class="o">*</span> <span class="n">pre_w</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">shape_pre</span><span class="p">))</span>
-            <span class="n">image</span> <span class="o">=</span> <span class="n">img_coils</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">square</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">sqrt</span><span class="p">()</span>  <span class="c1"># RSS: (*image_shape,)</span>
+            <span class="c1"># Pre-multiply by plan.pre_weights so that SparseFFT.forward</span>
+            <span class="c1"># applies the second sqrt_w factor → full density compensation</span>
+            <span class="c1"># w = 1/count.  pre_weights shape: (*S, n_samples) or (n_samples,).</span>
+            <span class="n">pre_w</span> <span class="o">=</span> <span class="n">plan</span><span class="o">.</span><span class="n">pre_weights</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">sparse_flat</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+            <span class="c1"># broadcast over *batch, coil axes — pre_w needs a coil axis</span>
+            <span class="n">pw</span> <span class="o">=</span> <span class="n">pre_w</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">)</span> <span class="k">if</span> <span class="n">pre_w</span><span class="o">.</span><span class="n">ndim</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="n">pre_w</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">img_coils</span> <span class="o">=</span> <span class="n">op</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">sparse_flat</span> <span class="o">*</span> <span class="n">pw</span><span class="p">)</span>
+            <span class="c1"># RSS over coil axis (the one immediately before *image_shape).</span>
+            <span class="n">img_ax</span> <span class="o">=</span> <span class="n">img_coils</span><span class="o">.</span><span class="n">ndim</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">plan</span><span class="o">.</span><span class="n">image_shape</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+            <span class="n">image</span> <span class="o">=</span> <span class="n">img_coils</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">square</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">img_ax</span><span class="p">)</span><span class="o">.</span><span class="n">sqrt</span><span class="p">()</span>
             <span class="n">gc</span><span class="o">.</span><span class="n">collect</span><span class="p">()</span>
             <span class="n">out</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span> <span class="k">if</span> <span class="n">is_numpy</span> <span class="k">else</span> <span class="n">image</span>
             <span class="k">return</span> <span class="n">out</span>
 
         <span class="n">gc</span><span class="o">.</span><span class="n">collect</span><span class="p">()</span>
 
-        <span class="n">out</span> <span class="o">=</span> <span class="n">sparse</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span> <span class="k">if</span> <span class="n">is_numpy</span> <span class="k">else</span> <span class="n">sparse</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">sparse_flat</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span> <span class="k">if</span> <span class="n">is_numpy</span> <span class="k">else</span> <span class="n">sparse_flat</span>
         <span class="k">return</span> <span class="n">out</span></div>
 
 
@@ -757,50 +895,100 @@
 <span class="sd">        Parameters</span>
 <span class="sd">        ----------</span>
 <span class="sd">        data : torch.Tensor</span>
-<span class="sd">            Shape ``(*batch, n_coils, *spatial)`` where ``*spatial`` matches</span>
-<span class="sd">            ``plan.target_idx.shape[:-1]``.  Leading ``*batch`` dims are</span>
+<span class="sd">            Shape ``(*batch, *stack, n_coils, *spatial)`` where ``*stack``</span>
+<span class="sd">            matches ``plan.stack_shape`` (possibly empty) and ``*spatial``</span>
+<span class="sd">            matches the per-stack-element grid (i.e. the trailing dims of</span>
+<span class="sd">            ``plan.target_idx`` minus the last ``kw`` axis and minus the</span>
+<span class="sd">            leading ``*stack`` prefix).  Leading ``*batch`` dims are</span>
 <span class="sd">            optional.</span>
 
 <span class="sd">        Returns</span>
 <span class="sd">        -------</span>
 <span class="sd">        torch.Tensor</span>
-<span class="sd">            Shape ``(*batch, n_coils, *spatial, kw)``.</span>
+<span class="sd">            Shape ``(*batch, *stack, n_coils, *spatial, kw)``.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">plan</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">plan</span>
-        <span class="n">target_idx</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">plan</span><span class="o">.</span><span class="n">target_idx</span><span class="p">)</span>  <span class="c1"># (*spatial, kw)</span>
-        <span class="n">interp_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_interp_idx</span>                  <span class="c1"># (*spatial, kw)</span>
-        <span class="n">kernel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_interp_kernel</span>                   <span class="c1"># (K, C, C)</span>
+        <span class="n">target_idx</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">plan</span><span class="o">.</span><span class="n">target_idx</span><span class="p">)</span>
+        <span class="n">interp_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_interp_idx</span>
+        <span class="n">kernel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_interp_kernel</span>
 
-        <span class="n">spatial</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">target_idx</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+        <span class="n">s_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">plan</span><span class="o">.</span><span class="n">stack_shape</span><span class="p">)</span>
+        <span class="n">s_ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">s_shape</span><span class="p">)</span>
+
+        <span class="n">spatial</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">target_idx</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="n">s_ndim</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
         <span class="n">kw</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">target_idx</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+
+        <span class="c1"># ndim layout: data = (*batch, *stack, n_coils, *spatial)</span>
         <span class="n">ncoils_pos</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">ndim</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">spatial</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
-        <span class="k">if</span> <span class="n">ncoils_pos</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">ncoils_pos</span> <span class="o">&lt;</span> <span class="n">s_ndim</span><span class="p">:</span>
             <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
-                <span class="sa">f</span><span class="s2">&quot;data.ndim=</span><span class="si">{</span><span class="n">data</span><span class="o">.</span><span class="n">ndim</span><span class="si">}</span><span class="s2"> too small for spatial=</span><span class="si">{</span><span class="n">spatial</span><span class="si">}</span><span class="s2"> (+coils)&quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;data.ndim=</span><span class="si">{</span><span class="n">data</span><span class="o">.</span><span class="n">ndim</span><span class="si">}</span><span class="s2"> too small for stack_shape=</span><span class="si">{</span><span class="n">s_shape</span><span class="si">}</span><span class="s2"> + &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;spatial=</span><span class="si">{</span><span class="n">spatial</span><span class="si">}</span><span class="s2"> (+coils)&quot;</span>
             <span class="p">)</span>
-        <span class="n">batch_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="n">ncoils_pos</span><span class="p">])</span>
+        <span class="c1"># Validate stack prefix.</span>
+        <span class="k">if</span> <span class="n">s_ndim</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">stack_prefix</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="n">ncoils_pos</span> <span class="o">-</span> <span class="n">s_ndim</span> <span class="p">:</span> <span class="n">ncoils_pos</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">stack_prefix</span> <span class="o">!=</span> <span class="n">s_shape</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;data stack prefix </span><span class="si">{</span><span class="n">stack_prefix</span><span class="si">}</span><span class="s2"> != plan.stack_shape </span><span class="si">{</span><span class="n">s_shape</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+        <span class="n">batch_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span> <span class="n">ncoils_pos</span> <span class="o">-</span> <span class="n">s_ndim</span><span class="p">])</span>
         <span class="n">ncoils</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="n">ncoils_pos</span><span class="p">])</span>
-        <span class="k">if</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="n">ncoils_pos</span> <span class="o">+</span> <span class="mi">1</span><span class="p">:])</span> <span class="o">!=</span> <span class="n">spatial</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="n">ncoils_pos</span> <span class="o">+</span> <span class="mi">1</span> <span class="p">:])</span> <span class="o">!=</span> <span class="n">spatial</span><span class="p">:</span>
             <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
-                <span class="sa">f</span><span class="s2">&quot;data spatial dims </span><span class="si">{</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="n">ncoils_pos</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">:]</span><span class="si">}</span><span class="s2"> != plan </span><span class="si">{</span><span class="n">spatial</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;data spatial dims </span><span class="si">{</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="n">ncoils_pos</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">:]</span><span class="si">}</span><span class="s2"> != plan </span><span class="si">{</span><span class="n">spatial</span><span class="si">}</span><span class="s2">&quot;</span>
             <span class="p">)</span>
 
+        <span class="k">if</span> <span class="n">s_ndim</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="c1"># Fast path — single trajectory (unchanged from prior behaviour).</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sparse_full_single</span><span class="p">(</span>
+                <span class="n">data</span><span class="p">,</span> <span class="n">batch_shape</span><span class="p">,</span> <span class="n">ncoils</span><span class="p">,</span> <span class="n">spatial</span><span class="p">,</span> <span class="n">kw</span><span class="p">,</span>
+                <span class="n">target_idx</span><span class="p">,</span> <span class="n">interp_idx</span><span class="p">,</span> <span class="n">kernel</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Stacked path — loop over *S (kernel call per stack element).</span>
+        <span class="c1"># data: (*B, *S, C, *spatial)  →  view as (B, S, C, *spatial)</span>
+        <span class="n">B</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">batch_shape</span><span class="p">))</span> <span class="k">if</span> <span class="n">batch_shape</span> <span class="k">else</span> <span class="mi">1</span>
+        <span class="n">S</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">s_shape</span><span class="p">))</span>
+        <span class="n">data_v</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">B</span><span class="p">,</span> <span class="n">S</span><span class="p">,</span> <span class="n">ncoils</span><span class="p">,</span> <span class="o">*</span><span class="n">spatial</span><span class="p">)</span>
+        <span class="c1"># interp_idx is (*S, *spatial, kw); flatten *S to S</span>
+        <span class="n">interp_idx_v</span> <span class="o">=</span> <span class="n">interp_idx</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">S</span><span class="p">,</span> <span class="o">*</span><span class="n">spatial</span><span class="p">,</span> <span class="n">kw</span><span class="p">)</span>
+
+        <span class="n">outs</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">S</span><span class="p">):</span>
+            <span class="n">outs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_sparse_full_single</span><span class="p">(</span>
+                    <span class="n">data_v</span><span class="p">[:,</span> <span class="n">s</span><span class="p">],</span> <span class="n">batch_shape</span><span class="p">,</span> <span class="n">ncoils</span><span class="p">,</span> <span class="n">spatial</span><span class="p">,</span> <span class="n">kw</span><span class="p">,</span>
+                    <span class="n">target_idx</span><span class="p">[</span><span class="n">s</span><span class="p">]</span> <span class="k">if</span> <span class="n">s_ndim</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="n">target_idx</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">S</span><span class="p">,</span> <span class="o">*</span><span class="n">spatial</span><span class="p">,</span> <span class="n">kw</span><span class="p">)[</span><span class="n">s</span><span class="p">],</span>
+                    <span class="n">interp_idx_v</span><span class="p">[</span><span class="n">s</span><span class="p">],</span> <span class="n">kernel</span><span class="p">,</span>
+                <span class="p">)</span>
+            <span class="p">)</span>
+        <span class="c1"># Stack along *S, then reshape back to multi-axis stack prefix.</span>
+        <span class="c1"># outs[i] has shape (*batch, C, *spatial, kw)</span>
+        <span class="n">stacked</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">outs</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">batch_shape</span><span class="p">))</span>  <span class="c1"># (*batch, S, C, *spatial, kw)</span>
+        <span class="k">return</span> <span class="n">stacked</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">batch_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">s_shape</span><span class="p">,</span> <span class="n">ncoils</span><span class="p">,</span> <span class="o">*</span><span class="n">spatial</span><span class="p">,</span> <span class="n">kw</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GrogInterpolator._sparse_full_single">
+<a class="viewcode-back" href="../../../generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator._sparse_full_single">[docs]</a>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_sparse_full_single</span><span class="p">(</span>
+        <span class="n">data</span><span class="p">,</span> <span class="n">batch_shape</span><span class="p">,</span> <span class="n">ncoils</span><span class="p">,</span> <span class="n">spatial</span><span class="p">,</span> <span class="n">kw</span><span class="p">,</span>
+        <span class="n">target_idx</span><span class="p">,</span> <span class="n">interp_idx</span><span class="p">,</span> <span class="n">kernel</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Single-trajectory kernel call. ``data`` has shape ``(*batch, C, *spatial)``.&quot;&quot;&quot;</span>
         <span class="n">B</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">batch_shape</span><span class="p">))</span> <span class="k">if</span> <span class="n">batch_shape</span> <span class="k">else</span> <span class="mi">1</span>
         <span class="n">N</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">spatial</span><span class="p">))</span>
 
-        <span class="c1"># (B, C, N) → (B*C, N, kw) → (N*kw, B*C) for the in-place C++ kernel,</span>
-        <span class="c1"># which expects (N, B, C) layout.</span>
         <span class="n">data_bcn</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">B</span> <span class="o">*</span> <span class="n">ncoils</span><span class="p">,</span> <span class="n">N</span><span class="p">)</span>
         <span class="n">data_rep</span> <span class="o">=</span> <span class="p">(</span>
             <span class="n">data_bcn</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">kw</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">B</span> <span class="o">*</span> <span class="n">ncoils</span><span class="p">,</span> <span class="n">N</span> <span class="o">*</span> <span class="n">kw</span><span class="p">)</span>
         <span class="p">)</span>
-        <span class="c1"># (N*kw, B*C) — interpret B*C as the (batch, coil) flattened axis</span>
         <span class="n">data_interp</span> <span class="o">=</span> <span class="n">data_rep</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">N</span> <span class="o">*</span> <span class="n">kw</span><span class="p">,</span> <span class="n">B</span><span class="p">,</span> <span class="n">ncoils</span><span class="p">)</span><span class="o">.</span><span class="n">contiguous</span><span class="p">()</span>
 
-        <span class="n">idx_1d</span> <span class="o">=</span> <span class="n">interp_idx</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># (N*kw,)</span>
+        <span class="n">idx_1d</span> <span class="o">=</span> <span class="n">interp_idx</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
         <span class="n">_interpolate</span><span class="p">(</span><span class="n">data_interp</span><span class="p">,</span> <span class="n">idx_1d</span><span class="p">,</span> <span class="n">kernel</span><span class="p">)</span>
 
-        <span class="c1"># (N*kw, B, C) → (B, C, N, kw) → (*batch, C, *spatial, kw)</span>
         <span class="n">out</span> <span class="o">=</span> <span class="n">data_interp</span><span class="o">.</span><span class="n">permute</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">contiguous</span><span class="p">()</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span>
             <span class="o">*</span><span class="n">batch_shape</span><span class="p">,</span> <span class="n">ncoils</span><span class="p">,</span> <span class="o">*</span><span class="n">spatial</span><span class="p">,</span> <span class="n">kw</span>
         <span class="p">)</span>
@@ -879,6 +1067,14 @@
 <span class="sd">    ``pre_weights`` is a :class:`GrogPlan` ``@property`` that returns</span>
 <span class="sd">    ``sqrt_weights[inv_perm]`` (i.e. weights in natural / interpolate-output</span>
 <span class="sd">    order).</span>
+
+<span class="sd">    Plan stacking</span>
+<span class="sd">    -------------</span>
+<span class="sd">    If ``plan.stack_shape`` is a non-empty tuple ``(*S,)``, ``target_idx``</span>
+<span class="sd">    is expected to carry a leading ``*S`` prefix (i.e. shape</span>
+<span class="sd">    ``(*S, *natural_shape)``).  ``natural_shape`` and ``n_samples`` describe</span>
+<span class="sd">    *one* stack element; ``indices``, ``sqrt_weights``, ``sort_perm``,</span>
+<span class="sd">    ``inv_perm`` are produced with shape ``(*S, n_samples)``.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">grid_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">plan</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">image_shape</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -892,34 +1088,44 @@
 
     <span class="n">target_idx</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">plan</span><span class="o">.</span><span class="n">target_idx</span><span class="p">)</span>
     <span class="n">weights</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">plan</span><span class="o">.</span><span class="n">weights</span><span class="p">)</span>
-    <span class="n">natural_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">target_idx</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>  <span class="c1"># (*spatial, kw)</span>
 
-    <span class="n">idx</span> <span class="o">=</span> <span class="n">target_idx</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
-    <span class="n">w</span> <span class="o">=</span> <span class="n">weights</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+    <span class="n">stack_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">plan</span><span class="p">,</span> <span class="s2">&quot;stack_shape&quot;</span><span class="p">,</span> <span class="p">())</span> <span class="ow">or</span> <span class="p">())</span>
+    <span class="n">s_ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">stack_shape</span><span class="p">)</span>
+    <span class="n">natural_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">target_idx</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="n">s_ndim</span><span class="p">:])</span>  <span class="c1"># (*spatial, kw) per stack element</span>
+    <span class="n">n_per</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">natural_shape</span><span class="p">))</span> <span class="k">if</span> <span class="n">natural_shape</span> <span class="k">else</span> <span class="mi">0</span>
+
+    <span class="c1"># Reshape to (*S, n_per) for vectorised per-stack operations.</span>
+    <span class="k">if</span> <span class="n">s_ndim</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">idx</span> <span class="o">=</span> <span class="n">target_idx</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+        <span class="n">w</span> <span class="o">=</span> <span class="n">weights</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">idx</span> <span class="o">=</span> <span class="n">target_idx</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">stack_shape</span><span class="p">,</span> <span class="n">n_per</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+        <span class="n">w</span> <span class="o">=</span> <span class="n">weights</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">stack_shape</span><span class="p">,</span> <span class="n">n_per</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
     <span class="n">sqrt_w</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">clamp</span><span class="p">(</span><span class="nb">min</span><span class="o">=</span><span class="mf">0.0</span><span class="p">))</span>
 
-    <span class="c1"># Out-of-window entries: clamp index to 0, force weight to 0.  After</span>
-    <span class="c1"># this, the scatter/gather kernels can treat all positions uniformly.</span>
+    <span class="c1"># Out-of-window entries: clamp index to 0, force weight to 0.</span>
     <span class="n">invalid</span> <span class="o">=</span> <span class="n">idx</span> <span class="o">&lt;</span> <span class="mi">0</span>
     <span class="k">if</span> <span class="n">invalid</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
         <span class="n">idx</span><span class="p">[</span><span class="n">invalid</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
         <span class="n">sqrt_w</span><span class="p">[</span><span class="n">invalid</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span>
 
-    <span class="n">n_total</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">idx</span><span class="o">.</span><span class="n">numel</span><span class="p">())</span>
+    <span class="c1"># Sort by grid index for cache-friendly scatter; per-stack along last axis.</span>
+    <span class="n">sort_perm</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">idx</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">sorted_idx</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="n">idx</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">sort_perm</span><span class="p">)</span>
+    <span class="n">sorted_w</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="n">sqrt_w</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">sort_perm</span><span class="p">)</span>
 
-    <span class="c1"># Sort by grid index for cache-friendly scatter; invalid entries end up</span>
-    <span class="c1"># contiguously at the front (their clamped index is 0) with zero weight.</span>
-    <span class="n">sort_perm</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">idx</span><span class="p">)</span>
-    <span class="n">sorted_idx</span> <span class="o">=</span> <span class="n">idx</span><span class="p">[</span><span class="n">sort_perm</span><span class="p">]</span>
-    <span class="n">sorted_w</span> <span class="o">=</span> <span class="n">sqrt_w</span><span class="p">[</span><span class="n">sort_perm</span><span class="p">]</span>
-
-    <span class="n">inv_perm</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">n_total</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
-    <span class="n">inv_perm</span><span class="p">[</span><span class="n">sort_perm</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">n_total</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">s_ndim</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">inv_perm</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">n_per</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+        <span class="n">inv_perm</span><span class="p">[</span><span class="n">sort_perm</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">n_per</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">inv_perm</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty_like</span><span class="p">(</span><span class="n">sort_perm</span><span class="p">)</span>
+        <span class="n">ar</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">n_per</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">sort_perm</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+        <span class="n">inv_perm</span><span class="o">.</span><span class="n">scatter_</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">sort_perm</span><span class="p">,</span> <span class="n">ar</span><span class="p">)</span>
 
     <span class="n">plan</span><span class="o">.</span><span class="n">image_shape</span> <span class="o">=</span> <span class="n">image_shape</span>
     <span class="n">plan</span><span class="o">.</span><span class="n">grid_size</span> <span class="o">=</span> <span class="n">grid_size</span>
-    <span class="n">plan</span><span class="o">.</span><span class="n">n_samples</span> <span class="o">=</span> <span class="n">n_total</span>
-    <span class="n">plan</span><span class="o">.</span><span class="n">natural_shape</span> <span class="o">=</span> <span class="n">natural_shape</span>  <span class="c1"># (*spatial, kw)</span>
+    <span class="n">plan</span><span class="o">.</span><span class="n">n_samples</span> <span class="o">=</span> <span class="n">n_per</span>
+    <span class="n">plan</span><span class="o">.</span><span class="n">natural_shape</span> <span class="o">=</span> <span class="n">natural_shape</span>  <span class="c1"># (*spatial, kw) per stack element</span>
     <span class="n">plan</span><span class="o">.</span><span class="n">indices</span> <span class="o">=</span> <span class="n">sorted_idx</span>
     <span class="n">plan</span><span class="o">.</span><span class="n">sqrt_weights</span> <span class="o">=</span> <span class="n">sorted_w</span>
     <span class="n">plan</span><span class="o">.</span><span class="n">sort_perm</span> <span class="o">=</span> <span class="n">sort_perm</span>
@@ -930,8 +1136,70 @@
 <span class="c1"># =====================================================================</span>
 <span class="c1"># Plan creation  (pure torch / numpy — no scipy)</span>
 <span class="c1"># =====================================================================</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">_create_plan</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">coords</span><span class="p">,</span> <span class="n">oversamp</span><span class="p">,</span> <span class="n">kernel_width</span><span class="p">,</span> <span class="n">kernel_shape</span><span class="p">,</span> <span class="n">time_map</span><span class="p">):</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_create_plan</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">coords</span><span class="p">,</span> <span class="n">oversamp</span><span class="p">,</span> <span class="n">kernel_width</span><span class="p">,</span> <span class="n">kernel_shape</span><span class="p">,</span> <span class="n">time_map</span><span class="p">,</span>
+                 <span class="n">stack_shape</span><span class="o">=</span><span class="p">()):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Build data-driven GROG plan.</span>
+
+<span class="sd">    When ``stack_shape`` is non-empty, the leading ``*S`` axes of ``coords``</span>
+<span class="sd">    are treated as independent stack elements: the underlying single-element</span>
+<span class="sd">    builder is invoked once per element (so per-element normalisation,</span>
+<span class="sd">    density compensation and rounding are bit-exact equivalent to building</span>
+<span class="sd">    a list of separate unstacked plans) and the results are then assembled</span>
+<span class="sd">    via :meth:`GrogPlan.stack`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">s_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="p">(</span><span class="n">stack_shape</span> <span class="ow">or</span> <span class="p">()))</span>
+    <span class="k">if</span> <span class="n">s_shape</span><span class="p">:</span>
+        <span class="n">coords</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">coords</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">coords</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span> <span class="nb">len</span><span class="p">(</span><span class="n">s_shape</span><span class="p">)])</span> <span class="o">!=</span> <span class="n">s_shape</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;coords leading shape </span><span class="si">{</span><span class="n">coords</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">s_shape</span><span class="p">)]</span><span class="si">}</span><span class="s2"> does &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;not match stack_shape </span><span class="si">{</span><span class="n">s_shape</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+        <span class="n">s_total</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">s_shape</span><span class="p">))</span>
+        <span class="n">rest_shape</span> <span class="o">=</span> <span class="n">coords</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">s_shape</span><span class="p">):]</span>
+        <span class="n">coords_flat</span> <span class="o">=</span> <span class="n">coords</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">s_total</span><span class="p">,</span> <span class="o">*</span><span class="n">rest_shape</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">time_map</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">tm</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">time_map</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">tm</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span> <span class="nb">len</span><span class="p">(</span><span class="n">s_shape</span><span class="p">)]</span> <span class="o">!=</span> <span class="n">s_shape</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;time_map leading shape </span><span class="si">{</span><span class="n">tm</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">s_shape</span><span class="p">)]</span><span class="si">}</span><span class="s2"> &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;does not match stack_shape </span><span class="si">{</span><span class="n">s_shape</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+            <span class="n">tm_flat</span> <span class="o">=</span> <span class="n">tm</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">s_total</span><span class="p">,</span> <span class="o">*</span><span class="n">tm</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">s_shape</span><span class="p">):])</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">tm_flat</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="n">s_total</span>
+        <span class="n">plans</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">_create_plan_single</span><span class="p">(</span>
+                <span class="n">shape</span><span class="p">,</span> <span class="n">coords_flat</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">oversamp</span><span class="p">,</span> <span class="n">kernel_width</span><span class="p">,</span> <span class="n">kernel_shape</span><span class="p">,</span>
+                <span class="n">tm_flat</span><span class="p">[</span><span class="n">i</span><span class="p">],</span>
+            <span class="p">)</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">s_total</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="c1"># _attach_fft_plan must run before GrogPlan._stack since the latter</span>
+        <span class="c1"># stacks indices/sort_perm/inv_perm.  Build them per element first.</span>
+        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">:</span>
+            <span class="n">_attach_fft_plan</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">image_shape</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">GrogPlan</span><span class="o">.</span><span class="n">_stack</span><span class="p">(</span><span class="n">plans</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">s_shape</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="c1"># Re-shape stacked tensors from (s_total, ...) to (*S, ...).</span>
+            <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;target_idx&quot;</span><span class="p">,</span> <span class="s2">&quot;weights&quot;</span><span class="p">,</span> <span class="s2">&quot;indices&quot;</span><span class="p">,</span> <span class="s2">&quot;sqrt_weights&quot;</span><span class="p">,</span>
+                      <span class="s2">&quot;sort_perm&quot;</span><span class="p">,</span> <span class="s2">&quot;inv_perm&quot;</span><span class="p">):</span>
+                <span class="n">t</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">f</span><span class="p">)</span>
+                <span class="n">out_shape</span> <span class="o">=</span> <span class="n">s_shape</span> <span class="o">+</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>
+                <span class="nb">setattr</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="n">t</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">out_shape</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">out</span><span class="o">.</span><span class="n">time_map</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">t</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">time_map</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">time_map</span> <span class="o">=</span> <span class="n">t</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">s_shape</span> <span class="o">+</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">:]))</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">stack_shape</span> <span class="o">=</span> <span class="n">s_shape</span>
+        <span class="k">return</span> <span class="n">out</span>
+    <span class="k">return</span> <span class="n">_create_plan_single</span><span class="p">(</span>
+        <span class="n">shape</span><span class="p">,</span> <span class="n">coords</span><span class="p">,</span> <span class="n">oversamp</span><span class="p">,</span> <span class="n">kernel_width</span><span class="p">,</span> <span class="n">kernel_shape</span><span class="p">,</span> <span class="n">time_map</span><span class="p">,</span>
+    <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_create_plan_single</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">coords</span><span class="p">,</span> <span class="n">oversamp</span><span class="p">,</span> <span class="n">kernel_width</span><span class="p">,</span> <span class="n">kernel_shape</span><span class="p">,</span>
+                        <span class="n">time_map</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Build data-driven GROG plan for a single (unstacked) trajectory.</span>
 
 <span class="sd">    For each source point, enumerate all grid neighbours within the kernel</span>
 <span class="sd">    and compute:</span>

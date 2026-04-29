@@ -257,8 +257,17 @@ class GrogInterpolator(_GrogInterpolatorBase):
         return_plan : bool, optional
             If ``True`` (default) return ``(ndarray, GrogPlan)``;
             if ``False`` return the ndarray only.
+        grid : bool, optional
+            If ``True``, return ``(gridded_kspace, mask, density[, plan])``
+            numpy arrays instead of the flat sparse output.
         """
+        grid = kwargs.get("grid", False)
         out = super().interpolate(np.asarray(kspace), **kwargs)
+        if grid:
+            grid_kspace, mask, density = (np.asarray(t) for t in out)
+            if return_plan:
+                return grid_kspace, mask, density, self.plan
+            return grid_kspace, mask, density
         out = np.asarray(out)
         # Reshape from flat (*batch, C, n_samples) → (*batch, C, *natural_shape)
         out = out.reshape(*out.shape[:-1], *self.plan.natural_shape)

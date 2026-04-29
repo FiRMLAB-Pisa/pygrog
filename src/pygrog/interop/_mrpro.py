@@ -428,7 +428,7 @@ class GrogInterpolator(_GrogInterpolatorBase):
         super().calc_interp_table(calib_arr, lamda=lamda, precision=precision)
 
     # ------------------------------------------------------------------
-    def interpolate(self, kdata, *, return_plan: bool = True):
+    def interpolate(self, kdata, *, return_plan: bool = True, grid: bool = False):
         """GROG-interpolate ``kdata`` onto the sparse Cartesian grid.
 
         Parameters
@@ -458,6 +458,12 @@ class GrogInterpolator(_GrogInterpolatorBase):
 
         # Drop singleton k2 for 2D plans before calling the base interpolate.
         data_for_interp = _data_to_spatial(data_t, self._ndim)
+        if grid:
+            out = super().interpolate(data_for_interp, grid=True)
+            grid_kspace, mask, density = (torch.as_tensor(t) for t in out)
+            if return_plan:
+                return grid_kspace, mask, density, self.plan
+            return grid_kspace, mask, density
         sparse = super().interpolate(data_for_interp)
         # Reshape from flat (*other, coils, n_samples) → (*other, coils, *spatial, kw)
         sparse = torch.as_tensor(sparse)
@@ -563,22 +569,21 @@ def nlinv_calib(
     coords_np, data_t, enc_shape, recon_shape = _kdata_extract(kdata)
     ndim = len(enc_shape)
 
-    # Squeeze "other" dims, expecting size 1 (NLINV operates on a single frame).
-    arr = data_t
-    while arr.ndim > 4:  # coils + (k2, k1, k0)
-        if arr.shape[0] != 1:
-            raise ValueError(
-                "nlinv_calib expects a single-frame KData; got data shape "
-                f"{tuple(data_t.shape)}."
-            )
+    # Allow leading *other dims (batch).  Squeeze leading singleton other
+    # axes so single-frame KData (the historic case) returns a result with
+    # no leading batch dim.  Trajectory is assumed shared across *other.
+    arr = data_t  # (*other, n_coils, k2, k1, k0)
+    while arr.ndim > 4 and arr.shape[0] == 1:
         arr = arr[0]
+    other_shape = tuple(int(s) for s in arr.shape[:-4])
     if ndim == 2:
-        arr = arr.squeeze(-3)  # (coils, k1, k0)
+        # Drop singleton k2 → (*other, n_coils, k1, k0).
+        arr_sf = arr.squeeze(-3)
         coords_np = coords_np.reshape(-1, 2)
-        y_in = arr.reshape(arr.shape[0], -1)
+        y_in = arr_sf.reshape(*other_shape, arr_sf.shape[-3], -1)
     else:
         coords_np = coords_np.reshape(-1, 3)
-        y_in = arr.reshape(arr.shape[0], -1)
+        y_in = arr.reshape(*other_shape, arr.shape[-4], -1)
 
     out = _nlinv_calib(
         y_in,
@@ -594,7 +599,7 @@ def nlinv_calib(
     smaps = out[0]
     smaps_t = torch.as_tensor(smaps)
     if ndim == 2:
-        # (n_coils, y, x) → (n_coils, 1, y, x)
+        # (..., n_coils, y, x) → (..., n_coils, 1, y, x)
         smaps_t = smaps_t.unsqueeze(-3)
     extras = out[1:]
     if extras:

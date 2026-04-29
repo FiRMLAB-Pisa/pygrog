@@ -241,6 +241,9 @@ class SparseFFT:
             self.natural_shape = tuple(
                 int(s) for s in getattr(plan, "natural_shape", (int(plan.n_samples),))
             )
+            self.stack_shape = tuple(
+                int(s) for s in getattr(plan, "stack_shape", ()) or ()
+            )
         else:
             if grid_shape is None or image_shape is None:
                 raise ValueError(
@@ -263,14 +266,21 @@ class SparseFFT:
             inv_perm[sort_perm] = torch.arange(len(sort_perm))
             self.inv_perm = inv_perm
             self.natural_shape = (int(idx.numel()),)
+            self.stack_shape = ()
 
-        self.n_samples = int(self.indices.numel())
+        # n_samples is the per-stack-element sample count.  When stacked,
+        # self.indices has shape (*stack_shape, n_samples); else (n_samples,).
+        self.n_samples = int(self.indices.shape[-1])
         self.ndim = len(self.grid_shape)
         self.fft_axes = tuple(range(-self.ndim, 0))
 
         # GPU binning — computed lazily on first use
         self._bin_starts = None
         self._bin_size = 0
+
+        # Packed-stack arrays — built lazily on first stacked op (see
+        # ``_packed_arrays``).  Cached per compute device.
+        self._packed_cache = None
 
         # Sensitivity maps — pre-compute conjugate (view, free)
         if smaps is not None:
@@ -304,6 +314,11 @@ class SparseFFT:
         """Compute GPU bins on first use for the given device."""
         if device.type != "cuda" or self._bin_starts is not None:
             return
+        if self.stack_shape:
+            # No bin caching for stacked plans (per-stack bins would need
+            # rebuilding inside the forward loop).  This only affects CUDA
+            # micro-optimisation; correctness is unchanged.
+            return
         self._bin_size = 256
         n_bins = (self.grid_size + self._bin_size - 1) // self._bin_size
         bin_edges = torch.arange(n_bins + 1, dtype=torch.int64) * self._bin_size
@@ -323,42 +338,145 @@ class SparseFFT:
         )
 
     # ------------------------------------------------------------------
+    # Per-stack 1-D selectors (for stacked plans)
+    # ------------------------------------------------------------------
+    def _stack_arrays(self, s_flat_idx: int):
+        """Return ``(indices, sqrt_weights, sort_perm, inv_perm)`` for one
+        flattened stack element.  If unstacked, returns the global arrays.
+        """
+        if not self.stack_shape:
+            return self.indices, self.sqrt_weights, self.sort_perm, self.inv_perm
+        s_total = int(np.prod(self.stack_shape))
+        idx = self.indices.reshape(s_total, self.n_samples)[s_flat_idx]
+        sqw = self.sqrt_weights.reshape(s_total, self.n_samples)[s_flat_idx]
+        sp = self.sort_perm.reshape(s_total, self.n_samples)[s_flat_idx]
+        ip = self.inv_perm.reshape(s_total, self.n_samples)[s_flat_idx]
+        return idx, sqw, sp, ip
+
+    # ------------------------------------------------------------------
+    # Packed-stack arrays — fuse all stack elements into a single sorted
+    # 1-D problem on a flat super-grid of shape ``(S_total * grid_size,)``.
+    # Per-stack indices are offset by ``s * grid_size`` so the concatenated
+    # array is globally sorted (each stack lives in its own disjoint slab),
+    # which lets the single-trajectory C++ kernels handle the whole stack
+    # in one call without naive Python looping.
+    # ------------------------------------------------------------------
+    def _packed_arrays(self, comp_device: torch.device):
+        """Return packed ``(indices, sqrt_w, sort_perm, inv_perm, S, n_per)``.
+
+        Each output is a 1-D tensor of length ``S_total * n_per`` on
+        ``comp_device``; ``indices`` are offset so writes to the flat super-
+        grid land in disjoint per-stack slabs.  Cached per device.
+        """
+        if not self.stack_shape:
+            raise RuntimeError("_packed_arrays called on an unstacked plan")
+
+        cache = getattr(self, "_packed_cache", None)
+        if cache is not None and cache[0] == comp_device:
+            return cache[1]
+
+        S_total = int(np.prod(self.stack_shape))
+        n_per = int(self.n_samples)
+
+        idx2d = self.indices.reshape(S_total, n_per).to(comp_device)
+        sqw2d = self.sqrt_weights.reshape(S_total, n_per).to(comp_device)
+        sp2d = self.sort_perm.reshape(S_total, n_per).to(comp_device)
+        ip2d = self.inv_perm.reshape(S_total, n_per).to(comp_device)
+
+        grid_off = (torch.arange(S_total, device=comp_device, dtype=idx2d.dtype)
+                    * self.grid_size).unsqueeze(-1)
+        data_off = (torch.arange(S_total, device=comp_device, dtype=sp2d.dtype)
+                    * n_per).unsqueeze(-1)
+
+        packed = (
+            (idx2d + grid_off).reshape(-1).contiguous(),
+            sqw2d.reshape(-1).contiguous(),
+            (sp2d + data_off).reshape(-1).contiguous(),
+            (ip2d + data_off).reshape(-1).contiguous(),
+            S_total,
+            n_per,
+        )
+        self._packed_cache = (comp_device, packed)
+        return packed
+
+    # ------------------------------------------------------------------
     # Forward: sparse k-space -> image  (adjoint NUFFT direction)
     # ------------------------------------------------------------------
     @with_torch
     def forward(self, sparse_kspace: torch.Tensor) -> torch.Tensor:
         """Sparse k-space to image.
 
-        Parameters
-        ----------
-        sparse_kspace : torch.Tensor
-            ``(n_coils, *natural_shape)`` or ``(n_coils, n_samples)`` (legacy),
-            or with a leading batch dim. ``prod(natural_shape) == n_samples``.
+        Accepted input layouts (with optional leading ``*B`` batch and, for
+        stacked plans, leading ``*S`` stack axes inserted between batch and
+        single-frame dims):
 
-        Returns
-        -------
-        torch.Tensor
-            ``(*image_shape,)`` or ``(*lead, *image_shape)`` combined image.
+        - ``(*B, *S, n_coils, *natural_shape)``
+        - ``(*B, *S, n_coils, n_samples)`` (legacy / flat form)
+
+        Output: ``(*B, *S, *image_shape)`` if smaps are set (SENSE-combined),
+        else ``(*B, *S, n_coils, *image_shape)``.
         """
         # Natural-shape (multi-dim) input → fold trailing dims into n_samples.
         nat = self.natural_shape
         if len(nat) > 1 and tuple(int(s) for s in sparse_kspace.shape[-len(nat):]) == nat:
             flat_shape = tuple(int(s) for s in sparse_kspace.shape[:-len(nat)]) + (self.n_samples,)
             sparse_kspace = sparse_kspace.reshape(flat_shape)
-        if sparse_kspace.ndim == 3:  # (T, n_coils, n_samples) → (T, *image_shape)
-            return torch.stack(
-                [self.forward(sparse_kspace[t]) for t in range(sparse_kspace.shape[0])],
-                dim=0,
-            )
+
+        # x now has trailing (n_coils, n_samples).  Split prefix into (*B, *S).
+        s_shape = self.stack_shape
+        s_ndim = len(s_shape)
+        prefix = tuple(int(s) for s in sparse_kspace.shape[:-2])
+        if s_ndim:
+            if len(prefix) < s_ndim or tuple(prefix[-s_ndim:]) != s_shape:
+                raise ValueError(
+                    f"sparse_kspace prefix {prefix} must end with stack_shape {s_shape}"
+                )
+            B_shape = prefix[:-s_ndim]
+        else:
+            B_shape = prefix
+
+        # Single-frame fast path (no batch, no stack).
+        if not prefix:
+            return self._forward_single(sparse_kspace, 0)
+
+        # Loop over flattened (*B, *S).
+        S_total = int(np.prod(s_shape)) if s_shape else 1
+        B_total = int(np.prod(B_shape)) if B_shape else 1
+        # Flatten to (B_total, S_total, n_coils, n_samples)
+        n_coils = int(sparse_kspace.shape[-2])
+        flat = sparse_kspace.reshape(B_total, S_total, n_coils, self.n_samples)
+        # Stacked path: fuse all S stack elements into a single packed
+        # scatter call (one C++ kernel invocation handles every stack
+        # element at once via offset indices into a flat super-grid).
+        if s_ndim:
+            outs = []
+            for b in range(B_total):
+                outs.append(self._forward_packed(flat[b]))
+        else:
+            outs = []
+            for b in range(B_total):
+                outs.append(self._forward_single(flat[b, 0], 0).unsqueeze(0))
+        # Single-frame output shape:
+        single_out_shape = (
+            tuple(self.image_shape) if self.smaps is not None
+            else (n_coils, *self.image_shape)
+        )
+        stacked = torch.stack(outs, dim=0)  # (B_total, S_total, *single_out)
+        return stacked.reshape(*B_shape, *s_shape, *single_out_shape)
+
+    def _forward_single(self, sparse_kspace: torch.Tensor, s_flat_idx: int = 0):
+        """Single-frame forward (one stack element). ``sparse_kspace`` shape:
+        ``(n_coils, n_samples)``."""
         n_coils = sparse_kspace.shape[0]
         src_device = sparse_kspace.device
         comp_device = self.device if self.device is not None else src_device
         use_pipeline = comp_device.type == "cuda" and src_device.type == "cpu"
 
         dtype = sparse_kspace.dtype
-        indices = self.indices.to(comp_device)
-        sqrt_w = self.sqrt_weights.to(comp_device)
-        sort_perm = self.sort_perm.to(comp_device)
+        idx_s, sqw_s, sp_s, _ = self._stack_arrays(s_flat_idx)
+        indices = idx_s.to(comp_device)
+        sqrt_w = sqw_s.to(comp_device)
+        sort_perm = sp_s.to(comp_device)
         self._ensure_bins(comp_device)
 
         # Pre-allocate reusable grid buffer (one alloc, reused per coil)
@@ -396,23 +514,75 @@ class SparseFFT:
         return accum.to(src_device)
 
     # ------------------------------------------------------------------
+    # Packed-stack forward — one C++ scatter call covers all S elements
+    # ------------------------------------------------------------------
+    def _forward_packed(self, sparse_kspace: torch.Tensor) -> torch.Tensor:
+        """Stacked forward over all stack elements at once.
+
+        Parameters
+        ----------
+        sparse_kspace : torch.Tensor
+            ``(S_total, n_coils, n_per)`` complex.
+
+        Returns
+        -------
+        torch.Tensor
+            ``(S_total, *image_shape)`` if smaps are set (SENSE-combined),
+            else ``(S_total, n_coils, *image_shape)``.
+        """
+        src_device = sparse_kspace.device
+        comp_device = self.device if self.device is not None else src_device
+        dtype = sparse_kspace.dtype
+
+        idx_p, sqw_p, sp_p, _, S_total, n_per = self._packed_arrays(comp_device)
+
+        n_coils = int(sparse_kspace.shape[-2])
+        # Bring data on compute device, fold (S, n_coils, n_per) -> (n_coils, S*n_per)
+        ksp_d = sparse_kspace.to(comp_device).permute(1, 0, 2).reshape(n_coils, -1)
+        # Globally sort once via packed_sort_perm (one indexing op per coil).
+        sorted_all = ksp_d[:, sp_p]  # (n_coils, S*n_per)
+
+        super_grid = torch.empty(S_total * self.grid_size,
+                                 dtype=dtype, device=comp_device)
+
+        if self.smaps is not None:
+            conj_smaps = self._conj_smaps.to(comp_device, dtype=dtype)
+            accum = torch.zeros(S_total, *self.image_shape,
+                                dtype=dtype, device=comp_device)
+        else:
+            accum = torch.zeros(S_total, n_coils, *self.image_shape,
+                                dtype=dtype, device=comp_device)
+
+        for c in range(n_coils):
+            super_grid.zero_()
+            # Single C++ kernel call covers every stack element.
+            _scatter_add(super_grid, sorted_all[c], idx_p, sqw_p)
+            full_imgs = ifft(
+                super_grid.reshape(S_total, *self.grid_shape),
+                axes=self.fft_axes,
+            )
+            imgs = resize(full_imgs, (S_total, *self.image_shape))
+            if self.smaps is not None:
+                accum.addcmul_(imgs, conj_smaps[c].unsqueeze(0))
+            else:
+                accum[:, c] = imgs
+
+        return accum.to(src_device)
+
+    # ------------------------------------------------------------------
     # Adjoint: image -> sparse k-space  (forward NUFFT direction)
     # ------------------------------------------------------------------
     @with_torch
     def adjoint(self, image: torch.Tensor) -> torch.Tensor:
         """Image to sparse k-space.
 
-        Parameters
-        ----------
-        image : torch.Tensor
-            ``(*image_shape,)`` or ``(T, *image_shape)`` complex.
-            When smaps are absent, single-frame input is ``(n_coils, *image_shape)``
-            and batched input is ``(T, n_coils, *image_shape)``.
+        Accepted input layouts (with optional leading ``*B`` batch and, for
+        stacked plans, leading ``*S`` stack axes):
 
-        Returns
-        -------
-        torch.Tensor
-            ``(n_coils, *natural_shape)`` (or with leading batch dim).
+        - ``(*B, *S, *image_shape)`` if smaps are set
+        - ``(*B, *S, n_coils, *image_shape)`` otherwise
+
+        Output: ``(*B, *S, n_coils, *natural_shape)``.
         """
         out = self._adjoint_flat(image)
         nat = self.natural_shape
@@ -422,22 +592,52 @@ class SparseFFT:
 
     @with_torch
     def _adjoint_flat(self, image: torch.Tensor) -> torch.Tensor:
-        """Flat-output adjoint: returns (..., n_samples)."""
-        # Batch detection: one extra leading dim beyond the expected single-frame ndim.
-        single_frame_ndim = len(self.image_shape) if self.smaps is not None else len(self.image_shape) + 1
-        if image.ndim == single_frame_ndim + 1:  # (T, ...) batched
-            return torch.stack(
-                [self._adjoint_flat(image[t]) for t in range(image.shape[0])],
-                dim=0,
-            )
+        """Flat-output adjoint: returns (*B, *S, n_coils, n_samples)."""
+        s_shape = self.stack_shape
+        s_ndim = len(s_shape)
+        # Single-frame ndim (no batch, no stack):
+        single_ndim = len(self.image_shape) + (0 if self.smaps is not None else 1)
+        prefix = tuple(int(s) for s in image.shape[:image.ndim - single_ndim])
+
+        if s_ndim:
+            if len(prefix) < s_ndim or tuple(prefix[-s_ndim:]) != s_shape:
+                raise ValueError(
+                    f"image prefix {prefix} must end with stack_shape {s_shape}"
+                )
+            B_shape = prefix[:-s_ndim]
+        else:
+            B_shape = prefix
+
+        # Single-frame fast path.
+        if not prefix:
+            return self._adjoint_single(image, 0)
+
+        S_total = int(np.prod(s_shape)) if s_shape else 1
+        B_total = int(np.prod(B_shape)) if B_shape else 1
+        # Reshape image to (B_total, S_total, *single_shape)
+        single_shape = tuple(image.shape[image.ndim - single_ndim:])
+        flat = image.reshape(B_total, S_total, *single_shape)
+        if s_ndim:
+            outs = [self._adjoint_packed(flat[b]) for b in range(B_total)]
+        else:
+            outs = [self._adjoint_single(flat[b, 0], 0).unsqueeze(0)
+                    for b in range(B_total)]
+        # Each entry has shape (S_total, n_coils, n_samples)
+        n_coils = outs[0].shape[1]
+        stacked = torch.stack(outs, dim=0)  # (B_total, S_total, n_coils, n_samples)
+        return stacked.reshape(*B_shape, *s_shape, n_coils, self.n_samples)
+
+    def _adjoint_single(self, image: torch.Tensor, s_flat_idx: int = 0):
+        """Single-frame adjoint (one stack element)."""
         src_device = image.device
         comp_device = self.device if self.device is not None else src_device
         use_pipeline = comp_device.type == "cuda" and src_device.type == "cpu"
 
         dtype = image.dtype
-        indices = self.indices.to(comp_device)
-        sqrt_w = self.sqrt_weights.to(comp_device)
-        inv_perm = self.inv_perm.to(comp_device)
+        idx_s, sqw_s, _, ip_s = self._stack_arrays(s_flat_idx)
+        indices = idx_s.to(comp_device)
+        sqrt_w = sqw_s.to(comp_device)
+        inv_perm = ip_s.to(comp_device)
         image_d = image.to(comp_device)
 
         if self.smaps is not None:
@@ -477,6 +677,64 @@ class SparseFFT:
 
         return output.to(src_device)
 
+    # ------------------------------------------------------------------
+    # Packed-stack adjoint — one C++ gather call covers all S elements
+    # ------------------------------------------------------------------
+    def _adjoint_packed(self, image: torch.Tensor) -> torch.Tensor:
+        """Stacked adjoint over all stack elements at once.
+
+        Parameters
+        ----------
+        image : torch.Tensor
+            ``(S_total, *image_shape)`` if smaps are set, otherwise
+            ``(S_total, n_coils, *image_shape)``.
+
+        Returns
+        -------
+        torch.Tensor
+            ``(S_total, n_coils, n_per)`` complex.
+        """
+        src_device = image.device
+        comp_device = self.device if self.device is not None else src_device
+        dtype = image.dtype
+
+        idx_p, sqw_p, _, ip_p, S_total, n_per = self._packed_arrays(comp_device)
+
+        image_d = image.to(comp_device)
+        if self.smaps is not None:
+            smaps = self.smaps.to(comp_device, dtype=dtype)
+            n_coils = smaps.shape[0]
+        else:
+            n_coils = image_d.shape[1]
+
+        # Pre-allocate a packed (S, *grid_shape) zero-padded buffer reused
+        # per coil; one batched FFT per coil over the full stack.
+        padded = torch.zeros(S_total, *self.grid_shape,
+                             dtype=dtype, device=comp_device)
+        slc = (slice(None), *self._pad_slices)
+
+        # Output is built sorted in packed layout, then unsorted via inv_perm
+        # at the end (single indexing op per coil).
+        output_unsorted = torch.empty(n_coils, S_total * n_per,
+                                      dtype=dtype, device=comp_device)
+
+        for c in range(n_coils):
+            if self.smaps is not None:
+                coil_imgs = image_d * smaps[c]            # (S, *image_shape)
+            else:
+                coil_imgs = image_d[:, c]                  # (S, *image_shape)
+            padded.zero_()
+            padded[slc] = coil_imgs
+            kgrid = fft(padded, axes=self.fft_axes)        # (S, *grid_shape)
+            super_flat = kgrid.reshape(-1)                 # (S*grid_size,)
+            # Single C++ kernel call across the whole stack.
+            sorted_packed = _gather(super_flat, idx_p, sqw_p)  # (S*n_per,)
+            # Undo per-stack sort with one indexing op.
+            output_unsorted[c] = sorted_packed[ip_p]
+
+        out = output_unsorted.reshape(n_coils, S_total, n_per).permute(1, 0, 2).contiguous()
+        return out.to(src_device)
+
     def __call__(self, x, adjoint=False):
         if adjoint:
             return self.adjoint(x)
@@ -515,7 +773,9 @@ class SparseFFT:
     # ------------------------------------------------------------------
     # Batch helpers for decorators  (Tier-1 FFT fusion)
     # ------------------------------------------------------------------
-    def _scatter_ifft_crop_batch(self, batch_kspace: torch.Tensor) -> torch.Tensor:
+    def _scatter_ifft_crop_batch(
+        self, batch_kspace: torch.Tensor, s_flat_idx: int = 0,
+    ) -> torch.Tensor:
         """Scatter (per-component loop) → **one batched IFFT** → crop.
 
         Reduces ``B x n_coils`` IFFT calls to a single
@@ -528,6 +788,8 @@ class SparseFFT:
             ``(B, n_samples)`` complex, **unsorted**.  Each row is an
             independently-weighted k-space vector (e.g. one ORC component
             x one coil, or one subspace frame x one coil).
+        s_flat_idx : int
+            Flattened stack-element index (ignored for unstacked plans).
 
         Returns
         -------
@@ -539,9 +801,10 @@ class SparseFFT:
         comp_device = self.device if self.device is not None else src_device
         dtype = batch_kspace.dtype
 
-        indices = self.indices.to(comp_device)
-        sqrt_w = self.sqrt_weights.to(comp_device)
-        sort_perm = self.sort_perm.to(comp_device)
+        idx_s, sqw_s, sp_s, _ = self._stack_arrays(s_flat_idx)
+        indices = idx_s.to(comp_device)
+        sqrt_w = sqw_s.to(comp_device)
+        sort_perm = sp_s.to(comp_device)
         self._ensure_bins(comp_device)
 
         # Sort all B inputs at once: (B, n_samples) — one indexing op
@@ -561,7 +824,9 @@ class SparseFFT:
         imgs = resize(full_imgs, (B, *self.image_shape))
         return imgs.to(src_device)
 
-    def _fft_pad_gather_batch(self, batch_imgs: torch.Tensor) -> torch.Tensor:
+    def _fft_pad_gather_batch(
+        self, batch_imgs: torch.Tensor, s_flat_idx: int = 0,
+    ) -> torch.Tensor:
         """ONE batched FFT -> zero-pad -> gather (per-component loop).
 
         Reduces ``B x n_coils`` FFT calls to a single
@@ -573,6 +838,8 @@ class SparseFFT:
         batch_imgs : torch.Tensor
             ``(B, *image_shape)`` complex.  Each slice ``[b]`` is an
             independently-weighted image (e.g. one ORC component x one coil).
+        s_flat_idx : int
+            Flattened stack-element index (ignored for unstacked plans).
 
         Returns
         -------
@@ -584,9 +851,10 @@ class SparseFFT:
         comp_device = self.device if self.device is not None else src_device
         dtype = batch_imgs.dtype
 
-        indices = self.indices.to(comp_device)
-        sqrt_w = self.sqrt_weights.to(comp_device)
-        inv_perm = self.inv_perm.to(comp_device)
+        idx_s, sqw_s, _, ip_s = self._stack_arrays(s_flat_idx)
+        indices = idx_s.to(comp_device)
+        sqrt_w = sqw_s.to(comp_device)
+        inv_perm = ip_s.to(comp_device)
         imgs_d = batch_imgs.to(comp_device)
 
         # Zero-pad images in image space (adjoint of center-crop in image space)

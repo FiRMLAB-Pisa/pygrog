@@ -258,7 +258,7 @@ adjointness condition throughout.
 
  .. code-block:: none
 
-    PyGROG sparse shape : (16, 48, 600, 3)
+    PyGROG sparse shape : (16, 86400)
 
 
 
@@ -271,7 +271,7 @@ Comparison
 Both PyGROG paths (shortcut and explicit) should match each other and the
 mri-nufft adjoint reference.
 
-.. GENERATED FROM PYTHON SOURCE LINES 166-219
+.. GENERATED FROM PYTHON SOURCE LINES 166-221
 
 .. code-block:: Python
 
@@ -331,6 +331,8 @@ mri-nufft adjoint reference.
 
 
 
+
+
 .. image-sg:: /generated/autoexamples/images/sphx_glr_example_basic_usage_003.png
    :alt: mri-nufft (reference), PyGROG RSS (ret_image=True), PyGROG full (sparse IFFT), error RSS [%]  MAE=4.14%, error full [%]  MAE=3.28%
    :srcset: /generated/autoexamples/images/sphx_glr_example_basic_usage_003.png
@@ -347,10 +349,72 @@ mri-nufft adjoint reference.
 
 
 
+.. GENERATED FROM PYTHON SOURCE LINES 222-230
+
+Multi-slice batch reconstruction
+================================
+
+Demonstrates the new multi-axis batch (``*B``) capability: three axial
+slices share the same spiral trajectory, so we can stack them along a
+leading batch axis and have :class:`~pygrog.operator.SparseFFT` and
+:class:`~pygrog.calib.GrogInterpolator` vectorise across slices in a
+single call.
+
+.. GENERATED FROM PYTHON SOURCE LINES 230-265
+
+.. code-block:: Python
+
+
+    # Pull three adjacent BrainWeb slices.
+    vol = get_mri(0, "T1")
+    vol = np.flip(vol, axis=(0, 2)).astype(np.float32)
+    vol /= vol.max() + 1e-8
+    slices = vol[88:91]                           # (B=3, ny, nx)
+    B = slices.shape[0]
+
+    # Simulate batched k-space with the same trajectory but per-slice content.
+    ksp_batch = np.stack(
+        [
+            nufft_sim.op(s.astype(np.complex64))
+            for s in slices
+        ],
+        axis=0,
+    )                                              # (B, n_coils, n_samples)
+    ksp_batch_shaped = ksp_batch.reshape(B, n_coils, *samples.shape[:2])
+
+    # Single batched GROG interpolation.
+    sparse_batch = grog.interpolate(ksp_batch_shaped, ret_image=False)
+    sparse_batch_t = torch.as_tensor(np.asarray(sparse_batch))
+    sparse_batch_w = sparse_batch_t * sqrt_w.to(sparse_batch_t.dtype)
+
+    # Single batched SparseFFT recon — same operator instance handles ``*B``.
+    recon_batch = op.forward(sparse_batch_w).abs().cpu().numpy()
+
+    fig, axes = plt.subplots(1, B, figsize=(4 * B, 4))
+    for i in range(B):
+        axes[i].imshow(recon_batch[i], cmap="gray", origin="lower")
+        axes[i].set_xticks([])
+        axes[i].set_yticks([])
+        axes[i].set_title(f"slice {i}")
+    fig.suptitle("Multi-slice batched PyGROG reconstruction")
+    plt.tight_layout()
+    plt.show()
+
+
+
+.. image-sg:: /generated/autoexamples/images/sphx_glr_example_basic_usage_004.png
+   :alt: Multi-slice batched PyGROG reconstruction, slice 0, slice 1, slice 2
+   :srcset: /generated/autoexamples/images/sphx_glr_example_basic_usage_004.png
+   :class: sphx-glr-single-img
+
+
+
+
+
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 2.422 seconds)
+   **Total running time of the script:** (0 minutes 4.067 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_basic_usage.py:

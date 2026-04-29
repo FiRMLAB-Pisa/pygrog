@@ -167,6 +167,7 @@
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
 </details></li>
@@ -366,6 +367,7 @@
 
 <span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;nlinv_calib&quot;</span><span class="p">]</span>
 
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">numpy.typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">NDArray</span>
@@ -400,6 +402,7 @@
     <span class="n">toeplitz</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">ret_cal</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
     <span class="n">ret_image</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">train_reduce</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;none&quot;</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="nb">complex</span><span class="p">],</span> <span class="o">...</span><span class="p">]:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Estimate coil sensitivity maps using NLINV.</span>
@@ -460,6 +463,118 @@
 <span class="sd">        Reconstructed image.  Only if ``ret_image=True``.</span>
 
 <span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">train_reduce</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;none&quot;</span><span class="p">,</span> <span class="s2">&quot;mean&quot;</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;train_reduce must be &#39;none&#39; or &#39;mean&#39;, got </span><span class="si">{</span><span class="n">train_reduce</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Multi-axis batch detection: leading *B dims before the canonical</span>
+    <span class="c1"># single-frame layout (coil, *spatial / *traj).</span>
+    <span class="n">noncart_input</span> <span class="o">=</span> <span class="n">coords</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">noncart_input</span><span class="p">:</span>
+        <span class="n">single_ndim</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">+</span> <span class="p">(</span><span class="n">coords</span><span class="o">.</span><span class="n">ndim</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="k">if</span> <span class="n">coords</span><span class="o">.</span><span class="n">ndim</span> <span class="o">&gt;=</span> <span class="mi">1</span> <span class="k">else</span> <span class="mi">1</span>
+        <span class="c1"># If coords has a *B prefix matching y, it is per-batch (stacked) traj.</span>
+        <span class="n">coords_batched</span> <span class="o">=</span> <span class="n">coords</span><span class="o">.</span><span class="n">ndim</span> <span class="o">&gt;</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>  <span class="c1"># heuristic refined below</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">ndim</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;ndim must be provided for Cartesian input&quot;</span><span class="p">)</span>
+        <span class="n">single_ndim</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">+</span> <span class="n">ndim</span>
+    <span class="n">B_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">y</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span> <span class="n">y</span><span class="o">.</span><span class="n">ndim</span> <span class="o">-</span> <span class="n">single_ndim</span><span class="p">])</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">B_shape</span><span class="p">:</span>
+        <span class="c1"># Single-frame fast path — fall through to original implementation below.</span>
+        <span class="k">pass</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># Decide if coords/weights are per-batch (leading dims match B_shape)</span>
+        <span class="c1"># or shared.  For coords, stacked means coords.shape[:len(B_shape)] == B_shape.</span>
+        <span class="n">per_batch_coords</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">noncart_input</span>
+            <span class="ow">and</span> <span class="n">coords</span><span class="o">.</span><span class="n">ndim</span> <span class="o">&gt;=</span> <span class="nb">len</span><span class="p">(</span><span class="n">B_shape</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+            <span class="ow">and</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">coords</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span> <span class="nb">len</span><span class="p">(</span><span class="n">B_shape</span><span class="p">)])</span> <span class="o">==</span> <span class="n">B_shape</span>
+        <span class="p">)</span>
+        <span class="n">per_batch_weights</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">noncart_input</span>
+            <span class="ow">and</span> <span class="n">weights</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+            <span class="ow">and</span> <span class="n">weights</span><span class="o">.</span><span class="n">ndim</span> <span class="o">&gt;=</span> <span class="nb">len</span><span class="p">(</span><span class="n">B_shape</span><span class="p">)</span>
+            <span class="ow">and</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">weights</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span> <span class="nb">len</span><span class="p">(</span><span class="n">B_shape</span><span class="p">)])</span> <span class="o">==</span> <span class="n">B_shape</span>
+        <span class="p">)</span>
+        <span class="n">per_batch_mask</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="p">(</span><span class="ow">not</span> <span class="n">noncart_input</span><span class="p">)</span>
+            <span class="ow">and</span> <span class="n">mask</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+            <span class="ow">and</span> <span class="n">mask</span><span class="o">.</span><span class="n">ndim</span> <span class="o">&gt;=</span> <span class="nb">len</span><span class="p">(</span><span class="n">B_shape</span><span class="p">)</span>
+            <span class="ow">and</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">mask</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span> <span class="nb">len</span><span class="p">(</span><span class="n">B_shape</span><span class="p">)])</span> <span class="o">==</span> <span class="n">B_shape</span>
+        <span class="p">)</span>
+        <span class="n">B_total</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">B_shape</span><span class="p">))</span>
+        <span class="n">single_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">y</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">B_shape</span><span class="p">):])</span>
+        <span class="n">y_flat</span> <span class="o">=</span> <span class="n">y</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">B_total</span><span class="p">,</span> <span class="o">*</span><span class="n">single_shape</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">noncart_input</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">per_batch_coords</span><span class="p">:</span>
+                <span class="n">coords_flat</span> <span class="o">=</span> <span class="n">coords</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span>
+                    <span class="n">B_total</span><span class="p">,</span> <span class="o">*</span><span class="n">coords</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">B_shape</span><span class="p">):]</span>
+                <span class="p">)</span>
+            <span class="k">if</span> <span class="n">per_batch_weights</span><span class="p">:</span>
+                <span class="n">weights_flat</span> <span class="o">=</span> <span class="n">weights</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span>
+                    <span class="n">B_total</span><span class="p">,</span> <span class="o">*</span><span class="n">weights</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">B_shape</span><span class="p">):]</span>
+                <span class="p">)</span>
+
+        <span class="n">smaps_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">train_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">image_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">B_total</span><span class="p">):</span>
+            <span class="n">sub_coords</span> <span class="o">=</span> <span class="n">coords_flat</span><span class="p">[</span><span class="n">b</span><span class="p">]</span> <span class="k">if</span> <span class="p">(</span><span class="n">noncart_input</span> <span class="ow">and</span> <span class="n">per_batch_coords</span><span class="p">)</span> <span class="k">else</span> <span class="n">coords</span>
+            <span class="n">sub_weights</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">weights_flat</span><span class="p">[</span><span class="n">b</span><span class="p">]</span>
+                <span class="k">if</span> <span class="p">(</span><span class="n">noncart_input</span> <span class="ow">and</span> <span class="n">per_batch_weights</span><span class="p">)</span>
+                <span class="k">else</span> <span class="n">weights</span>
+            <span class="p">)</span>
+            <span class="n">sub_mask</span> <span class="o">=</span> <span class="n">mask</span><span class="p">[</span><span class="n">b</span><span class="p">]</span> <span class="k">if</span> <span class="n">per_batch_mask</span> <span class="k">else</span> <span class="n">mask</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="n">nlinv_calib</span><span class="p">(</span>
+                <span class="n">y_flat</span><span class="p">[</span><span class="n">b</span><span class="p">],</span>
+                <span class="n">cal_width</span><span class="o">=</span><span class="n">cal_width</span><span class="p">,</span>
+                <span class="n">ndim</span><span class="o">=</span><span class="n">ndim</span><span class="p">,</span>
+                <span class="n">mask</span><span class="o">=</span><span class="n">sub_mask</span><span class="p">,</span>
+                <span class="n">shape</span><span class="o">=</span><span class="n">shape</span><span class="p">,</span>
+                <span class="n">coords</span><span class="o">=</span><span class="n">sub_coords</span><span class="p">,</span>
+                <span class="n">weights</span><span class="o">=</span><span class="n">sub_weights</span><span class="p">,</span>
+                <span class="n">oversamp</span><span class="o">=</span><span class="n">oversamp</span><span class="p">,</span>
+                <span class="n">eps</span><span class="o">=</span><span class="n">eps</span><span class="p">,</span>
+                <span class="n">sobolev_width</span><span class="o">=</span><span class="n">sobolev_width</span><span class="p">,</span>
+                <span class="n">sobolev_deg</span><span class="o">=</span><span class="n">sobolev_deg</span><span class="p">,</span>
+                <span class="n">max_iter</span><span class="o">=</span><span class="n">max_iter</span><span class="p">,</span>
+                <span class="n">cg_iter</span><span class="o">=</span><span class="n">cg_iter</span><span class="p">,</span>
+                <span class="n">cg_tol</span><span class="o">=</span><span class="n">cg_tol</span><span class="p">,</span>
+                <span class="n">alpha0</span><span class="o">=</span><span class="n">alpha0</span><span class="p">,</span>
+                <span class="n">q</span><span class="o">=</span><span class="n">q</span><span class="p">,</span>
+                <span class="n">toeplitz</span><span class="o">=</span><span class="n">toeplitz</span><span class="p">,</span>
+                <span class="n">ret_cal</span><span class="o">=</span><span class="n">ret_cal</span><span class="p">,</span>
+                <span class="n">ret_image</span><span class="o">=</span><span class="n">ret_image</span><span class="p">,</span>
+                <span class="n">train_reduce</span><span class="o">=</span><span class="s2">&quot;none&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+                <span class="n">res</span> <span class="o">=</span> <span class="p">(</span><span class="n">res</span><span class="p">,)</span>
+            <span class="n">smaps_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">res</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+            <span class="n">idx</span> <span class="o">=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="n">ret_cal</span><span class="p">:</span>
+                <span class="n">train_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">res</span><span class="p">[</span><span class="n">idx</span><span class="p">])</span>
+                <span class="n">idx</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="n">ret_image</span><span class="p">:</span>
+                <span class="n">image_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">res</span><span class="p">[</span><span class="n">idx</span><span class="p">])</span>
+
+        <span class="n">smaps_out</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">smaps_list</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span>
+            <span class="o">*</span><span class="n">B_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">smaps_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span>
+        <span class="p">)</span>
+        <span class="n">outs</span> <span class="o">=</span> <span class="p">[</span><span class="n">smaps_out</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">ret_cal</span><span class="p">:</span>
+            <span class="n">train_stacked</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">train_list</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">train_reduce</span> <span class="o">==</span> <span class="s2">&quot;mean&quot;</span><span class="p">:</span>
+                <span class="n">train_out</span> <span class="o">=</span> <span class="n">train_stacked</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">train_out</span> <span class="o">=</span> <span class="n">train_stacked</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">B_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">train_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+            <span class="n">outs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">train_out</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">ret_image</span><span class="p">:</span>
+            <span class="n">image_out</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">image_list</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span>
+                <span class="o">*</span><span class="n">B_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">image_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span>
+            <span class="p">)</span>
+            <span class="n">outs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">image_out</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">outs</span><span class="p">)</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">outs</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="n">outs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
     <span class="n">noncart</span> <span class="o">=</span> <span class="n">coords</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
     <span class="n">n_coils</span> <span class="o">=</span> <span class="n">y</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
     <span class="n">device</span> <span class="o">=</span> <span class="n">y</span><span class="o">.</span><span class="n">device</span>

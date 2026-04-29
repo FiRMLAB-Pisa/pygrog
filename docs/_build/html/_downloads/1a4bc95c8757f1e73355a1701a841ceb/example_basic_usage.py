@@ -216,3 +216,49 @@ fig.colorbar(im2, ax=axes[1, 2], fraction=0.046, pad=0.04)
 
 plt.tight_layout()
 plt.show()
+
+
+# %%
+# Multi-slice batch reconstruction
+# ================================
+#
+# Demonstrates the new multi-axis batch (``*B``) capability: three axial
+# slices share the same spiral trajectory, so we can stack them along a
+# leading batch axis and have :class:`~pygrog.operator.SparseFFT` and
+# :class:`~pygrog.calib.GrogInterpolator` vectorise across slices in a
+# single call.
+
+# Pull three adjacent BrainWeb slices.
+vol = get_mri(0, "T1")
+vol = np.flip(vol, axis=(0, 2)).astype(np.float32)
+vol /= vol.max() + 1e-8
+slices = vol[88:91]                           # (B=3, ny, nx)
+B = slices.shape[0]
+
+# Simulate batched k-space with the same trajectory but per-slice content.
+ksp_batch = np.stack(
+    [
+        nufft_sim.op(s.astype(np.complex64))
+        for s in slices
+    ],
+    axis=0,
+)                                              # (B, n_coils, n_samples)
+ksp_batch_shaped = ksp_batch.reshape(B, n_coils, *samples.shape[:2])
+
+# Single batched GROG interpolation.
+sparse_batch = grog.interpolate(ksp_batch_shaped, ret_image=False)
+sparse_batch_t = torch.as_tensor(np.asarray(sparse_batch))
+sparse_batch_w = sparse_batch_t * sqrt_w.to(sparse_batch_t.dtype)
+
+# Single batched SparseFFT recon — same operator instance handles ``*B``.
+recon_batch = op.forward(sparse_batch_w).abs().cpu().numpy()
+
+fig, axes = plt.subplots(1, B, figsize=(4 * B, 4))
+for i in range(B):
+    axes[i].imshow(recon_batch[i], cmap="gray", origin="lower")
+    axes[i].set_xticks([])
+    axes[i].set_yticks([])
+    axes[i].set_title(f"slice {i}")
+fig.suptitle("Multi-slice batched PyGROG reconstruction")
+plt.tight_layout()
+plt.show()

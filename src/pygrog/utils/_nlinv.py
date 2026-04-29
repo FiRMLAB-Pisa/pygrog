@@ -6,6 +6,7 @@ for non-Cartesian acquisitions via mri-nufft.
 
 __all__ = ["nlinv_calib"]
 
+import numpy as np
 import torch
 
 from numpy.typing import NDArray
@@ -38,6 +39,7 @@ def nlinv_calib(
     toeplitz: bool | None = None,
     ret_cal: bool = True,
     ret_image: bool = False,
+    train_reduce: str = "none",
 ) -> tuple[NDArray[complex], ...]:
     """
     Estimate coil sensitivity maps using NLINV.
@@ -98,6 +100,118 @@ def nlinv_calib(
         Reconstructed image.  Only if ``ret_image=True``.
 
     """
+    if train_reduce not in ("none", "mean"):
+        raise ValueError(f"train_reduce must be 'none' or 'mean', got {train_reduce!r}")
+
+    # Multi-axis batch detection: leading *B dims before the canonical
+    # single-frame layout (coil, *spatial / *traj).
+    noncart_input = coords is not None
+    if noncart_input:
+        single_ndim = 1 + (coords.ndim - 1) if coords.ndim >= 1 else 1
+        # If coords has a *B prefix matching y, it is per-batch (stacked) traj.
+        coords_batched = coords.ndim > (1 + 1)  # heuristic refined below
+    else:
+        if ndim is None:
+            raise ValueError("ndim must be provided for Cartesian input")
+        single_ndim = 1 + ndim
+    B_shape = tuple(int(s) for s in y.shape[: y.ndim - single_ndim])
+    if not B_shape:
+        # Single-frame fast path — fall through to original implementation below.
+        pass
+    else:
+        # Decide if coords/weights are per-batch (leading dims match B_shape)
+        # or shared.  For coords, stacked means coords.shape[:len(B_shape)] == B_shape.
+        per_batch_coords = (
+            noncart_input
+            and coords.ndim >= len(B_shape) + 1
+            and tuple(int(s) for s in coords.shape[: len(B_shape)]) == B_shape
+        )
+        per_batch_weights = (
+            noncart_input
+            and weights is not None
+            and weights.ndim >= len(B_shape)
+            and tuple(int(s) for s in weights.shape[: len(B_shape)]) == B_shape
+        )
+        per_batch_mask = (
+            (not noncart_input)
+            and mask is not None
+            and mask.ndim >= len(B_shape)
+            and tuple(int(s) for s in mask.shape[: len(B_shape)]) == B_shape
+        )
+        B_total = int(np.prod(B_shape))
+        single_shape = tuple(y.shape[len(B_shape):])
+        y_flat = y.reshape(B_total, *single_shape)
+        if noncart_input:
+            if per_batch_coords:
+                coords_flat = coords.reshape(
+                    B_total, *coords.shape[len(B_shape):]
+                )
+            if per_batch_weights:
+                weights_flat = weights.reshape(
+                    B_total, *weights.shape[len(B_shape):]
+                )
+
+        smaps_list = []
+        train_list = []
+        image_list = []
+        for b in range(B_total):
+            sub_coords = coords_flat[b] if (noncart_input and per_batch_coords) else coords
+            sub_weights = (
+                weights_flat[b]
+                if (noncart_input and per_batch_weights)
+                else weights
+            )
+            sub_mask = mask[b] if per_batch_mask else mask
+            res = nlinv_calib(
+                y_flat[b],
+                cal_width=cal_width,
+                ndim=ndim,
+                mask=sub_mask,
+                shape=shape,
+                coords=sub_coords,
+                weights=sub_weights,
+                oversamp=oversamp,
+                eps=eps,
+                sobolev_width=sobolev_width,
+                sobolev_deg=sobolev_deg,
+                max_iter=max_iter,
+                cg_iter=cg_iter,
+                cg_tol=cg_tol,
+                alpha0=alpha0,
+                q=q,
+                toeplitz=toeplitz,
+                ret_cal=ret_cal,
+                ret_image=ret_image,
+                train_reduce="none",
+            )
+            if not isinstance(res, tuple):
+                res = (res,)
+            smaps_list.append(res[0])
+            idx = 1
+            if ret_cal:
+                train_list.append(res[idx])
+                idx += 1
+            if ret_image:
+                image_list.append(res[idx])
+
+        smaps_out = torch.stack(smaps_list, dim=0).reshape(
+            *B_shape, *smaps_list[0].shape
+        )
+        outs = [smaps_out]
+        if ret_cal:
+            train_stacked = torch.stack(train_list, dim=0)
+            if train_reduce == "mean":
+                train_out = train_stacked.mean(dim=0)
+            else:
+                train_out = train_stacked.reshape(*B_shape, *train_list[0].shape)
+            outs.append(train_out)
+        if ret_image:
+            image_out = torch.stack(image_list, dim=0).reshape(
+                *B_shape, *image_list[0].shape
+            )
+            outs.append(image_out)
+        return tuple(outs) if len(outs) > 1 else outs[0]
+
     noncart = coords is not None
     n_coils = y.shape[0]
     device = y.device

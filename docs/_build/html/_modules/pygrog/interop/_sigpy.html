@@ -167,6 +167,7 @@
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
 </details></li>
@@ -377,7 +378,13 @@
 <span class="sd">the operator and receives numpy/cupy back.</span>
 <span class="sd">&quot;&quot;&quot;</span>
 
-<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;GrogLinop&quot;</span><span class="p">,</span> <span class="s2">&quot;GrogInterpolator&quot;</span><span class="p">,</span> <span class="s2">&quot;nlinv_calib&quot;</span><span class="p">,</span> <span class="s2">&quot;coil_compress&quot;</span><span class="p">]</span>
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">&quot;GrogLinop&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;GrogNormalLinop&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;GrogInterpolator&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;nlinv_calib&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;coil_compress&quot;</span><span class="p">,</span>
+<span class="p">]</span>
 
 <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 
@@ -488,6 +495,72 @@
 
 
 <span class="c1"># ===========================================================================</span>
+<span class="c1"># Normal-operator Linop (Toeplitz short-circuit)</span>
+<span class="c1"># ===========================================================================</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">GrogNormalLinop</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;sigpy ``Linop`` wrapping ``op.normal`` (i.e. ``A^H A``).</span>
+
+<span class="sd">    Use this in CG / least-squares loops in place of ``A.H * A`` when the</span>
+<span class="sd">    underlying pygrog operator&#39;s ``toeplitz`` flag is enabled (``A.H * A``</span>
+<span class="sd">    in sigpy is a generic composed Linop and does NOT short-circuit to</span>
+<span class="sd">    ``op.normal``).</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    op : SparseFFT-like</span>
+<span class="sd">        Any pygrog operator with a ``.normal(image)`` method.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    ::</span>
+
+<span class="sd">        from pygrog.interop import GrogLinop, GrogNormalLinop</span>
+<span class="sd">        A = GrogLinop(base)</span>
+<span class="sd">        AHA = GrogNormalLinop(base)   # uses Toeplitz when base.toeplitz=True</span>
+<span class="sd">        # Use AHA wherever you would use ``A.H * A``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">_sigpy_class</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">op</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_sigpy_class</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">cls</span><span class="o">.</span><span class="n">_sigpy_class</span> <span class="o">=</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_build_sigpy_class</span><span class="p">()</span>
+        <span class="k">return</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_sigpy_class</span><span class="p">(</span><span class="n">op</span><span class="p">)</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_build_sigpy_class</span><span class="p">():</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">sigpy.linop</span><span class="w"> </span><span class="kn">import</span> <span class="n">Linop</span>
+        <span class="k">except</span> <span class="ne">ImportError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span>
+                <span class="s2">&quot;sigpy is required for GrogNormalLinop.  &quot;</span>
+                <span class="s2">&quot;Install it with: pip install sigpy&quot;</span>
+            <span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">exc</span>
+
+        <span class="k">class</span><span class="w"> </span><span class="nc">_GrogNormalLinopImpl</span><span class="p">(</span><span class="n">Linop</span><span class="p">):</span>
+<span class="w">            </span><span class="sd">&quot;&quot;&quot;Self-adjoint Linop that applies ``op.normal``.&quot;&quot;&quot;</span>
+
+            <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">op</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_op</span> <span class="o">=</span> <span class="n">op</span>
+                <span class="k">if</span> <span class="n">op</span><span class="o">.</span><span class="n">smaps</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">img_shape</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">op</span><span class="o">.</span><span class="n">image_shape</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">n_coils</span> <span class="o">=</span> <span class="p">(</span>
+                        <span class="n">op</span><span class="o">.</span><span class="n">smaps</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">op</span><span class="o">.</span><span class="n">smaps</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="mi">1</span>
+                    <span class="p">)</span>
+                    <span class="n">img_shape</span> <span class="o">=</span> <span class="p">[</span><span class="n">n_coils</span><span class="p">,</span> <span class="o">*</span><span class="nb">list</span><span class="p">(</span><span class="n">op</span><span class="o">.</span><span class="n">image_shape</span><span class="p">)]</span>
+                <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">img_shape</span><span class="p">,</span> <span class="n">img_shape</span><span class="p">)</span>
+
+            <span class="k">def</span><span class="w"> </span><span class="nf">_apply</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">):</span>  <span class="c1"># noqa: A002</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_op</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+
+            <span class="k">def</span><span class="w"> </span><span class="nf">_adjoint_linop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+                <span class="k">return</span> <span class="bp">self</span>  <span class="c1"># self-adjoint</span>
+
+        <span class="k">return</span> <span class="n">_GrogNormalLinopImpl</span>
+
+
+<span class="c1"># ===========================================================================</span>
 <span class="c1"># GrogInterpolator adapter (numpy ndarray I/O)</span>
 <span class="c1"># ===========================================================================</span>
 <span class="k">class</span><span class="w"> </span><span class="nc">GrogInterpolator</span><span class="p">(</span><span class="n">_GrogInterpolatorBase</span><span class="p">):</span>
@@ -551,6 +624,8 @@
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">out</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">interpolate</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">kspace</span><span class="p">),</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
         <span class="n">out</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+        <span class="c1"># Reshape from flat (*batch, C, n_samples) → (*batch, C, *natural_shape)</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">out</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">plan</span><span class="o">.</span><span class="n">natural_shape</span><span class="p">)</span>
         <span class="k">if</span> <span class="n">return_plan</span><span class="p">:</span>
             <span class="k">return</span> <span class="n">out</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">plan</span>
         <span class="k">return</span> <span class="n">out</span>

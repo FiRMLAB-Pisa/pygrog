@@ -167,6 +167,7 @@
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
 </details></li>
@@ -573,6 +574,10 @@
 <span class="sd">    device : str | torch.device | None</span>
 <span class="sd">        Compute device.  When ``&#39;cuda&#39;`` with CPU data, dual-stream</span>
 <span class="sd">        pipelining is enabled.</span>
+<span class="sd">    toeplitz : bool | None, optional</span>
+<span class="sd">        Use Toeplitz embedding (PSF on `grid_shape`) for the self-adjoint</span>
+<span class="sd">        operator :meth:`normal`.  ``None`` → auto: enabled on CPU,</span>
+<span class="sd">        disabled on CUDA (matches :func:`pygrog.utils.nlinv` policy).</span>
 <span class="sd">    &quot;&quot;&quot;</span>
 
     <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
@@ -585,6 +590,7 @@
         <span class="n">device</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
         <span class="o">*</span><span class="p">,</span>
         <span class="n">plan</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">toeplitz</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="p">):</span>
         <span class="c1"># --- Accept plan or raw arguments ----------------------------------</span>
         <span class="k">if</span> <span class="n">plan</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
@@ -597,6 +603,9 @@
             <span class="bp">self</span><span class="o">.</span><span class="n">inv_perm</span> <span class="o">=</span> <span class="n">plan</span><span class="o">.</span><span class="n">inv_perm</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">natural_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span>
                 <span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">plan</span><span class="p">,</span> <span class="s2">&quot;natural_shape&quot;</span><span class="p">,</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">plan</span><span class="o">.</span><span class="n">n_samples</span><span class="p">),))</span>
+            <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">stack_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span>
+                <span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">plan</span><span class="p">,</span> <span class="s2">&quot;stack_shape&quot;</span><span class="p">,</span> <span class="p">())</span> <span class="ow">or</span> <span class="p">()</span>
             <span class="p">)</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="k">if</span> <span class="n">grid_shape</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">image_shape</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -620,14 +629,21 @@
             <span class="n">inv_perm</span><span class="p">[</span><span class="n">sort_perm</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">sort_perm</span><span class="p">))</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">inv_perm</span> <span class="o">=</span> <span class="n">inv_perm</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">natural_shape</span> <span class="o">=</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">idx</span><span class="o">.</span><span class="n">numel</span><span class="p">()),)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">stack_shape</span> <span class="o">=</span> <span class="p">()</span>
 
-        <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">indices</span><span class="o">.</span><span class="n">numel</span><span class="p">())</span>
+        <span class="c1"># n_samples is the per-stack-element sample count.  When stacked,</span>
+        <span class="c1"># self.indices has shape (*stack_shape, n_samples); else (n_samples,).</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">indices</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">ndim</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
 
         <span class="c1"># GPU binning — computed lazily on first use</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_bin_starts</span> <span class="o">=</span> <span class="kc">None</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="c1"># Packed-stack arrays — built lazily on first stacked op (see</span>
+        <span class="c1"># ``_packed_arrays``).  Cached per compute device.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_packed_cache</span> <span class="o">=</span> <span class="kc">None</span>
 
         <span class="c1"># Sensitivity maps — pre-compute conjugate (view, free)</span>
         <span class="k">if</span> <span class="n">smaps</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
@@ -645,6 +661,15 @@
 
         <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="n">device</span><span class="p">)</span> <span class="k">if</span> <span class="n">device</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">None</span>
 
+        <span class="c1"># --- Toeplitz acceleration -----------------------------------------</span>
+        <span class="c1"># Auto-toggle: ON when target compute is CPU, OFF on CUDA (mirrors</span>
+        <span class="c1"># `pygrog.utils.nlinv` policy).  User can force True/False.</span>
+        <span class="k">if</span> <span class="n">toeplitz</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">target</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span>
+            <span class="n">toeplitz</span> <span class="o">=</span> <span class="n">target</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="s2">&quot;cpu&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">toeplitz</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">toeplitz</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_toep_op</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># lazily built on first .normal() call</span>
+
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Internal helpers</span>
     <span class="c1"># ------------------------------------------------------------------</span>
@@ -653,6 +678,11 @@
     <span class="k">def</span><span class="w"> </span><span class="nf">_ensure_bins</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">device</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute GPU bins on first use for the given device.&quot;&quot;&quot;</span>
         <span class="k">if</span> <span class="n">device</span><span class="o">.</span><span class="n">type</span> <span class="o">!=</span> <span class="s2">&quot;cuda&quot;</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bin_starts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">stack_shape</span><span class="p">:</span>
+            <span class="c1"># No bin caching for stacked plans (per-stack bins would need</span>
+            <span class="c1"># rebuilding inside the forward loop).  This only affects CUDA</span>
+            <span class="c1"># micro-optimisation; correctness is unchanged.</span>
             <span class="k">return</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span> <span class="o">=</span> <span class="mi">256</span>
         <span class="n">n_bins</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">grid_size</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">//</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span>
@@ -677,6 +707,74 @@
 
 
     <span class="c1"># ------------------------------------------------------------------</span>
+    <span class="c1"># Per-stack 1-D selectors (for stacked plans)</span>
+    <span class="c1"># ------------------------------------------------------------------</span>
+<div class="viewcode-block" id="SparseFFT._stack_arrays">
+<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._stack_arrays">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_stack_arrays</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return ``(indices, sqrt_weights, sort_perm, inv_perm)`` for one</span>
+<span class="sd">        flattened stack element.  If unstacked, returns the global arrays.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">stack_shape</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">indices</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">sqrt_weights</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">sort_perm</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">inv_perm</span>
+        <span class="n">s_total</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">stack_shape</span><span class="p">))</span>
+        <span class="n">idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">indices</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">s_total</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">)[</span><span class="n">s_flat_idx</span><span class="p">]</span>
+        <span class="n">sqw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sqrt_weights</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">s_total</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">)[</span><span class="n">s_flat_idx</span><span class="p">]</span>
+        <span class="n">sp</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sort_perm</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">s_total</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">)[</span><span class="n">s_flat_idx</span><span class="p">]</span>
+        <span class="n">ip</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">inv_perm</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">s_total</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">)[</span><span class="n">s_flat_idx</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">idx</span><span class="p">,</span> <span class="n">sqw</span><span class="p">,</span> <span class="n">sp</span><span class="p">,</span> <span class="n">ip</span></div>
+
+
+    <span class="c1"># ------------------------------------------------------------------</span>
+    <span class="c1"># Packed-stack arrays — fuse all stack elements into a single sorted</span>
+    <span class="c1"># 1-D problem on a flat super-grid of shape ``(S_total * grid_size,)``.</span>
+    <span class="c1"># Per-stack indices are offset by ``s * grid_size`` so the concatenated</span>
+    <span class="c1"># array is globally sorted (each stack lives in its own disjoint slab),</span>
+    <span class="c1"># which lets the single-trajectory C++ kernels handle the whole stack</span>
+    <span class="c1"># in one call without naive Python looping.</span>
+    <span class="c1"># ------------------------------------------------------------------</span>
+<div class="viewcode-block" id="SparseFFT._packed_arrays">
+<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._packed_arrays">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_packed_arrays</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">comp_device</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return packed ``(indices, sqrt_w, sort_perm, inv_perm, S, n_per)``.</span>
+
+<span class="sd">        Each output is a 1-D tensor of length ``S_total * n_per`` on</span>
+<span class="sd">        ``comp_device``; ``indices`` are offset so writes to the flat super-</span>
+<span class="sd">        grid land in disjoint per-stack slabs.  Cached per device.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">stack_shape</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;_packed_arrays called on an unstacked plan&quot;</span><span class="p">)</span>
+
+        <span class="n">cache</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;_packed_cache&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cache</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">cache</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="n">comp_device</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">cache</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="n">S_total</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">stack_shape</span><span class="p">))</span>
+        <span class="n">n_per</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">)</span>
+
+        <span class="n">idx2d</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">indices</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">S_total</span><span class="p">,</span> <span class="n">n_per</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">sqw2d</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sqrt_weights</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">S_total</span><span class="p">,</span> <span class="n">n_per</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">sp2d</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sort_perm</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">S_total</span><span class="p">,</span> <span class="n">n_per</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">ip2d</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">inv_perm</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">S_total</span><span class="p">,</span> <span class="n">n_per</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+
+        <span class="n">grid_off</span> <span class="o">=</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">S_total</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">idx2d</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+                    <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">grid_size</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">data_off</span> <span class="o">=</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">S_total</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">sp2d</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+                    <span class="o">*</span> <span class="n">n_per</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="n">packed</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="p">(</span><span class="n">idx2d</span> <span class="o">+</span> <span class="n">grid_off</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">contiguous</span><span class="p">(),</span>
+            <span class="n">sqw2d</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">contiguous</span><span class="p">(),</span>
+            <span class="p">(</span><span class="n">sp2d</span> <span class="o">+</span> <span class="n">data_off</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">contiguous</span><span class="p">(),</span>
+            <span class="p">(</span><span class="n">ip2d</span> <span class="o">+</span> <span class="n">data_off</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">contiguous</span><span class="p">(),</span>
+            <span class="n">S_total</span><span class="p">,</span>
+            <span class="n">n_per</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_packed_cache</span> <span class="o">=</span> <span class="p">(</span><span class="n">comp_device</span><span class="p">,</span> <span class="n">packed</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">packed</span></div>
+
+
+    <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Forward: sparse k-space -&gt; image  (adjoint NUFFT direction)</span>
     <span class="c1"># ------------------------------------------------------------------</span>
 <div class="viewcode-block" id="SparseFFT.forward">
@@ -685,36 +783,80 @@
     <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sparse_kspace</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Sparse k-space to image.</span>
 
-<span class="sd">        Parameters</span>
-<span class="sd">        ----------</span>
-<span class="sd">        sparse_kspace : torch.Tensor</span>
-<span class="sd">            ``(n_coils, *natural_shape)`` or ``(n_coils, n_samples)`` (legacy),</span>
-<span class="sd">            or with a leading batch dim. ``prod(natural_shape) == n_samples``.</span>
+<span class="sd">        Accepted input layouts (with optional leading ``*B`` batch and, for</span>
+<span class="sd">        stacked plans, leading ``*S`` stack axes inserted between batch and</span>
+<span class="sd">        single-frame dims):</span>
 
-<span class="sd">        Returns</span>
-<span class="sd">        -------</span>
-<span class="sd">        torch.Tensor</span>
-<span class="sd">            ``(*image_shape,)`` or ``(*lead, *image_shape)`` combined image.</span>
+<span class="sd">        - ``(*B, *S, n_coils, *natural_shape)``</span>
+<span class="sd">        - ``(*B, *S, n_coils, n_samples)`` (legacy / flat form)</span>
+
+<span class="sd">        Output: ``(*B, *S, *image_shape)`` if smaps are set (SENSE-combined),</span>
+<span class="sd">        else ``(*B, *S, n_coils, *image_shape)``.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="c1"># Natural-shape (multi-dim) input → fold trailing dims into n_samples.</span>
         <span class="n">nat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">natural_shape</span>
         <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">nat</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="ow">and</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">nat</span><span class="p">):])</span> <span class="o">==</span> <span class="n">nat</span><span class="p">:</span>
             <span class="n">flat_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">nat</span><span class="p">)])</span> <span class="o">+</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">,)</span>
             <span class="n">sparse_kspace</span> <span class="o">=</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">flat_shape</span><span class="p">)</span>
-        <span class="k">if</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>  <span class="c1"># (T, n_coils, n_samples) → (T, *image_shape)</span>
-            <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
-                <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">sparse_kspace</span><span class="p">[</span><span class="n">t</span><span class="p">])</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">sparse_kspace</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])],</span>
-                <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
-            <span class="p">)</span>
+
+        <span class="c1"># x now has trailing (n_coils, n_samples).  Split prefix into (*B, *S).</span>
+        <span class="n">s_shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">stack_shape</span>
+        <span class="n">s_ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">s_shape</span><span class="p">)</span>
+        <span class="n">prefix</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">2</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">s_ndim</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">prefix</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">s_ndim</span> <span class="ow">or</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">prefix</span><span class="p">[</span><span class="o">-</span><span class="n">s_ndim</span><span class="p">:])</span> <span class="o">!=</span> <span class="n">s_shape</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;sparse_kspace prefix </span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2"> must end with stack_shape </span><span class="si">{</span><span class="n">s_shape</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+            <span class="n">B_shape</span> <span class="o">=</span> <span class="n">prefix</span><span class="p">[:</span><span class="o">-</span><span class="n">s_ndim</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">B_shape</span> <span class="o">=</span> <span class="n">prefix</span>
+
+        <span class="c1"># Single-frame fast path (no batch, no stack).</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">prefix</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_forward_single</span><span class="p">(</span><span class="n">sparse_kspace</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+        <span class="c1"># Loop over flattened (*B, *S).</span>
+        <span class="n">S_total</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">s_shape</span><span class="p">))</span> <span class="k">if</span> <span class="n">s_shape</span> <span class="k">else</span> <span class="mi">1</span>
+        <span class="n">B_total</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">B_shape</span><span class="p">))</span> <span class="k">if</span> <span class="n">B_shape</span> <span class="k">else</span> <span class="mi">1</span>
+        <span class="c1"># Flatten to (B_total, S_total, n_coils, n_samples)</span>
+        <span class="n">n_coils</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">sparse_kspace</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">])</span>
+        <span class="n">flat</span> <span class="o">=</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">B_total</span><span class="p">,</span> <span class="n">S_total</span><span class="p">,</span> <span class="n">n_coils</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">)</span>
+        <span class="c1"># Stacked path: fuse all S stack elements into a single packed</span>
+        <span class="c1"># scatter call (one C++ kernel invocation handles every stack</span>
+        <span class="c1"># element at once via offset indices into a flat super-grid).</span>
+        <span class="k">if</span> <span class="n">s_ndim</span><span class="p">:</span>
+            <span class="n">outs</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">B_total</span><span class="p">):</span>
+                <span class="n">outs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_forward_packed</span><span class="p">(</span><span class="n">flat</span><span class="p">[</span><span class="n">b</span><span class="p">]))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">outs</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">B_total</span><span class="p">):</span>
+                <span class="n">outs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_forward_single</span><span class="p">(</span><span class="n">flat</span><span class="p">[</span><span class="n">b</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+        <span class="c1"># Single-frame output shape:</span>
+        <span class="n">single_out_shape</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">)</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">smaps</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+            <span class="k">else</span> <span class="p">(</span><span class="n">n_coils</span><span class="p">,</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">stacked</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">outs</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>  <span class="c1"># (B_total, S_total, *single_out)</span>
+        <span class="k">return</span> <span class="n">stacked</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">B_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">s_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">single_out_shape</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SparseFFT._forward_single">
+<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._forward_single">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_forward_single</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sparse_kspace</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Single-frame forward (one stack element). ``sparse_kspace`` shape:</span>
+<span class="sd">        ``(n_coils, n_samples)``.&quot;&quot;&quot;</span>
         <span class="n">n_coils</span> <span class="o">=</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
         <span class="n">src_device</span> <span class="o">=</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">device</span>
         <span class="n">comp_device</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">src_device</span>
         <span class="n">use_pipeline</span> <span class="o">=</span> <span class="n">comp_device</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="s2">&quot;cuda&quot;</span> <span class="ow">and</span> <span class="n">src_device</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="s2">&quot;cpu&quot;</span>
 
         <span class="n">dtype</span> <span class="o">=</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">dtype</span>
-        <span class="n">indices</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">indices</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
-        <span class="n">sqrt_w</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sqrt_weights</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
-        <span class="n">sort_perm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sort_perm</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">idx_s</span><span class="p">,</span> <span class="n">sqw_s</span><span class="p">,</span> <span class="n">sp_s</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stack_arrays</span><span class="p">(</span><span class="n">s_flat_idx</span><span class="p">)</span>
+        <span class="n">indices</span> <span class="o">=</span> <span class="n">idx_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">sqrt_w</span> <span class="o">=</span> <span class="n">sqw_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">sort_perm</span> <span class="o">=</span> <span class="n">sp_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_bins</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
 
         <span class="c1"># Pre-allocate reusable grid buffer (one alloc, reused per coil)</span>
@@ -753,6 +895,65 @@
 
 
     <span class="c1"># ------------------------------------------------------------------</span>
+    <span class="c1"># Packed-stack forward — one C++ scatter call covers all S elements</span>
+    <span class="c1"># ------------------------------------------------------------------</span>
+<div class="viewcode-block" id="SparseFFT._forward_packed">
+<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._forward_packed">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_forward_packed</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sparse_kspace</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Stacked forward over all stack elements at once.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        sparse_kspace : torch.Tensor</span>
+<span class="sd">            ``(S_total, n_coils, n_per)`` complex.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        torch.Tensor</span>
+<span class="sd">            ``(S_total, *image_shape)`` if smaps are set (SENSE-combined),</span>
+<span class="sd">            else ``(S_total, n_coils, *image_shape)``.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">src_device</span> <span class="o">=</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">device</span>
+        <span class="n">comp_device</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">src_device</span>
+        <span class="n">dtype</span> <span class="o">=</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">dtype</span>
+
+        <span class="n">idx_p</span><span class="p">,</span> <span class="n">sqw_p</span><span class="p">,</span> <span class="n">sp_p</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">S_total</span><span class="p">,</span> <span class="n">n_per</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_packed_arrays</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+
+        <span class="n">n_coils</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">sparse_kspace</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">])</span>
+        <span class="c1"># Bring data on compute device, fold (S, n_coils, n_per) -&gt; (n_coils, S*n_per)</span>
+        <span class="n">ksp_d</span> <span class="o">=</span> <span class="n">sparse_kspace</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span><span class="o">.</span><span class="n">permute</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">n_coils</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="c1"># Globally sort once via packed_sort_perm (one indexing op per coil).</span>
+        <span class="n">sorted_all</span> <span class="o">=</span> <span class="n">ksp_d</span><span class="p">[:,</span> <span class="n">sp_p</span><span class="p">]</span>  <span class="c1"># (n_coils, S*n_per)</span>
+
+        <span class="n">super_grid</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">S_total</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">grid_size</span><span class="p">,</span>
+                                 <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">smaps</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">conj_smaps</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_conj_smaps</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+            <span class="n">accum</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">S_total</span><span class="p">,</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">,</span>
+                                <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">accum</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">S_total</span><span class="p">,</span> <span class="n">n_coils</span><span class="p">,</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">,</span>
+                                <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_coils</span><span class="p">):</span>
+            <span class="n">super_grid</span><span class="o">.</span><span class="n">zero_</span><span class="p">()</span>
+            <span class="c1"># Single C++ kernel call covers every stack element.</span>
+            <span class="n">_scatter_add</span><span class="p">(</span><span class="n">super_grid</span><span class="p">,</span> <span class="n">sorted_all</span><span class="p">[</span><span class="n">c</span><span class="p">],</span> <span class="n">idx_p</span><span class="p">,</span> <span class="n">sqw_p</span><span class="p">)</span>
+            <span class="n">full_imgs</span> <span class="o">=</span> <span class="n">ifft</span><span class="p">(</span>
+                <span class="n">super_grid</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">S_total</span><span class="p">,</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">),</span>
+                <span class="n">axes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">imgs</span> <span class="o">=</span> <span class="n">resize</span><span class="p">(</span><span class="n">full_imgs</span><span class="p">,</span> <span class="p">(</span><span class="n">S_total</span><span class="p">,</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">))</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">smaps</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">accum</span><span class="o">.</span><span class="n">addcmul_</span><span class="p">(</span><span class="n">imgs</span><span class="p">,</span> <span class="n">conj_smaps</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">accum</span><span class="p">[:,</span> <span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">imgs</span>
+
+        <span class="k">return</span> <span class="n">accum</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span></div>
+
+
+    <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Adjoint: image -&gt; sparse k-space  (forward NUFFT direction)</span>
     <span class="c1"># ------------------------------------------------------------------</span>
 <div class="viewcode-block" id="SparseFFT.adjoint">
@@ -761,17 +962,13 @@
     <span class="k">def</span><span class="w"> </span><span class="nf">adjoint</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Image to sparse k-space.</span>
 
-<span class="sd">        Parameters</span>
-<span class="sd">        ----------</span>
-<span class="sd">        image : torch.Tensor</span>
-<span class="sd">            ``(*image_shape,)`` or ``(T, *image_shape)`` complex.</span>
-<span class="sd">            When smaps are absent, single-frame input is ``(n_coils, *image_shape)``</span>
-<span class="sd">            and batched input is ``(T, n_coils, *image_shape)``.</span>
+<span class="sd">        Accepted input layouts (with optional leading ``*B`` batch and, for</span>
+<span class="sd">        stacked plans, leading ``*S`` stack axes):</span>
 
-<span class="sd">        Returns</span>
-<span class="sd">        -------</span>
-<span class="sd">        torch.Tensor</span>
-<span class="sd">            ``(n_coils, *natural_shape)`` (or with leading batch dim).</span>
+<span class="sd">        - ``(*B, *S, *image_shape)`` if smaps are set</span>
+<span class="sd">        - ``(*B, *S, n_coils, *image_shape)`` otherwise</span>
+
+<span class="sd">        Output: ``(*B, *S, n_coils, *natural_shape)``.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">out</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_adjoint_flat</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>
         <span class="n">nat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">natural_shape</span>
@@ -784,22 +981,55 @@
 <a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._adjoint_flat">[docs]</a>
     <span class="nd">@with_torch</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">_adjoint_flat</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Flat-output adjoint: returns (..., n_samples).&quot;&quot;&quot;</span>
-        <span class="c1"># Batch detection: one extra leading dim beyond the expected single-frame ndim.</span>
-        <span class="n">single_frame_ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">)</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">smaps</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
-        <span class="k">if</span> <span class="n">image</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="n">single_frame_ndim</span> <span class="o">+</span> <span class="mi">1</span><span class="p">:</span>  <span class="c1"># (T, ...) batched</span>
-            <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
-                <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_adjoint_flat</span><span class="p">(</span><span class="n">image</span><span class="p">[</span><span class="n">t</span><span class="p">])</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])],</span>
-                <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
-            <span class="p">)</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Flat-output adjoint: returns (*B, *S, n_coils, n_samples).&quot;&quot;&quot;</span>
+        <span class="n">s_shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">stack_shape</span>
+        <span class="n">s_ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">s_shape</span><span class="p">)</span>
+        <span class="c1"># Single-frame ndim (no batch, no stack):</span>
+        <span class="n">single_ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">)</span> <span class="o">+</span> <span class="p">(</span><span class="mi">0</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">smaps</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">prefix</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">image</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="n">image</span><span class="o">.</span><span class="n">ndim</span> <span class="o">-</span> <span class="n">single_ndim</span><span class="p">])</span>
+
+        <span class="k">if</span> <span class="n">s_ndim</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">prefix</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">s_ndim</span> <span class="ow">or</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">prefix</span><span class="p">[</span><span class="o">-</span><span class="n">s_ndim</span><span class="p">:])</span> <span class="o">!=</span> <span class="n">s_shape</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;image prefix </span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2"> must end with stack_shape </span><span class="si">{</span><span class="n">s_shape</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+            <span class="n">B_shape</span> <span class="o">=</span> <span class="n">prefix</span><span class="p">[:</span><span class="o">-</span><span class="n">s_ndim</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">B_shape</span> <span class="o">=</span> <span class="n">prefix</span>
+
+        <span class="c1"># Single-frame fast path.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">prefix</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_adjoint_single</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+        <span class="n">S_total</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">s_shape</span><span class="p">))</span> <span class="k">if</span> <span class="n">s_shape</span> <span class="k">else</span> <span class="mi">1</span>
+        <span class="n">B_total</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">B_shape</span><span class="p">))</span> <span class="k">if</span> <span class="n">B_shape</span> <span class="k">else</span> <span class="mi">1</span>
+        <span class="c1"># Reshape image to (B_total, S_total, *single_shape)</span>
+        <span class="n">single_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="n">image</span><span class="o">.</span><span class="n">ndim</span> <span class="o">-</span> <span class="n">single_ndim</span><span class="p">:])</span>
+        <span class="n">flat</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">B_total</span><span class="p">,</span> <span class="n">S_total</span><span class="p">,</span> <span class="o">*</span><span class="n">single_shape</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">s_ndim</span><span class="p">:</span>
+            <span class="n">outs</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_adjoint_packed</span><span class="p">(</span><span class="n">flat</span><span class="p">[</span><span class="n">b</span><span class="p">])</span> <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">B_total</span><span class="p">)]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">outs</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_adjoint_single</span><span class="p">(</span><span class="n">flat</span><span class="p">[</span><span class="n">b</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                    <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">B_total</span><span class="p">)]</span>
+        <span class="c1"># Each entry has shape (S_total, n_coils, n_samples)</span>
+        <span class="n">n_coils</span> <span class="o">=</span> <span class="n">outs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">stacked</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">outs</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>  <span class="c1"># (B_total, S_total, n_coils, n_samples)</span>
+        <span class="k">return</span> <span class="n">stacked</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">B_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">s_shape</span><span class="p">,</span> <span class="n">n_coils</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SparseFFT._adjoint_single">
+<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._adjoint_single">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_adjoint_single</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Single-frame adjoint (one stack element).&quot;&quot;&quot;</span>
         <span class="n">src_device</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">device</span>
         <span class="n">comp_device</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">src_device</span>
         <span class="n">use_pipeline</span> <span class="o">=</span> <span class="n">comp_device</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="s2">&quot;cuda&quot;</span> <span class="ow">and</span> <span class="n">src_device</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="s2">&quot;cpu&quot;</span>
 
         <span class="n">dtype</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">dtype</span>
-        <span class="n">indices</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">indices</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
-        <span class="n">sqrt_w</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sqrt_weights</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
-        <span class="n">inv_perm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">inv_perm</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">idx_s</span><span class="p">,</span> <span class="n">sqw_s</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">ip_s</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stack_arrays</span><span class="p">(</span><span class="n">s_flat_idx</span><span class="p">)</span>
+        <span class="n">indices</span> <span class="o">=</span> <span class="n">idx_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">sqrt_w</span> <span class="o">=</span> <span class="n">sqw_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">inv_perm</span> <span class="o">=</span> <span class="n">ip_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
         <span class="n">image_d</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
 
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">smaps</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
@@ -840,6 +1070,67 @@
         <span class="k">return</span> <span class="n">output</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span></div>
 
 
+    <span class="c1"># ------------------------------------------------------------------</span>
+    <span class="c1"># Packed-stack adjoint — one C++ gather call covers all S elements</span>
+    <span class="c1"># ------------------------------------------------------------------</span>
+<div class="viewcode-block" id="SparseFFT._adjoint_packed">
+<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._adjoint_packed">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_adjoint_packed</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Stacked adjoint over all stack elements at once.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        image : torch.Tensor</span>
+<span class="sd">            ``(S_total, *image_shape)`` if smaps are set, otherwise</span>
+<span class="sd">            ``(S_total, n_coils, *image_shape)``.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        torch.Tensor</span>
+<span class="sd">            ``(S_total, n_coils, n_per)`` complex.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">src_device</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">device</span>
+        <span class="n">comp_device</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">src_device</span>
+        <span class="n">dtype</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">dtype</span>
+
+        <span class="n">idx_p</span><span class="p">,</span> <span class="n">sqw_p</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">ip_p</span><span class="p">,</span> <span class="n">S_total</span><span class="p">,</span> <span class="n">n_per</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_packed_arrays</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+
+        <span class="n">image_d</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">smaps</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">smaps</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">smaps</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+            <span class="n">n_coils</span> <span class="o">=</span> <span class="n">smaps</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">n_coils</span> <span class="o">=</span> <span class="n">image_d</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="c1"># Pre-allocate a packed (S, *grid_shape) zero-padded buffer reused</span>
+        <span class="c1"># per coil; one batched FFT per coil over the full stack.</span>
+        <span class="n">padded</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">S_total</span><span class="p">,</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">,</span>
+                             <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">slc</span> <span class="o">=</span> <span class="p">(</span><span class="nb">slice</span><span class="p">(</span><span class="kc">None</span><span class="p">),</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">_pad_slices</span><span class="p">)</span>
+
+        <span class="c1"># Output is built sorted in packed layout, then unsorted via inv_perm</span>
+        <span class="c1"># at the end (single indexing op per coil).</span>
+        <span class="n">output_unsorted</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">n_coils</span><span class="p">,</span> <span class="n">S_total</span> <span class="o">*</span> <span class="n">n_per</span><span class="p">,</span>
+                                      <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_coils</span><span class="p">):</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">smaps</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">coil_imgs</span> <span class="o">=</span> <span class="n">image_d</span> <span class="o">*</span> <span class="n">smaps</span><span class="p">[</span><span class="n">c</span><span class="p">]</span>            <span class="c1"># (S, *image_shape)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">coil_imgs</span> <span class="o">=</span> <span class="n">image_d</span><span class="p">[:,</span> <span class="n">c</span><span class="p">]</span>                  <span class="c1"># (S, *image_shape)</span>
+            <span class="n">padded</span><span class="o">.</span><span class="n">zero_</span><span class="p">()</span>
+            <span class="n">padded</span><span class="p">[</span><span class="n">slc</span><span class="p">]</span> <span class="o">=</span> <span class="n">coil_imgs</span>
+            <span class="n">kgrid</span> <span class="o">=</span> <span class="n">fft</span><span class="p">(</span><span class="n">padded</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span><span class="p">)</span>        <span class="c1"># (S, *grid_shape)</span>
+            <span class="n">super_flat</span> <span class="o">=</span> <span class="n">kgrid</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>                 <span class="c1"># (S*grid_size,)</span>
+            <span class="c1"># Single C++ kernel call across the whole stack.</span>
+            <span class="n">sorted_packed</span> <span class="o">=</span> <span class="n">_gather</span><span class="p">(</span><span class="n">super_flat</span><span class="p">,</span> <span class="n">idx_p</span><span class="p">,</span> <span class="n">sqw_p</span><span class="p">)</span>  <span class="c1"># (S*n_per,)</span>
+            <span class="c1"># Undo per-stack sort with one indexing op.</span>
+            <span class="n">output_unsorted</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">sorted_packed</span><span class="p">[</span><span class="n">ip_p</span><span class="p">]</span>
+
+        <span class="n">out</span> <span class="o">=</span> <span class="n">output_unsorted</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">n_coils</span><span class="p">,</span> <span class="n">S_total</span><span class="p">,</span> <span class="n">n_per</span><span class="p">)</span><span class="o">.</span><span class="n">permute</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">contiguous</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">out</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span></div>
+
+
 <div class="viewcode-block" id="SparseFFT.__call__">
 <a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT.__call__">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">adjoint</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
@@ -849,11 +1140,46 @@
 
 
     <span class="c1"># ------------------------------------------------------------------</span>
+    <span class="c1"># Normal operator: A^H A</span>
+    <span class="c1"># ------------------------------------------------------------------</span>
+<div class="viewcode-block" id="SparseFFT.normal">
+<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT.normal">[docs]</a>
+    <span class="nd">@with_torch</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">normal</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Self-adjoint application: ``A^H A image``.</span>
+
+<span class="sd">        When ``self.toeplitz`` is True, uses a pre-computed PSF on</span>
+<span class="sd">        ``grid_shape`` (built lazily on first call) and applies</span>
+<span class="sd">        pad / FFT / PSF / IFFT / crop per coil.  Otherwise falls back to</span>
+<span class="sd">        ``forward(adjoint(image))``.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        image : torch.Tensor</span>
+<span class="sd">            Same shape as the output of :meth:`forward`.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        torch.Tensor</span>
+<span class="sd">            Same shape as input.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">toeplitz</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_toep_op</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="c1"># Local import to avoid circular import at module load.</span>
+                <span class="kn">from</span><span class="w"> </span><span class="nn">.._toep._grog_toep</span><span class="w"> </span><span class="kn">import</span> <span class="n">GrogToeplitzOp</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_toep_op</span> <span class="o">=</span> <span class="n">GrogToeplitzOp</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_toep_op</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">adjoint</span><span class="p">(</span><span class="n">image</span><span class="p">))</span></div>
+
+
+    <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Batch helpers for decorators  (Tier-1 FFT fusion)</span>
     <span class="c1"># ------------------------------------------------------------------</span>
 <div class="viewcode-block" id="SparseFFT._scatter_ifft_crop_batch">
 <a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._scatter_ifft_crop_batch">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">_scatter_ifft_crop_batch</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">batch_kspace</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_scatter_ifft_crop_batch</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">batch_kspace</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Scatter (per-component loop) → **one batched IFFT** → crop.</span>
 
 <span class="sd">        Reduces ``B x n_coils`` IFFT calls to a single</span>
@@ -866,6 +1192,8 @@
 <span class="sd">            ``(B, n_samples)`` complex, **unsorted**.  Each row is an</span>
 <span class="sd">            independently-weighted k-space vector (e.g. one ORC component</span>
 <span class="sd">            x one coil, or one subspace frame x one coil).</span>
+<span class="sd">        s_flat_idx : int</span>
+<span class="sd">            Flattened stack-element index (ignored for unstacked plans).</span>
 
 <span class="sd">        Returns</span>
 <span class="sd">        -------</span>
@@ -877,9 +1205,10 @@
         <span class="n">comp_device</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">src_device</span>
         <span class="n">dtype</span> <span class="o">=</span> <span class="n">batch_kspace</span><span class="o">.</span><span class="n">dtype</span>
 
-        <span class="n">indices</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">indices</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
-        <span class="n">sqrt_w</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sqrt_weights</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
-        <span class="n">sort_perm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sort_perm</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">idx_s</span><span class="p">,</span> <span class="n">sqw_s</span><span class="p">,</span> <span class="n">sp_s</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stack_arrays</span><span class="p">(</span><span class="n">s_flat_idx</span><span class="p">)</span>
+        <span class="n">indices</span> <span class="o">=</span> <span class="n">idx_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">sqrt_w</span> <span class="o">=</span> <span class="n">sqw_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">sort_perm</span> <span class="o">=</span> <span class="n">sp_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_bins</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
 
         <span class="c1"># Sort all B inputs at once: (B, n_samples) — one indexing op</span>
@@ -902,7 +1231,9 @@
 
 <div class="viewcode-block" id="SparseFFT._fft_pad_gather_batch">
 <a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._fft_pad_gather_batch">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">_fft_pad_gather_batch</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">batch_imgs</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_fft_pad_gather_batch</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">batch_imgs</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;ONE batched FFT -&gt; zero-pad -&gt; gather (per-component loop).</span>
 
 <span class="sd">        Reduces ``B x n_coils`` FFT calls to a single</span>
@@ -914,6 +1245,8 @@
 <span class="sd">        batch_imgs : torch.Tensor</span>
 <span class="sd">            ``(B, *image_shape)`` complex.  Each slice ``[b]`` is an</span>
 <span class="sd">            independently-weighted image (e.g. one ORC component x one coil).</span>
+<span class="sd">        s_flat_idx : int</span>
+<span class="sd">            Flattened stack-element index (ignored for unstacked plans).</span>
 
 <span class="sd">        Returns</span>
 <span class="sd">        -------</span>
@@ -925,9 +1258,10 @@
         <span class="n">comp_device</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">src_device</span>
         <span class="n">dtype</span> <span class="o">=</span> <span class="n">batch_imgs</span><span class="o">.</span><span class="n">dtype</span>
 
-        <span class="n">indices</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">indices</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
-        <span class="n">sqrt_w</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sqrt_weights</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
-        <span class="n">inv_perm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">inv_perm</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">idx_s</span><span class="p">,</span> <span class="n">sqw_s</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">ip_s</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stack_arrays</span><span class="p">(</span><span class="n">s_flat_idx</span><span class="p">)</span>
+        <span class="n">indices</span> <span class="o">=</span> <span class="n">idx_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">sqrt_w</span> <span class="o">=</span> <span class="n">sqw_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">inv_perm</span> <span class="o">=</span> <span class="n">ip_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
         <span class="n">imgs_d</span> <span class="o">=</span> <span class="n">batch_imgs</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
 
         <span class="c1"># Zero-pad images in image space (adjoint of center-crop in image space)</span>

@@ -19,6 +19,7 @@
       ~SparseFFT.__init__
       ~SparseFFT.adjoint
       ~SparseFFT.forward
+      ~SparseFFT.normal
    
    
 

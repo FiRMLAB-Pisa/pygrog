@@ -342,3 +342,43 @@ plt.show()
 #    estimates are needed (e.g.\ as input to GROG/GRAPPA kernel training).
 
 plt.show()
+
+
+# %%
+# Multi-slice batched NLINV calibration
+# =====================================
+#
+# :func:`~pygrog.utils.nlinv_calib` accepts a leading batch axis and runs
+# the calibration once per batch element.  Sensitivity maps and image
+# reconstructions are returned per-slice; the synthesized GRAPPA training
+# k-space can optionally be averaged across the batch with
+# ``train_reduce='mean'`` to produce a single shared kernel.
+
+batch_slices = np.stack([kspace_us, kspace_us[:, ::-1, :]], axis=0)
+print(f"\n[Multi-slice] batched k-space shape : {batch_slices.shape}")
+
+# Per-slice smaps + shared (mean-reduced) GRAPPA training k-space.
+smaps_b, train_b_mean, image_b = nlinv_calib(
+    batch_slices,
+    cal_width=cal_width,
+    ndim=2,
+    ret_cal=True,
+    ret_image=True,
+    train_reduce="mean",
+)
+print(f"[Multi-slice] smaps shape           : {tuple(smaps_b.shape)}")
+print(f"[Multi-slice] image shape           : {tuple(image_b.shape)}")
+print(f"[Multi-slice] mean-train shape      : {tuple(train_b_mean.shape)}")
+
+fig, axes = plt.subplots(2, ncols_show, figsize=(3 * ncols_show, 5.5))
+for i in range(ncols_show):
+    axes[0, i].imshow(np.abs(smaps_b[0, i]), cmap="magma", origin="lower", vmin=0)
+    axes[0, i].set_title(f"slice 0 — smap {i + 1}")
+    axes[0, i].axis("off")
+    axes[1, i].imshow(np.abs(smaps_b[1, i]), cmap="magma", origin="lower", vmin=0)
+    axes[1, i].set_title(f"slice 1 — smap {i + 1}")
+    axes[1, i].axis("off")
+
+plt.suptitle("Batched NLINV — per-slice smaps (shared GRAPPA training kernel)")
+plt.tight_layout()
+plt.show()

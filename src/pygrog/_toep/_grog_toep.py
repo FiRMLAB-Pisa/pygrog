@@ -55,27 +55,65 @@ class GrogToeplitzOp:
         self.image_shape = sparse_fft.image_shape
         self.fft_axes = sparse_fft.fft_axes
         self._pad_slices = sparse_fft._pad_slices
+        self.stack_shape = tuple(getattr(sparse_fft, "stack_shape", ()) or ())
 
-        # Build PSF once: scatter w (= sqrt_w**2) onto the flat grid.
-        sqrt_w = sparse_fft.sqrt_weights.to(self.device)
-        indices = sparse_fft.indices.to(self.device)
-        w_sq = (sqrt_w * sqrt_w).contiguous()
-        psf_flat = torch.zeros(sparse_fft.grid_size,
-                               dtype=w_sq.dtype, device=self.device)
-        ext = _get_torch_ext()
-        ext.psf_scatter_scalar(psf_flat, indices, w_sq)
-        # Reshape to grid_shape so it broadcasts against (..., *grid_shape).
-        self.psf = psf_flat.reshape(self.grid_shape)
+        # Build PSF(s): for MaskedFFT use the pre-computed density grid
+        # directly (no scatter needed); for SparseFFT scatter w²  onto the
+        # flat grid via the C++ kernel.
+        _is_masked = getattr(sparse_fft, "density", None) is not None
+
+        if _is_masked:
+            # density is already sum-of-squared-weights on the grid.
+            density = sparse_fft.density.to(self.device)
+            if not self.stack_shape:
+                self.psf = density.clone()
+            else:
+                # density shape: (*stack_shape, *grid_shape)
+                S_total = int(torch.tensor(self.stack_shape).prod().item())
+                self.psf = density.reshape(*self.stack_shape, *self.grid_shape).clone()
+        else:
+            # SparseFFT path: scatter sqrt_w² onto the grid.
+            sqrt_w_full = sparse_fft.sqrt_weights.to(self.device)
+            indices_full = sparse_fft.indices.to(self.device)
+            ext = _get_torch_ext()
+
+            if not self.stack_shape:
+                w_sq = (sqrt_w_full * sqrt_w_full).contiguous()
+                psf_flat = torch.zeros(sparse_fft.grid_size,
+                                       dtype=w_sq.dtype, device=self.device)
+                ext.psf_scatter_scalar(psf_flat, indices_full, w_sq)
+                self.psf = psf_flat.reshape(self.grid_shape)
+            else:
+                S_total = int(torch.tensor(self.stack_shape).prod().item())
+                n_per = int(sparse_fft.n_samples)
+                sqrt_w_v = sqrt_w_full.reshape(S_total, n_per)
+                indices_v = indices_full.reshape(S_total, n_per)
+                grid_off = (
+                    torch.arange(S_total, device=self.device, dtype=indices_v.dtype)
+                    * sparse_fft.grid_size
+                ).unsqueeze(-1)
+                indices_packed = (indices_v + grid_off).reshape(-1).contiguous()
+                w_sq_packed = (sqrt_w_v * sqrt_w_v).reshape(-1).contiguous()
+                psf_super = torch.zeros(
+                    S_total * sparse_fft.grid_size,
+                    dtype=w_sq_packed.dtype, device=self.device,
+                )
+                ext.psf_scatter_scalar(psf_super, indices_packed, w_sq_packed)
+                self.psf = psf_super.reshape(*self.stack_shape, *self.grid_shape)
+        self._psf_complex = self.psf.to(
+            torch.complex64 if self.psf.dtype == torch.float32
+            else torch.complex128
+        )
 
     # ------------------------------------------------------------------
     def __call__(self, image: torch.Tensor) -> torch.Tensor:
         """Apply ``A^H A x``.
 
-        Parameters
-        ----------
-        image : torch.Tensor
-            ``(*image_shape,)`` (with smaps) or ``(n_coils, *image_shape)``
-            (no smaps) complex.  Optional leading batch dim ``T``.
+        Accepted layouts (with optional leading ``*B`` batch and, for
+        stacked operators, leading ``*S`` stack axes):
+
+        - ``(*B, *S, *image_shape)`` if smaps are set
+        - ``(*B, *S, n_coils, *image_shape)`` otherwise
 
         Returns
         -------
@@ -83,62 +121,87 @@ class GrogToeplitzOp:
             Same shape as input.
         """
         sf = self.sparse_fft
-        # Batch detection (mirror of SparseFFT._adjoint_flat).
-        single_frame_ndim = (
+        s_shape = self.stack_shape
+        s_ndim = len(s_shape)
+        single_ndim = (
             len(self.image_shape) if sf.smaps is not None
             else len(self.image_shape) + 1
         )
-        if image.ndim == single_frame_ndim + 1:
-            return torch.stack(
-                [self(image[t]) for t in range(image.shape[0])], dim=0
-            )
+        prefix = tuple(int(s) for s in image.shape[: image.ndim - single_ndim])
+        if s_ndim:
+            if len(prefix) < s_ndim or tuple(prefix[-s_ndim:]) != s_shape:
+                raise ValueError(
+                    f"image prefix {prefix} must end with stack_shape {s_shape}"
+                )
+            B_shape = prefix[:-s_ndim]
+        else:
+            B_shape = prefix
 
+        if not prefix:
+            return self._apply_single(image, 0)
+
+        S_total = int(torch.tensor(s_shape).prod().item()) if s_shape else 1
+        B_total = int(torch.tensor(B_shape).prod().item()) if B_shape else 1
+        single_shape = tuple(image.shape[image.ndim - single_ndim:])
+        flat = image.reshape(B_total, S_total, *single_shape)
+        outs = []
+        for b in range(B_total):
+            for s in range(S_total):
+                outs.append(self._apply_single(flat[b, s], s))
+        stacked = torch.stack(outs, dim=0)
+        return stacked.reshape(*B_shape, *s_shape, *single_shape)
+
+    def _apply_single(self, image: torch.Tensor, s_flat_idx: int = 0) -> torch.Tensor:
+        """Single-frame application for one stack element."""
+        sf = self.sparse_fft
         src_device = image.device
         comp_device = self.device
         dtype = image.dtype
-        psf = self.psf.to(comp_device, dtype=torch.promote_types(
-            self.psf.dtype, torch.float32))
-        # PSF is real; we'll multiply by it in complex space via broadcast.
-        psf_c = psf.to(_real_to_complex_dtype(dtype))
+        psf_full = self._psf_complex.to(comp_device, dtype=dtype)
+        if self.stack_shape:
+            psf_c = psf_full.reshape(-1, *self.grid_shape)[s_flat_idx]
+        else:
+            psf_c = psf_full
+        image_d = image.to(comp_device)
 
         if sf.smaps is not None:
             smaps = sf.smaps.to(comp_device, dtype=dtype)
             conj_smaps = sf._conj_smaps.to(comp_device, dtype=dtype)
-            n_coils = smaps.shape[0]
-            image_d = image.to(comp_device)
-            accum = torch.zeros(self.image_shape, dtype=dtype, device=comp_device)
-            padded = torch.empty(self.grid_shape, dtype=dtype, device=comp_device)
-            for c in range(n_coils):
-                coil_img = image_d * smaps[c]
-                out_c = self._apply_one(coil_img, padded, psf_c)
-                accum.addcmul_(out_c, conj_smaps[c])
-            return accum.to(src_device)
+            coil_img = image_d.unsqueeze(0) * smaps
+            full = self._apply_batched(coil_img, psf_c)
+            return (full * conj_smaps).sum(0).to(src_device)
 
         # No smaps — coil dim is leading.
-        n_coils = image.shape[0]
-        image_d = image.to(comp_device)
-        out = torch.empty_like(image_d)
-        padded = torch.empty(self.grid_shape, dtype=dtype, device=comp_device)
-        for c in range(n_coils):
-            out[c] = self._apply_one(image_d[c], padded, psf_c)
-        return out.to(src_device)
+        full = self._apply_batched(image_d, psf_c)
+        return full.to(src_device)
 
     # ------------------------------------------------------------------
-    def _apply_one(self, coil_img, padded, psf_c):
-        """Pad -> FFT -> PSF multiply -> IFFT -> crop for one coil image."""
+    def _apply_batched(self, batch_img, psf_c):
+        """Pad → batched FFT → PSF multiply → batched IFFT → crop.
+
+        Parameters
+        ----------
+        batch_img : torch.Tensor
+            ``(B, *image_shape)`` complex.
+        psf_c : torch.Tensor
+            ``(*grid_shape,)`` complex (broadcasts over B).
+
+        Returns
+        -------
+        torch.Tensor
+            ``(B, *image_shape)`` complex.
+        """
         if self.grid_shape == self.image_shape:
-            k = fft(coil_img, axes=self.fft_axes)
+            k = fft(batch_img, axes=self.fft_axes)
             k = k * psf_c
             return ifft(k, axes=self.fft_axes)
-        padded.zero_()
-        padded[self._pad_slices] = coil_img
+        B = batch_img.shape[0]
+        padded = torch.zeros(
+            B, *self.grid_shape,
+            dtype=batch_img.dtype, device=batch_img.device,
+        )
+        padded[(slice(None), *self._pad_slices)] = batch_img
         k = fft(padded, axes=self.fft_axes)
         k = k * psf_c
-        full_img = ifft(k, axes=self.fft_axes)
-        return resize(full_img, self.image_shape)
-
-
-def _real_to_complex_dtype(complex_dtype: torch.dtype) -> torch.dtype:
-    if complex_dtype in (torch.complex64, torch.complex32):
-        return torch.complex64
-    return torch.complex128
+        full = ifft(k, axes=self.fft_axes)
+        return resize(full, (B, *self.image_shape))

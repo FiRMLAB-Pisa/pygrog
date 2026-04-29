@@ -192,7 +192,7 @@ Every step works on plain :class:`numpy.ndarray` objects.
 * :class:`~pygrog.interop.GrogLinop` finally wraps the operator as a
   :class:`sigpy.linop.Linop` for use inside ``LinearLeastSquares``.
 
-.. GENERATED FROM PYTHON SOURCE LINES 139-190
+.. GENERATED FROM PYTHON SOURCE LINES 139-193
 
 .. code-block:: Python
 
@@ -228,7 +228,10 @@ Every step works on plain :class:`numpy.ndarray` objects.
     grog_s.calc_interp_table(calib_s, lamda=0.01, precision=1)
     sparse_s, plan_s = grog_s.interpolate(ksp_s_arms)
     sparse_s_t = torch.as_tensor(np.asarray(sparse_s))
-    sparse_s_t = sparse_s_t * plan_s.pre_weights.to(sparse_s_t.dtype).unsqueeze(0)
+    # pre_weights is flat (n_samples,); reshape to natural to align with the
+    # natural-shape sparse output ``(n_coils, *natural_shape)``.
+    pre_w = plan_s.pre_weights.reshape(*plan_s.natural_shape).to(sparse_s_t.dtype)
+    sparse_s_t = sparse_s_t * pre_w
 
     # 4. SparseFFT + sigpy linop wrapper.
     op_s = SparseFFT(plan=plan_s, smaps=torch.as_tensor(smaps_s))
@@ -262,7 +265,7 @@ Every step works on plain :class:`numpy.ndarray` objects.
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 191-207
+.. GENERATED FROM PYTHON SOURCE LINES 194-210
 
 deepinv pipeline
 ================
@@ -281,7 +284,7 @@ Native containers are batched :class:`torch.Tensor` objects.
   :class:`deepinv.physics.LinearPhysics` so the standard
   ``optim_builder`` solvers can drive the inverse problem directly.
 
-.. GENERATED FROM PYTHON SOURCE LINES 207-275
+.. GENERATED FROM PYTHON SOURCE LINES 210-278
 
 .. code-block:: Python
 
@@ -314,9 +317,9 @@ Native containers are batched :class:`torch.Tensor` objects.
     grog_d = pg_deepinv.GrogInterpolator(
         coords, shape, kernel_width=2, oversamp=1.25, image_shape=shape
     )
-    grog_d.calc_interp_table(calib_d, lamda=0.01, precision=1)
+    grog_d.calc_interp_table(calib_d[0], lamda=0.01, precision=1)
     sparse_d, plan_d = grog_d.interpolate(ksp_d_arms)  # (1, n_v, *natural, kw)
-    sparse_d = sparse_d * plan_d.pre_weights.to(sparse_d.dtype)
+    sparse_d = sparse_d * plan_d.pre_weights.reshape(*plan_d.natural_shape).to(sparse_d.dtype)
 
     # 4. SparseFFT + deepinv physics wrapper.
     op_d = SparseFFT(plan=plan_d, smaps=smaps_d[0])
@@ -368,7 +371,7 @@ Native containers are batched :class:`torch.Tensor` objects.
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 276-295
+.. GENERATED FROM PYTHON SOURCE LINES 279-298
 
 mrpro pipeline
 ==============
@@ -390,7 +393,7 @@ Native container is :class:`mrpro.data.KData`.
   directly with :class:`~mrpro.operators.WaveletOp` and the
   :func:`~mrpro.algorithms.optimizers.pgd` proximal-gradient solver.
 
-.. GENERATED FROM PYTHON SOURCE LINES 295-368
+.. GENERATED FROM PYTHON SOURCE LINES 298-371
 
 .. code-block:: Python
 
@@ -482,12 +485,12 @@ Native container is :class:`mrpro.data.KData`.
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 369-371
+.. GENERATED FROM PYTHON SOURCE LINES 372-374
 
 Display
 =======
 
-.. GENERATED FROM PYTHON SOURCE LINES 371-391
+.. GENERATED FROM PYTHON SOURCE LINES 374-394
 
 .. code-block:: Python
 
@@ -524,7 +527,7 @@ Display
 
  .. code-block:: none
 
-    /home/mcencini/pygrog-project/pygrog/examples/example_interop.py:390: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+    /home/mcencini/pygrog-project/pygrog/examples/example_interop.py:393: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
       plt.show()
 
 
@@ -533,7 +536,7 @@ Display
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 10.128 seconds)
+   **Total running time of the script:** (0 minutes 7.462 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_interop.py:

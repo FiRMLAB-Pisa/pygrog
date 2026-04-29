@@ -275,6 +275,12 @@ class GrogInterpolator(_GrogInterpolatorBase):
                 f"{tuple(kspace.shape)}."
             )
         out = super().interpolate(kspace, **kwargs)
+        grid = kwargs.get("grid", False)
+        if grid:
+            grid_kspace, mask, density = (torch.as_tensor(t) for t in out)
+            if return_plan:
+                return grid_kspace, mask, density, self.plan
+            return grid_kspace, mask, density
         out_t = torch.as_tensor(out)
         # Reshape from flat (*batch, C, n_samples) → (*batch, C, *natural_shape)
         out_t = out_t.reshape(*out_t.shape[:-1], *self.plan.natural_shape)
@@ -314,24 +320,23 @@ def nlinv_calib(
     Returns
     -------
     smaps : torch.Tensor
-        ``(1, n_coils, *shape)`` coil sensitivities (deepinv "B=1, C=coils"
-        layout).  The leading batch axis is included so callers can scale
-        with the rest of a deepinv pipeline.
+        ``(B, n_coils, *shape)`` coil sensitivities (deepinv "B, C=coils"
+        layout).  ``B`` is preserved from the input.
     *extras : optional
         Additional outputs from ``nlinv_calib``.
     """
     if isinstance(kspace, torch.Tensor):
         ks = kspace
-        if ks.ndim == 3:
-            if ks.shape[0] != 1:
-                raise ValueError(
-                    "nlinv_calib expects batch size 1; got "
-                    f"shape {tuple(ks.shape)}."
-                )
-            ks = ks[0]
-        ks_in = ks
+        has_batch = ks.ndim >= 3
+        if not has_batch:
+            ks_in = ks  # (n_coils, n_samples)
+            B = 1
+        else:
+            ks_in = ks  # (B, n_coils, n_samples) — passes through batched path
+            B = int(ks.shape[0])
     else:
         ks_in = np.asarray(kspace)
+        B = ks_in.shape[0] if ks_in.ndim >= 3 else 1
 
     coords_np = (
         coords.detach().cpu().numpy()
@@ -350,7 +355,9 @@ def nlinv_calib(
     )
     if not isinstance(out, tuple):
         out = (out,)
-    smaps = torch.as_tensor(out[0]).unsqueeze(0)  # (1, n_coils, *shape)
+    smaps = torch.as_tensor(out[0])
+    if smaps.ndim == 1 + len(shape):  # single-frame result, add B=1
+        smaps = smaps.unsqueeze(0)
     extras = tuple(torch.as_tensor(e) for e in out[1:])
     if extras:
         return (smaps, *extras)

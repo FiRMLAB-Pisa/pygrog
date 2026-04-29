@@ -155,7 +155,7 @@ Gadget 1: SubspaceProjection / SubspaceSparseFFT
 =================================================
 m0, t1, t2 are already loaded in the shared setup above.
 
-.. GENERATED FROM PYTHON SOURCE LINES 101-214
+.. GENERATED FROM PYTHON SOURCE LINES 101-220
 
 .. code-block:: Python
 
@@ -235,12 +235,18 @@ m0, t1, t2 are already loaded in the shared setup above.
     )
     sparse_sub = grog_sub.interpolate(
         torch.as_tensor(kspace_sub)
+    )  # (1, C, T*1*n_shots*n_read*kw) flat
+    # SubspaceSparseFFT expects natural shape preserved: (B, C, *natural_shape)
+    sparse_sub = sparse_sub.reshape(
+        1, n_coils, *grog_sub.plan.natural_shape,
     )  # (1, C, T, 1, n_shots, n_read, kw)
 
     proj = SubspaceProjection(n_components=rank)
     proj.fit(torch.as_tensor(train, dtype=torch.float32))
     sub_op = SubspaceSparseFFT(base_op_sub, proj.basis.to(torch.complex64), encoding_axis=-5)
     coeff_pygrog = sub_op.forward(sparse_sub).detach().cpu().numpy()
+    # Drop leading B=1 batch axis -> (rank, H, W)
+    coeff_pygrog = coeff_pygrog[0]
 
     # Display all coefficients: rows = mri-nufft / PyGROG / error, cols = coefficients
     fig, axes = plt.subplots(3, rank, figsize=(4 * rank, 10))
@@ -291,12 +297,12 @@ m0, t1, t2 are already loaded in the shared setup above.
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 215-217
+.. GENERATED FROM PYTHON SOURCE LINES 221-223
 
 Gadget 2: OffResonanceCorrection
 ================================
 
-.. GENERATED FROM PYTHON SOURCE LINES 217-341
+.. GENERATED FROM PYTHON SOURCE LINES 223-347
 
 .. code-block:: Python
 
@@ -446,7 +452,7 @@ Gadget 2: OffResonanceCorrection
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 46.585 seconds)
+   **Total running time of the script:** (0 minutes 45.470 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_gadgets.py:

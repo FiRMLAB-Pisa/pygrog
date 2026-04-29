@@ -174,12 +174,18 @@ kspace_sub = (
 )
 sparse_sub = grog_sub.interpolate(
     torch.as_tensor(kspace_sub)
+)  # (1, C, T*1*n_shots*n_read*kw) flat
+# SubspaceSparseFFT expects natural shape preserved: (B, C, *natural_shape)
+sparse_sub = sparse_sub.reshape(
+    1, n_coils, *grog_sub.plan.natural_shape,
 )  # (1, C, T, 1, n_shots, n_read, kw)
 
 proj = SubspaceProjection(n_components=rank)
 proj.fit(torch.as_tensor(train, dtype=torch.float32))
 sub_op = SubspaceSparseFFT(base_op_sub, proj.basis.to(torch.complex64), encoding_axis=-5)
 coeff_pygrog = sub_op.forward(sparse_sub).detach().cpu().numpy()
+# Drop leading B=1 batch axis -> (rank, H, W)
+coeff_pygrog = coeff_pygrog[0]
 
 # Display all coefficients: rows = mri-nufft / PyGROG / error, cols = coefficients
 fig, axes = plt.subplots(3, rank, figsize=(4 * rank, 10))
