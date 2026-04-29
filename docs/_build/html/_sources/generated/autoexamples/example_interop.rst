@@ -52,7 +52,7 @@ For each framework we run the full chain
 starting from the same raw multi-coil 16-arm spiral acquisition of a T1
 BrainWeb slice.  This is an interoperability showcase, not a benchmark.
 
-.. GENERATED FROM PYTHON SOURCE LINES 36-46
+.. GENERATED FROM PYTHON SOURCE LINES 36-45
 
 .. code-block:: Python
 
@@ -72,8 +72,7 @@ BrainWeb slice.  This is an interoperability showcase, not a benchmark.
 
 
 
-
-.. GENERATED FROM PYTHON SOURCE LINES 47-53
+.. GENERATED FROM PYTHON SOURCE LINES 46-52
 
 Shared synthetic acquisition
 ============================
@@ -82,15 +81,16 @@ keep the resulting raw multi-coil k-space as a single
 :class:`numpy.ndarray` and let each framework's adapters convert it to
 the appropriate native container.
 
-.. GENERATED FROM PYTHON SOURCE LINES 53-122
+.. GENERATED FROM PYTHON SOURCE LINES 52-121
 
 .. code-block:: Python
+
 
 
     def _center_crop_pad(arr, target):
         out = np.zeros(target, dtype=arr.dtype)
         src, dst = [], []
-        for si, ti in zip(arr.shape, target):
+        for si, ti in zip(arr.shape, target, strict=False):
             if si >= ti:
                 off = (si - ti) // 2
                 src.append(slice(off, off + ti))
@@ -143,8 +143,7 @@ the appropriate native container.
     rng = np.random.default_rng(0)
     sigma = 0.001 * np.abs(kspace_raw).max()
     kspace_raw = kspace_raw + sigma * (
-        rng.standard_normal(kspace_raw.shape)
-        + 1j * rng.standard_normal(kspace_raw.shape)
+        rng.standard_normal(kspace_raw.shape) + 1j * rng.standard_normal(kspace_raw.shape)
     ).astype(np.complex64)
 
     n_compressed = 4
@@ -173,7 +172,7 @@ the appropriate native container.
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 123-139
+.. GENERATED FROM PYTHON SOURCE LINES 122-138
 
 sigpy pipeline
 ==============
@@ -192,7 +191,7 @@ Every step works on plain :class:`numpy.ndarray` objects.
 * :class:`~pygrog.interop.GrogLinop` finally wraps the operator as a
   :class:`sigpy.linop.Linop` for use inside ``LinearLeastSquares``.
 
-.. GENERATED FROM PYTHON SOURCE LINES 139-193
+.. GENERATED FROM PYTHON SOURCE LINES 138-196
 
 .. code-block:: Python
 
@@ -227,15 +226,15 @@ Every step works on plain :class:`numpy.ndarray` objects.
     )
     grog_s.calc_interp_table(calib_s, lamda=0.01, precision=1)
     sparse_s, plan_s = grog_s.interpolate(ksp_s_arms)
-    sparse_s_t = torch.as_tensor(np.asarray(sparse_s))
+    sparse_s_t = torch.as_tensor(sparse_s)
     # pre_weights is flat (n_samples,); reshape to natural to align with the
     # natural-shape sparse output ``(n_coils, *natural_shape)``.
-    pre_w = plan_s.pre_weights.reshape(*plan_s.natural_shape).to(sparse_s_t.dtype)
+    pre_w = plan_s.pre_weights.reshape(*plan_s.natural_shape)
     sparse_s_t = sparse_s_t * pre_w
 
     # 4. SparseFFT + sigpy linop wrapper.
-    op_s = SparseFFT(plan=plan_s, smaps=torch.as_tensor(smaps_s))
-    img_zf = op_s.forward(sparse_s_t).detach().cpu().numpy()
+    op_s = SparseFFT(plan=plan_s, smaps=smaps_s)
+    img_zf = op_s.adjoint(sparse_s_t).numpy()
 
     # 5. L1-wavelet FISTA via ``LinearLeastSquares``.
     M_sigpy = GrogLinop(op_s).H
@@ -244,7 +243,11 @@ Every step works on plain :class:`numpy.ndarray` objects.
     y_sigpy = sparse_s_t.reshape(n_compressed, op_s.indices.shape[0]).numpy()
     proxg = sp.prox.L1Reg(W_sigpy.oshape, lamda=5e-4)
     wav_hat = sp.app.LinearLeastSquares(
-        A=A_sigpy, y=y_sigpy, proxg=proxg, max_iter=80, show_pbar=False,
+        A=A_sigpy,
+        y=y_sigpy,
+        proxg=proxg,
+        max_iter=80,
+        show_pbar=False,
     ).run()
     img_sigpy = np.abs(W_sigpy.H(wav_hat))
     print(f"  done — output shape {img_sigpy.shape}")
@@ -265,7 +268,7 @@ Every step works on plain :class:`numpy.ndarray` objects.
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 194-210
+.. GENERATED FROM PYTHON SOURCE LINES 197-213
 
 deepinv pipeline
 ================
@@ -284,7 +287,7 @@ Native containers are batched :class:`torch.Tensor` objects.
   :class:`deepinv.physics.LinearPhysics` so the standard
   ``optim_builder`` solvers can drive the inverse problem directly.
 
-.. GENERATED FROM PYTHON SOURCE LINES 210-278
+.. GENERATED FROM PYTHON SOURCE LINES 213-281
 
 .. code-block:: Python
 
@@ -319,7 +322,9 @@ Native containers are batched :class:`torch.Tensor` objects.
     )
     grog_d.calc_interp_table(calib_d[0], lamda=0.01, precision=1)
     sparse_d, plan_d = grog_d.interpolate(ksp_d_arms)  # (1, n_v, *natural, kw)
-    sparse_d = sparse_d * plan_d.pre_weights.reshape(*plan_d.natural_shape).to(sparse_d.dtype)
+    sparse_d = sparse_d * plan_d.pre_weights.reshape(*plan_d.natural_shape).to(
+        sparse_d.dtype
+    )
 
     # 4. SparseFFT + deepinv physics wrapper.
     op_d = SparseFFT(plan=plan_d, smaps=smaps_d[0])
@@ -334,9 +339,7 @@ Native containers are batched :class:`torch.Tensor` objects.
         for _ in range(15):
             v = physics.A_adjoint(physics.A(v))
             v = v / (v.norm() + 1e-12)
-        lipschitz = (
-            physics.A_adjoint(physics.A(v)).norm() / (v.norm() + 1e-12)
-        ).item()
+        lipschitz = (physics.A_adjoint(physics.A(v)).norm() / (v.norm() + 1e-12)).item()
 
     prior = WaveletPrior(wv="db4", wvdim=2, level=3, is_complex=True)
     prior.explicit_prior = False
@@ -371,7 +374,7 @@ Native containers are batched :class:`torch.Tensor` objects.
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 279-298
+.. GENERATED FROM PYTHON SOURCE LINES 282-301
 
 mrpro pipeline
 ==============
@@ -393,7 +396,7 @@ Native container is :class:`mrpro.data.KData`.
   directly with :class:`~mrpro.operators.WaveletOp` and the
   :func:`~mrpro.algorithms.optimizers.pgd` proximal-gradient solver.
 
-.. GENERATED FROM PYTHON SOURCE LINES 298-371
+.. GENERATED FROM PYTHON SOURCE LINES 301-375
 
 .. code-block:: Python
 
@@ -413,9 +416,7 @@ Native container is :class:`mrpro.data.KData`.
     kz_t = torch.zeros_like(kx_t)
     traj = KTrajectory(kz=kz_t, ky=ky_t, kx=kx_t)
     data_t = (
-        torch.as_tensor(kspace_raw)
-        .reshape(n_coils_full, 1, n_shots, n_read)
-        .unsqueeze(0)
+        torch.as_tensor(kspace_raw).reshape(n_coils_full, 1, n_shots, n_read).unsqueeze(0)
     )
     spatial = SpatialDimension(z=1, y=shape[0], x=shape[1])
     header = KHeader(
@@ -431,7 +432,10 @@ Native container is :class:`mrpro.data.KData`.
 
     # 2. NLINV self-calibration through pygrog (returns smaps + cal patch).
     smaps_m, calib_m = pg_mrpro.nlinv_calib(
-        kdata, cal_width=24, max_iter=12, ret_cal=True,
+        kdata,
+        cal_width=24,
+        max_iter=12,
+        ret_cal=True,
     )  # smaps: (n_v, 1, H, W); calib: (n_v, *cal_shape)
 
     # 3. GROG — interpolation snaps the trajectory onto the grid and fuses
@@ -485,14 +489,15 @@ Native container is :class:`mrpro.data.KData`.
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 372-374
+.. GENERATED FROM PYTHON SOURCE LINES 376-378
 
 Display
 =======
 
-.. GENERATED FROM PYTHON SOURCE LINES 374-394
+.. GENERATED FROM PYTHON SOURCE LINES 378-399
 
 .. code-block:: Python
+
 
 
     def _norm(x):
@@ -507,7 +512,7 @@ Display
         ("deepinv (L1-wavelet)", _norm(img_deepinv)),
         ("mrpro (L1-wavelet)", _norm(img_mrpro)),
     ]
-    for ax, (title, im) in zip(axes, panels):
+    for ax, (title, im) in zip(axes, panels, strict=False):
         ax.imshow(im, cmap="gray", origin="lower", vmin=0.0, vmax=1.0)
         ax.set_xticks([])
         ax.set_yticks([])
@@ -527,7 +532,7 @@ Display
 
  .. code-block:: none
 
-    /home/mcencini/pygrog-project/pygrog/examples/example_interop.py:393: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+    /home/mcencini/pygrog-project/pygrog/examples/example_interop.py:398: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
       plt.show()
 
 
@@ -536,7 +541,7 @@ Display
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 7.462 seconds)
+   **Total running time of the script:** (0 minutes 12.630 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_interop.py:

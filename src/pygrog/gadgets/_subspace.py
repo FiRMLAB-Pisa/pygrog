@@ -24,14 +24,18 @@ basis along that axis.
 """
 
 __all__ = [
+    "SubspaceMaskedFFT",
     "SubspaceProjection",
     "SubspaceSparseFFT",
-    "SubspaceMaskedFFT",
     "with_subspace",
 ]
 
 import torch
 import numpy as np
+
+from mrinufft._array_compat import with_torch
+
+from .._solve._mixin import SolveMixin
 
 
 # =====================================================================
@@ -64,12 +68,14 @@ class SubspaceProjection:
             raise RuntimeError("Call fit() first.")
         return self._basis
 
+    @with_torch
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         spatial_shape = data.shape[1:]
         flat = data.reshape(data.shape[0], -1)
         coeff = self.basis @ flat
         return coeff.reshape(self.n_components, *spatial_shape)
 
+    @with_torch
     def adjoint(self, coefficients: torch.Tensor) -> torch.Tensor:
         spatial_shape = coefficients.shape[1:]
         flat = coefficients.reshape(self.n_components, -1)
@@ -80,8 +86,7 @@ class SubspaceProjection:
 # =====================================================================
 # SparseFFT decorator
 # =====================================================================
-def with_subspace(base_op, subspace_basis, encoding_axis: int = -4,
-                  *, toeplitz=None):
+def with_subspace(base_op, subspace_basis, encoding_axis: int = -4, *, toeplitz=None):
     """Wrap a SparseFFT or MaskedFFT operator with subspace projection.
 
     Parameters
@@ -99,16 +104,23 @@ def with_subspace(base_op, subspace_basis, encoding_axis: int = -4,
         from ``base_op.toeplitz``.
     """
     from ..operator._masked_fft import MaskedFFT
+
     if isinstance(base_op, MaskedFFT):
         return SubspaceMaskedFFT(
-            base_op, subspace_basis, encoding_axis=encoding_axis, toeplitz=toeplitz,
+            base_op,
+            subspace_basis,
+            encoding_axis=encoding_axis,
+            toeplitz=toeplitz,
         )
     return SubspaceSparseFFT(
-        base_op, subspace_basis, encoding_axis=encoding_axis, toeplitz=toeplitz,
+        base_op,
+        subspace_basis,
+        encoding_axis=encoding_axis,
+        toeplitz=toeplitz,
     )
 
 
-class SubspaceSparseFFT:
+class SubspaceSparseFFT(SolveMixin):
     """SparseFFT with low-rank subspace projection (loop-fused).
 
     Adjoint (sparse → image), per coil:
@@ -137,8 +149,9 @@ class SubspaceSparseFFT:
         Default ``-4`` (last four axes are natural ``(T, k1, k0, kw)``).
     """
 
-    def __init__(self, base_op, subspace_basis, encoding_axis: int = -4,
-                 *, toeplitz=None):
+    def __init__(
+        self, base_op, subspace_basis, encoding_axis: int = -4, *, toeplitz=None
+    ):
         self._base = base_op
         self.basis = torch.as_tensor(subspace_basis)  # (K, T)
         self.K, self.T = self.basis.shape
@@ -174,17 +187,18 @@ class SubspaceSparseFFT:
         self._toep_op = None  # lazily built
 
     # ------------------------------------------------------------------
-    # forward: sparse k-space → subspace coefficient images
+    # adjoint: sparse k-space → subspace coefficient images  (A^H)
     # ------------------------------------------------------------------
-    def forward(self, sparse_kspace: torch.Tensor) -> torch.Tensor:
-        """Sparse → subspace coefficient images. (named ``forward`` to match
-        the SparseFFT convention where ``forward`` is sparse → image.)"""
+    @with_torch
+    def adjoint(self, sparse_kspace: torch.Tensor) -> torch.Tensor:
+        """Sparse k-space → subspace coefficient images (``A^H``)."""
         return self._adjoint_impl(sparse_kspace)
 
     # ------------------------------------------------------------------
-    # adjoint: subspace coefficient images → sparse k-space
+    # forward: subspace coefficient images → sparse k-space  (A)
     # ------------------------------------------------------------------
-    def adjoint(self, coeffs: torch.Tensor) -> torch.Tensor:
+    @with_torch
+    def forward(self, coeffs: torch.Tensor) -> torch.Tensor:
         return self._forward_impl(coeffs)
 
     # ==================================================================
@@ -208,7 +222,9 @@ class SubspaceSparseFFT:
         s_ndim = len(s_shape)
 
         # Identify leading prefix (*B, *S) before (C, *natural).
-        prefix = tuple(int(s) for s in sparse_kspace.shape[: sparse_kspace.ndim - (1 + nat_ndim)])
+        prefix = tuple(
+            int(s) for s in sparse_kspace.shape[: sparse_kspace.ndim - (1 + nat_ndim)]
+        )
         if s_ndim:
             if len(prefix) < s_ndim or tuple(prefix[-s_ndim:]) != s_shape:
                 raise ValueError(
@@ -219,7 +235,7 @@ class SubspaceSparseFFT:
             B_shape = prefix
         if sparse_kspace.ndim < 1 + nat_ndim:
             raise ValueError(
-                f"Expected (...{(1 + nat_ndim)}D)=(C, *natural)={('C',) + tuple(nat)}; "
+                f"Expected (...{(1 + nat_ndim)}D)=(C, *natural)={('C', *tuple(nat))}; "
                 f"got {tuple(sparse_kspace.shape)}"
             )
 
@@ -230,7 +246,7 @@ class SubspaceSparseFFT:
         B_total = int(np.prod(B_shape)) if B_shape else 1
         S_total = int(np.prod(s_shape)) if s_shape else 1
         flat = sparse_kspace.reshape(
-            B_total, S_total, *sparse_kspace.shape[-(1 + nat_ndim):]
+            B_total, S_total, *sparse_kspace.shape[-(1 + nat_ndim) :]
         )
         outs = []
         for b in range(B_total):
@@ -263,7 +279,7 @@ class SubspaceSparseFFT:
         output = torch.zeros(K, *base.image_shape, dtype=dtype, device=device)
 
         # Per-stack pre-weights via the operator's _stack_arrays.
-        idx_s, sqw_s, _, ip_s = base._stack_arrays(s_flat_idx)
+        _idx_s, sqw_s, _, ip_s = base._stack_arrays(s_flat_idx)
         pre_w = sqw_s[ip_s].to(device=device, dtype=dtype).view(*nat)
 
         for c in range(n_coils):
@@ -318,7 +334,9 @@ class SubspaceSparseFFT:
         stacked = torch.stack(outs, dim=0)
         return stacked.reshape(*B_shape, *s_shape, n_coils, *nat)
 
-    def _forward_single(self, coeffs: torch.Tensor, s_flat_idx: int = 0) -> torch.Tensor:
+    def _forward_single(
+        self, coeffs: torch.Tensor, s_flat_idx: int = 0
+    ) -> torch.Tensor:
         """Single-frame, single-stack-element forward.  Input: ``(K, *image_shape)``,
         Output: ``(C, *natural)``."""
         base = self._base
@@ -349,7 +367,7 @@ class SubspaceSparseFFT:
 
         output = torch.empty(n_coils, *nat, dtype=dtype, device=device)
 
-        idx_s, sqw_s, _, ip_s = base._stack_arrays(s_flat_idx)
+        _idx_s, sqw_s, _, ip_s = base._stack_arrays(s_flat_idx)
         pre_w = sqw_s[ip_s].to(device=device, dtype=dtype).view(*nat)
 
         for c in range(n_coils):
@@ -361,12 +379,15 @@ class SubspaceSparseFFT:
 
         return output
 
+    @with_torch
     def normal(self, coeffs):
         if self.toeplitz:
             if self._toep_op is None:
                 from .._toep._sub_toep import SubspaceToeplitzOp
+
                 self._toep_op = SubspaceToeplitzOp(
-                    self, device=self._base.device,
+                    self,
+                    device=self._base.device,
                 )
             return self._toep_op(coeffs)
         return self._adjoint_impl(self._forward_impl(coeffs))
@@ -380,7 +401,7 @@ class SubspaceSparseFFT:
 # =====================================================================
 # MaskedFFT decorator
 # =====================================================================
-class SubspaceMaskedFFT:
+class SubspaceMaskedFFT(SolveMixin):
     """MaskedFFT with low-rank subspace projection (loop-fused).
 
     Mirrors :class:`SubspaceSparseFFT` but operates on pre-gridded
@@ -409,8 +430,9 @@ class SubspaceMaskedFFT:
         Default ``-3`` (last three axes are ``(T, gy, gx)`` for 2D).
     """
 
-    def __init__(self, base_op, subspace_basis, encoding_axis: int = -3,
-                 *, toeplitz=None):
+    def __init__(
+        self, base_op, subspace_basis, encoding_axis: int = -3, *, toeplitz=None
+    ):
         self._base = base_op
         self.basis = torch.as_tensor(subspace_basis)  # (K, T)
         self.K, self.T = self.basis.shape
@@ -441,14 +463,16 @@ class SubspaceMaskedFFT:
         self._toep_op = None
 
     # ------------------------------------------------------------------
-    # forward: gridded k-space → subspace coefficient images
+    # adjoint: gridded k-space → subspace coefficient images  (A^H)
     # ------------------------------------------------------------------
-    def forward(self, kspace_grid: torch.Tensor) -> torch.Tensor:
-        """Gridded k-space → subspace coefficient images."""
+    @with_torch
+    def adjoint(self, kspace_grid: torch.Tensor) -> torch.Tensor:
+        """Gridded k-space → subspace coefficient images (``A^H``)."""
         return self._adjoint_impl(kspace_grid)
 
-    def adjoint(self, coeffs: torch.Tensor) -> torch.Tensor:
-        """Subspace coefficient images → gridded k-space."""
+    @with_torch
+    def forward(self, coeffs: torch.Tensor) -> torch.Tensor:
+        """Subspace coefficient images → gridded k-space (``A``)."""
         return self._forward_impl(coeffs)
 
     # ==================================================================
@@ -464,7 +488,7 @@ class SubspaceMaskedFFT:
         Output: ``(*B, *S, K, *image_shape)``.
         """
         base = self._base
-        nat = base.natural_shape   # == grid_shape for MaskedFFT
+        nat = base.natural_shape  # == grid_shape for MaskedFFT
         nat_ndim = len(nat)
         s_shape = tuple(getattr(base, "stack_shape", ()) or ())
         s_ndim = len(s_shape)
@@ -485,7 +509,9 @@ class SubspaceMaskedFFT:
 
         B_total = int(np.prod(B_shape)) if B_shape else 1
         S_total = int(np.prod(s_shape)) if s_shape else 1
-        flat = kspace_grid.reshape(B_total, S_total, *kspace_grid.shape[-expected_trailing:])
+        flat = kspace_grid.reshape(
+            B_total, S_total, *kspace_grid.shape[-expected_trailing:]
+        )
         outs = []
         for b in range(B_total):
             for s in range(S_total):
@@ -496,7 +522,7 @@ class SubspaceMaskedFFT:
     def _adjoint_single(self, kspace_grid: torch.Tensor, s_flat_idx: int = 0):
         """Single-frame adjoint.  Input: ``(C, *grid_shape)``."""
         base = self._base
-        nat = base.natural_shape   # == grid_shape
+        nat = base.natural_shape  # == grid_shape
         nat_ndim = len(nat)
         device = kspace_grid.device
         dtype = kspace_grid.dtype
@@ -567,7 +593,7 @@ class SubspaceMaskedFFT:
     def _forward_single(self, coeffs: torch.Tensor, s_flat_idx: int = 0):
         """Single-frame forward.  Input: ``(K, *image_shape)``, output: ``(C, *grid_shape)``."""
         base = self._base
-        nat = base.natural_shape   # == grid_shape
+        nat = base.natural_shape  # == grid_shape
         nat_ndim = len(nat)
 
         if coeffs.shape[0] != self.K:
@@ -604,11 +630,13 @@ class SubspaceMaskedFFT:
 
         return output
 
+    @with_torch
     def normal(self, coeffs):
         """Normal operator: ``A^H A x``."""
         if self.toeplitz:
             if self._toep_op is None:
                 from .._toep._sub_toep import SubspaceToeplitzOp
+
                 self._toep_op = SubspaceToeplitzOp(self, device=self._base.device)
             return self._toep_op(coeffs)
         return self._adjoint_impl(self._forward_impl(coeffs))

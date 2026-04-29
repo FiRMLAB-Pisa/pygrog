@@ -109,7 +109,6 @@ def nlinv_calib(
     if noncart_input:
         single_ndim = 1 + (coords.ndim - 1) if coords.ndim >= 1 else 1
         # If coords has a *B prefix matching y, it is per-batch (stacked) traj.
-        coords_batched = coords.ndim > (1 + 1)  # heuristic refined below
     else:
         if ndim is None:
             raise ValueError("ndim must be provided for Cartesian input")
@@ -139,27 +138,23 @@ def nlinv_calib(
             and tuple(int(s) for s in mask.shape[: len(B_shape)]) == B_shape
         )
         B_total = int(np.prod(B_shape))
-        single_shape = tuple(y.shape[len(B_shape):])
+        single_shape = tuple(y.shape[len(B_shape) :])
         y_flat = y.reshape(B_total, *single_shape)
         if noncart_input:
             if per_batch_coords:
-                coords_flat = coords.reshape(
-                    B_total, *coords.shape[len(B_shape):]
-                )
+                coords_flat = coords.reshape(B_total, *coords.shape[len(B_shape) :])
             if per_batch_weights:
-                weights_flat = weights.reshape(
-                    B_total, *weights.shape[len(B_shape):]
-                )
+                weights_flat = weights.reshape(B_total, *weights.shape[len(B_shape) :])
 
         smaps_list = []
         train_list = []
         image_list = []
         for b in range(B_total):
-            sub_coords = coords_flat[b] if (noncart_input and per_batch_coords) else coords
+            sub_coords = (
+                coords_flat[b] if (noncart_input and per_batch_coords) else coords
+            )
             sub_weights = (
-                weights_flat[b]
-                if (noncart_input and per_batch_weights)
-                else weights
+                weights_flat[b] if (noncart_input and per_batch_weights) else weights
             )
             sub_mask = mask[b] if per_batch_mask else mask
             res = nlinv_calib(
@@ -386,7 +381,9 @@ def _setup_noncartesian(
     flat_y = y.reshape(y.shape[0], -1)
     flat_w = weights.reshape(-1) if weights is not None else None
 
-    scaled = rescale_coords(flat_coords.movedim(-1, 0), list(oshape[-ndim:])).movedim(0, -1)
+    scaled = rescale_coords(flat_coords.movedim(-1, 0), list(oshape[-ndim:])).movedim(
+        0, -1
+    )
     radius = 0.5 * cal_width
     mask = (scaled**2).sum(dim=-1).sqrt() <= radius
 

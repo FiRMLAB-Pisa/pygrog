@@ -79,8 +79,9 @@ class GrogToeplitzOp:
 
             if not self.stack_shape:
                 w_sq = (sqrt_w_full * sqrt_w_full).contiguous()
-                psf_flat = torch.zeros(sparse_fft.grid_size,
-                                       dtype=w_sq.dtype, device=self.device)
+                psf_flat = torch.zeros(
+                    sparse_fft.grid_size, dtype=w_sq.dtype, device=self.device
+                )
                 ext.psf_scatter_scalar(psf_flat, indices_full, w_sq)
                 self.psf = psf_flat.reshape(self.grid_shape)
             else:
@@ -96,13 +97,13 @@ class GrogToeplitzOp:
                 w_sq_packed = (sqrt_w_v * sqrt_w_v).reshape(-1).contiguous()
                 psf_super = torch.zeros(
                     S_total * sparse_fft.grid_size,
-                    dtype=w_sq_packed.dtype, device=self.device,
+                    dtype=w_sq_packed.dtype,
+                    device=self.device,
                 )
                 ext.psf_scatter_scalar(psf_super, indices_packed, w_sq_packed)
                 self.psf = psf_super.reshape(*self.stack_shape, *self.grid_shape)
         self._psf_complex = self.psf.to(
-            torch.complex64 if self.psf.dtype == torch.float32
-            else torch.complex128
+            torch.complex64 if self.psf.dtype == torch.float32 else torch.complex128
         )
 
     # ------------------------------------------------------------------
@@ -124,8 +125,7 @@ class GrogToeplitzOp:
         s_shape = self.stack_shape
         s_ndim = len(s_shape)
         single_ndim = (
-            len(self.image_shape) if sf.smaps is not None
-            else len(self.image_shape) + 1
+            len(self.image_shape) if sf.smaps is not None else len(self.image_shape) + 1
         )
         prefix = tuple(int(s) for s in image.shape[: image.ndim - single_ndim])
         if s_ndim:
@@ -142,7 +142,7 @@ class GrogToeplitzOp:
 
         S_total = int(torch.tensor(s_shape).prod().item()) if s_shape else 1
         B_total = int(torch.tensor(B_shape).prod().item()) if B_shape else 1
-        single_shape = tuple(image.shape[image.ndim - single_ndim:])
+        single_shape = tuple(image.shape[image.ndim - single_ndim :])
         flat = image.reshape(B_total, S_total, *single_shape)
         outs = []
         for b in range(B_total):
@@ -197,8 +197,10 @@ class GrogToeplitzOp:
             return ifft(k, axes=self.fft_axes)
         B = batch_img.shape[0]
         padded = torch.zeros(
-            B, *self.grid_shape,
-            dtype=batch_img.dtype, device=batch_img.device,
+            B,
+            *self.grid_shape,
+            dtype=batch_img.dtype,
+            device=batch_img.device,
         )
         padded[(slice(None), *self._pad_slices)] = batch_img
         k = fft(padded, axes=self.fft_axes)

@@ -26,9 +26,7 @@ def fixture():
 
     shape = (96, 96)
     n_coils = 4
-    samples = initialize_2D_spiral(
-        Nc=8, Ns=200, nb_revolutions=4
-    ).astype(np.float32)
+    samples = initialize_2D_spiral(Nc=8, Ns=200, nb_revolutions=4).astype(np.float32)
     coords_np = (samples * np.asarray(shape, np.float32)).astype(np.float32)
 
     yy, xx = np.mgrid[-1 : 1 : shape[0] * 1j, -1 : 1 : shape[1] * 1j]
@@ -87,9 +85,7 @@ def _make_kdata(fix):
     kz_t = torch.zeros_like(kx_t)
     traj = KTrajectory(kz=kz_t, ky=ky_t, kx=kx_t)
     data_t = (
-        torch.as_tensor(fix["ksp"])
-        .reshape(n_coils, 1, n_shots, n_read)
-        .unsqueeze(0)
+        torch.as_tensor(fix["ksp"]).reshape(n_coils, 1, n_shots, n_read).unsqueeze(0)
     )
     spatial = SpatialDimension(z=1, y=shape[0], x=shape[1])
     header = KHeader(
@@ -164,7 +160,9 @@ def test_deepinv_grog_interpolator(fixture):
     fix = fixture
     ksp_t = torch.as_tensor(
         fix["ksp"].reshape(fix["n_coils"], *fix["samples"].shape[:2])
-    ).unsqueeze(0)  # (B=1, coils, k1, k0)
+    ).unsqueeze(
+        0
+    )  # (B=1, coils, k1, k0)
     grog = pg_deepinv.GrogInterpolator(
         fix["coords"],
         fix["shape"],
@@ -172,7 +170,7 @@ def test_deepinv_grog_interpolator(fixture):
         oversamp=1.25,
     )
     grog.calc_interp_table(fix["calib"], lamda=0.01)
-    sparse, plan = grog.interpolate(ksp_t)
+    sparse, _plan = grog.interpolate(ksp_t)
     assert isinstance(sparse, torch.Tensor)
     assert sparse.shape[0] == 1
     assert sparse.shape[1] == fix["n_coils"]
@@ -259,6 +257,7 @@ def test_mrpro_coil_compress(fixture):
 # ===========================================================================
 def _make_toeplitz_op():
     from pygrog.operator import SparseFFT
+
     torch.manual_seed(0)
     nx = ny = 32
     n_coils = 4
@@ -266,12 +265,22 @@ def _make_toeplitz_op():
     indices = torch.randint(0, nx * ny, (n_samples,), dtype=torch.int64)
     weights = torch.rand(n_samples, dtype=torch.float32) + 0.1
     smaps = torch.randn(n_coils, ny, nx, dtype=torch.complex64) * 0.5
-    op_t = SparseFFT(grid_shape=(ny, nx), image_shape=(ny, nx),
-                     indices=indices, weights=weights, smaps=smaps,
-                     toeplitz=True)
-    op_n = SparseFFT(grid_shape=(ny, nx), image_shape=(ny, nx),
-                     indices=indices, weights=weights, smaps=smaps,
-                     toeplitz=False)
+    op_t = SparseFFT(
+        grid_shape=(ny, nx),
+        image_shape=(ny, nx),
+        indices=indices,
+        weights=weights,
+        smaps=smaps,
+        toeplitz=True,
+    )
+    op_n = SparseFFT(
+        grid_shape=(ny, nx),
+        image_shape=(ny, nx),
+        indices=indices,
+        weights=weights,
+        smaps=smaps,
+        toeplitz=False,
+    )
     return op_t, op_n
 
 
@@ -282,6 +291,7 @@ def _rel_err(a, b):
 def test_sigpy_grog_normal_linop():
     pytest.importorskip("sigpy")
     from pygrog.interop import GrogNormalLinop
+
     op_t, op_n = _make_toeplitz_op()
     x = torch.randn(*op_t.image_shape, dtype=torch.complex64)
     ref = op_n.normal(x)
@@ -293,6 +303,7 @@ def test_sigpy_grog_normal_linop():
 def test_deepinv_grog_a_adjoint_a():
     pytest.importorskip("deepinv")
     from pygrog.interop import GrogLinearPhysics
+
     op_t, op_n = _make_toeplitz_op()
     x = torch.randn(*op_t.image_shape, dtype=torch.complex64)
     ref = op_n.normal(x)
@@ -320,11 +331,15 @@ def test_mrpro_h_gram_normal():
     inv_perm = torch.empty_like(sort_perm)
     inv_perm[sort_perm] = torch.arange(n_samples)
     plan = types.SimpleNamespace(
-        grid_shape=(ny, nx), image_shape=(ny, nx), grid_size=ny * nx,
+        grid_shape=(ny, nx),
+        image_shape=(ny, nx),
+        grid_size=ny * nx,
         indices=indices[sort_perm],
         sqrt_weights=torch.sqrt(weights)[sort_perm],
-        sort_perm=sort_perm, inv_perm=inv_perm,
-        natural_shape=(n_shots, n_pts), n_samples=n_samples,
+        sort_perm=sort_perm,
+        inv_perm=inv_perm,
+        natural_shape=(n_shots, n_pts),
+        n_samples=n_samples,
     )
     op_t = SparseFFT(plan=plan, smaps=smaps, toeplitz=True)
     op_n = SparseFFT(plan=plan, smaps=smaps, toeplitz=False)

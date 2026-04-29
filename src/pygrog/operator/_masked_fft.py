@@ -40,7 +40,7 @@ oversampled k-space domain, identical to what :class:`~pygrog._toep.GrogToeplitz
 computes via scatter.
 """
 
-__all__ = ["MaskedFFTPlan", "MaskedFFT"]
+__all__ = ["MaskedFFT", "MaskedFFTPlan"]
 
 import numpy as np
 import torch
@@ -48,6 +48,7 @@ from mrinufft._array_compat import with_torch
 
 from .._base._fftc import fft, ifft
 from .._utils import resize
+from .._solve._mixin import SolveMixin
 
 
 class MaskedFFTPlan:
@@ -61,12 +62,12 @@ class MaskedFFTPlan:
         # Sparse path
         sparse = grog.interpolate(kspace)
         op = SparseFFT(plan=grog.plan, smaps=smaps)
-        image = op.forward(sparse * grog.plan.pre_weights)
+        image = op.adjoint(sparse * grog.plan.pre_weights)
 
         # Dense/grid path — symmetric API
         kgrid, plan = grog.interpolate(kspace, grid=True)
         op = MaskedFFT(plan=plan, smaps=smaps)
-        image = op.forward(kgrid)
+        image = op.adjoint(kgrid)
 
     Parameters
     ----------
@@ -101,7 +102,7 @@ class MaskedFFTPlan:
         )
 
 
-class MaskedFFT:
+class MaskedFFT(SolveMixin):
     """Masked FFT / IFFT operator for gridded k-space data.
 
     Accepts either a pre-built plan (from
@@ -255,7 +256,7 @@ class MaskedFFT:
     # Forward: gridded k-space → image  (adjoint NUFFT direction)
     # ------------------------------------------------------------------
     @with_torch
-    def forward(self, kspace_grid: torch.Tensor) -> torch.Tensor:
+    def adjoint(self, kspace_grid: torch.Tensor) -> torch.Tensor:
         """Gridded k-space to image.
 
         Parameters
@@ -305,7 +306,8 @@ class MaskedFFT:
         stacked = torch.stack(outs, dim=0)  # (B, S, ...)
 
         single_out_shape = (
-            tuple(self.image_shape) if self.smaps is not None
+            tuple(self.image_shape)
+            if self.smaps is not None
             else (n_coils, *self.image_shape)
         )
         return stacked.reshape(*B_shape, *s_shape, *single_out_shape)
@@ -318,14 +320,18 @@ class MaskedFFT:
         dtype = kspace_grid.dtype
 
         mask_s, _ = self._stack_mask(s_flat_idx)
-        mask_s = mask_s.to(comp_device, dtype=dtype.to_real() if dtype.is_complex else dtype)
+        mask_s = mask_s.to(
+            comp_device, dtype=dtype.to_real() if dtype.is_complex else dtype
+        )
         kgrid = kspace_grid.to(comp_device)
 
         if self.smaps is not None:
             conj_smaps = self._conj_smaps.to(comp_device, dtype=dtype)
             accum = torch.zeros(self.image_shape, dtype=dtype, device=comp_device)
         else:
-            accum = torch.zeros(n_coils, *self.image_shape, dtype=dtype, device=comp_device)
+            accum = torch.zeros(
+                n_coils, *self.image_shape, dtype=dtype, device=comp_device
+            )
 
         for c in range(n_coils):
             # Apply mask, IFFT, center-crop
@@ -343,7 +349,7 @@ class MaskedFFT:
     # Adjoint: image → gridded k-space  (forward NUFFT direction)
     # ------------------------------------------------------------------
     @with_torch
-    def adjoint(self, image: torch.Tensor) -> torch.Tensor:
+    def forward(self, image: torch.Tensor) -> torch.Tensor:
         """Image to gridded k-space.
 
         Parameters
@@ -376,7 +382,7 @@ class MaskedFFT:
 
         S_total = int(np.prod(s_shape)) if s_shape else 1
         B_total = int(np.prod(B_shape)) if B_shape else 1
-        single_shape = tuple(image.shape[image.ndim - single_ndim:])
+        single_shape = tuple(image.shape[image.ndim - single_ndim :])
         flat = image.reshape(B_total, S_total, *single_shape)
 
         outs = []
@@ -436,14 +442,22 @@ class MaskedFFT:
 
         When ``self.toeplitz`` is True (requires ``density`` to be set),
         uses a pre-computed PSF on ``grid_shape`` (built lazily on first
-        call).  Otherwise falls back to ``adjoint(forward(x))``.
+        call).  Otherwise falls back to ``forward(adjoint(image))`` (with
+        pygrog convention: ``adjoint = A`` (image→kspace),
+        ``forward = A^H`` (kspace→image)).
         """
         if self.toeplitz:
             if self._toep_op is None:
                 from .._toep._grog_toep import GrogToeplitzOp
+
                 self._toep_op = GrogToeplitzOp(self, device=self.device)
             return self._toep_op(image)
         return self.adjoint(self.forward(image))
+
+    # ------------------------------------------------------------------
+    # Iterative solve
+    # ------------------------------------------------------------------
+    # Provided by SolveMixin (attached at module import time).
 
     # ------------------------------------------------------------------
     # Batch helpers for decorators
@@ -478,7 +492,7 @@ class MaskedFFT:
         mask_s = mask_s.to(comp_device, dtype=real_dtype)
 
         kgrid = batch_kspace_grid.to(comp_device) * mask_s.unsqueeze(0)
-        full_imgs = ifft(kgrid, axes=self.fft_axes)      # (B, *grid_shape)
+        full_imgs = ifft(kgrid, axes=self.fft_axes)  # (B, *grid_shape)
         imgs = resize(full_imgs, (B, *self.image_shape))
         return imgs.to(src_device)
 
@@ -513,5 +527,5 @@ class MaskedFFT:
         imgs_d = batch_imgs.to(comp_device)
         padded = torch.zeros(B, *self.grid_shape, dtype=dtype, device=comp_device)
         padded[(slice(None), *self._pad_slices)] = imgs_d
-        kgrid = fft(padded, axes=self.fft_axes)           # (B, *grid_shape)
+        kgrid = fft(padded, axes=self.fft_axes)  # (B, *grid_shape)
         return (kgrid * mask_s.unsqueeze(0)).to(src_device)

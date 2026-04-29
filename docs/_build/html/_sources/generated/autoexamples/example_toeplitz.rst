@@ -119,7 +119,7 @@ Helpers
 Part 1 — end-to-end SparseFFT with CG reconstruction
 ====================================================
 
-.. GENERATED FROM PYTHON SOURCE LINES 77-129
+.. GENERATED FROM PYTHON SOURCE LINES 77-135
 
 .. code-block:: Python
 
@@ -128,15 +128,17 @@ Part 1 — end-to-end SparseFFT with CG reconstruction
     shape = image.shape
     n_coils = 8
 
-    samples = initialize_2D_spiral(
-        Nc=48, Ns=600, nb_revolutions=10
-    ).astype(np.float32)
+    samples = initialize_2D_spiral(Nc=48, Ns=600, nb_revolutions=10).astype(np.float32)
     density = voronoi(samples)
 
     smaps = _synthetic_smaps(shape, n_coils=n_coils)
     nufft_sim = get_operator("finufft")(
-        samples=samples, shape=shape, n_coils=n_coils,
-        smaps=smaps, density=density, squeeze_dims=True,
+        samples=samples,
+        shape=shape,
+        n_coils=n_coils,
+        smaps=smaps,
+        density=density,
+        squeeze_dims=True,
     )
     kspace = nufft_sim.op(image.astype(np.complex64))
 
@@ -149,21 +151,23 @@ Part 1 — end-to-end SparseFFT with CG reconstruction
     cy, cx = shape[0] // 2, shape[1] // 2
     calib_size = 24
     calib = calib_full[
-        :, cy - calib_size // 2 : cy + calib_size // 2,
+        :,
+        cy - calib_size // 2 : cy + calib_size // 2,
         cx - calib_size // 2 : cx + calib_size // 2,
     ]
 
     coords = (samples * np.asarray(shape, dtype=np.float32)).astype(np.float32)
     grog = GrogInterpolator(
-        shape=shape, coords=coords, kernel_width=2,
-        oversamp=1.25, image_shape=shape,
+        shape=shape,
+        coords=coords,
+        kernel_width=2,
+        oversamp=1.25,
+        image_shape=shape,
     )
     grog.calc_interp_table(calib, lamda=0.01, precision=1)
 
-    op_t = SparseFFT(plan=grog.plan, smaps=torch.as_tensor(smaps),
-                     toeplitz=True)
-    op_n = SparseFFT(plan=grog.plan, smaps=torch.as_tensor(smaps),
-                     toeplitz=False)
+    op_t = SparseFFT(plan=grog.plan, smaps=smaps, toeplitz=True)
+    op_n = SparseFFT(plan=grog.plan, smaps=smaps, toeplitz=False)
 
     # A^H A timing on a random image
     torch.manual_seed(0)
@@ -171,8 +175,10 @@ Part 1 — end-to-end SparseFFT with CG reconstruction
     t_toep, y_toep = _bench(op_t.normal, x)
     t_nest, y_nest = _bench(op_n.normal, x)
     err_sparse = _rel_err(y_toep, y_nest)
-    print(f"SparseFFT  Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
-          f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_sparse:.2e}")
+    print(
+        f"SparseFFT  Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
+        f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_sparse:.2e}"
+    )
 
 
 
@@ -185,17 +191,17 @@ Part 1 — end-to-end SparseFFT with CG reconstruction
 
     /home/mcencini/.conda/envs/pygrog/lib/python3.13/site-packages/mrinufft/_utils.py:67: UserWarning: Samples will be rescaled to [-pi, pi), assuming they were in [-0.5, 0.5)
       warnings.warn(
-    SparseFFT  Toeplitz    3.99 ms  |  nested   11.94 ms  | speed-up x 2.99  | rel-err 3.18e-07
+    SparseFFT  Toeplitz    7.75 ms  |  nested   15.81 ms  | speed-up x 2.04  | rel-err 3.18e-07
 
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 130-132
+.. GENERATED FROM PYTHON SOURCE LINES 136-138
 
 CG using ``op.normal``
 ----------------------
 
-.. GENERATED FROM PYTHON SOURCE LINES 132-193
+.. GENERATED FROM PYTHON SOURCE LINES 138-195
 
 .. code-block:: Python
 
@@ -218,16 +224,10 @@ CG using ``op.normal``
     # Right-hand side b = A^H y with density compensation.
     n_shots, n_read = samples.shape[:2]
     sparse = grog.interpolate(
-        torch.as_tensor(
-            kspace.reshape(n_coils, n_shots, n_read).astype(np.complex64),
-        ),
+        kspace.reshape(n_coils, n_shots, n_read).astype(np.complex64),
         ret_image=False,
     )
-    sparse = torch.as_tensor(np.asarray(sparse), dtype=torch.complex64)
-    sw = grog.plan.pre_weights.to(sparse.dtype)
-    sparse = sparse * sw
-    # In pygrog convention SparseFFT.forward is sparse → image (a.k.a. A^H).
-    b = op_t.forward(sparse)
+    b = op_t.adjoint(torch.as_tensor(sparse) * grog.plan.pre_weights)
 
     t0 = time.perf_counter()
     recon_toep = cg(op_t.normal, b, n_iter=12)
@@ -236,8 +236,10 @@ CG using ``op.normal``
     recon_nest = cg(op_n.normal, b, n_iter=12)
     t_cg_nest = time.perf_counter() - t0
 
-    print(f"CG (12 iter):  Toeplitz {t_cg_toep:.2f} s  |  nested {t_cg_nest:.2f} s"
-          f"  | speed-up x{t_cg_nest/t_cg_toep:.2f}")
+    print(
+        f"CG (12 iter):  Toeplitz {t_cg_toep:.2f} s  |  nested {t_cg_nest:.2f} s"
+        f"  | speed-up x{t_cg_nest/t_cg_toep:.2f}"
+    )
 
     recon_t_np = np.abs(recon_toep.detach().cpu().numpy())
     recon_n_np = np.abs(recon_nest.detach().cpu().numpy())
@@ -264,7 +266,7 @@ CG using ``op.normal``
 
 
 .. image-sg:: /generated/autoexamples/images/sphx_glr_example_toeplitz_001.png
-   :alt: CG (Toeplitz) — 0.07 s, CG (nested A^HA) — 0.16 s, Difference
+   :alt: CG (Toeplitz) — 0.08 s, CG (nested A^HA) — 0.51 s, Difference
    :srcset: /generated/autoexamples/images/sphx_glr_example_toeplitz_001.png
    :class: sphx-glr-single-img
 
@@ -273,12 +275,12 @@ CG using ``op.normal``
 
  .. code-block:: none
 
-    CG (12 iter):  Toeplitz 0.07 s  |  nested 0.16 s  | speed-up x2.40
+    CG (12 iter):  Toeplitz 0.08 s  |  nested 0.51 s  | speed-up x6.49
 
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 194-200
+.. GENERATED FROM PYTHON SOURCE LINES 196-202
 
 Part 2 — accuracy of the gadget Toeplitz operators
 ==================================================
@@ -287,22 +289,26 @@ Small random problems where ``OffResonanceSparseFFT`` and
 the high-level helpers).  For each gadget we compare ``op.normal`` for
 ``toeplitz=True`` and ``toeplitz=False``.
 
-.. GENERATED FROM PYTHON SOURCE LINES 200-271
+.. GENERATED FROM PYTHON SOURCE LINES 202-290
 
 .. code-block:: Python
 
     def _make_small_sparse_fft(grid, n_samples, n_coils, *, toeplitz, seed=0):
         rng = np.random.default_rng(seed)
-        indices = torch.from_numpy(
-            rng.integers(0, int(np.prod(grid)), n_samples).astype(np.int64))
-        weights = torch.from_numpy(rng.random(n_samples).astype(np.float32) + 0.1)
-        smaps = torch.from_numpy(
-            (rng.standard_normal((n_coils, *grid))
-             + 1j * rng.standard_normal((n_coils, *grid))
-             ).astype(np.complex64) * 0.5)
-        return SparseFFT(grid_shape=grid, image_shape=grid,
-                         indices=indices, weights=weights,
-                         smaps=smaps, toeplitz=toeplitz)
+        indices = rng.integers(0, int(np.prod(grid)), n_samples).astype(np.int64)
+        weights = rng.random(n_samples).astype(np.float32) + 0.1
+        smaps = (
+            rng.standard_normal((n_coils, *grid))
+            + 1j * rng.standard_normal((n_coils, *grid))
+        ).astype(np.complex64) * 0.5
+        return SparseFFT(
+            grid_shape=grid,
+            image_shape=grid,
+            indices=indices,
+            weights=weights,
+            smaps=smaps,
+            toeplitz=toeplitz,
+        )
 
 
     # ---- ORC ----------------------------------------------------------------
@@ -312,54 +318,67 @@ the high-level helpers).  For each gadget we compare ``op.normal`` for
     op_b_t = _make_small_sparse_fft(grid, n_samples, 4, toeplitz=True, seed=0)
     op_b_n = _make_small_sparse_fft(grid, n_samples, 4, toeplitz=False, seed=0)
     rng = np.random.default_rng(11)
-    B = (rng.standard_normal((n_samples, L))
-         + 1j * rng.standard_normal((n_samples, L))).astype(np.complex64)
-    C = (rng.standard_normal((L, *grid))
-         + 1j * rng.standard_normal((L, *grid))).astype(np.complex64)
+    B = (
+        rng.standard_normal((n_samples, L)) + 1j * rng.standard_normal((n_samples, L))
+    ).astype(np.complex64)
+    C = (rng.standard_normal((L, *grid)) + 1j * rng.standard_normal((L, *grid))).astype(
+        np.complex64
+    )
     orc_t = OffResonanceSparseFFT(op_b_t, B, C, toeplitz=True)
     orc_n = OffResonanceSparseFFT(op_b_n, B, C, toeplitz=False)
     x_orc = torch.randn(*grid, dtype=torch.complex64)
     t_toep, y_toep = _bench(orc_t.normal, x_orc, n_iter=5)
     t_nest, y_nest = _bench(orc_n.normal, x_orc, n_iter=5)
     err_orc = _rel_err(y_toep, y_nest)
-    print(f"ORC (L={L})   Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
-          f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_orc:.2e}")
+    print(
+        f"ORC (L={L})   Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
+        f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_orc:.2e}"
+    )
 
     # ---- Subspace -----------------------------------------------------------
     import types
+
     T = 12
     K = 4
     n_pts = 60
     n_samples_sub = T * n_pts
     rng = np.random.default_rng(13)
-    indices = torch.from_numpy(
-        rng.integers(0, int(np.prod(grid)), n_samples_sub).astype(np.int64))
-    weights = torch.from_numpy(rng.random(n_samples_sub).astype(np.float32) + 0.1)
-    smaps_sub = torch.from_numpy(
-        (rng.standard_normal((4, *grid))
-         + 1j * rng.standard_normal((4, *grid))).astype(np.complex64) * 0.5)
-    sort_perm = torch.argsort(indices)
+    indices = rng.integers(0, int(np.prod(grid)), n_samples_sub).astype(np.int64)
+    weights = rng.random(n_samples_sub).astype(np.float32) + 0.1
+    smaps_sub = (
+        rng.standard_normal((4, *grid)) + 1j * rng.standard_normal((4, *grid))
+    ).astype(np.complex64) * 0.5
+    sort_perm = torch.argsort(torch.as_tensor(indices))
     inv_perm = torch.empty_like(sort_perm)
     inv_perm[sort_perm] = torch.arange(n_samples_sub)
+    indices_t = torch.as_tensor(indices)
+    weights_t = torch.as_tensor(weights)
     plan = types.SimpleNamespace(
-        grid_shape=grid, image_shape=grid, grid_size=int(np.prod(grid)),
-        indices=indices[sort_perm], sqrt_weights=torch.sqrt(weights)[sort_perm],
-        sort_perm=sort_perm, inv_perm=inv_perm,
-        natural_shape=(T, n_pts), n_samples=n_samples_sub,
+        grid_shape=grid,
+        image_shape=grid,
+        grid_size=int(np.prod(grid)),
+        indices=indices_t[sort_perm],
+        sqrt_weights=torch.sqrt(weights_t)[sort_perm],
+        sort_perm=sort_perm,
+        inv_perm=inv_perm,
+        natural_shape=(T, n_pts),
+        n_samples=n_samples_sub,
     )
     base_sub_t = SparseFFT(plan=plan, smaps=smaps_sub, toeplitz=True)
     base_sub_n = SparseFFT(plan=plan, smaps=smaps_sub, toeplitz=False)
-    basis = torch.from_numpy(
-        (rng.standard_normal((K, T))
-         + 1j * rng.standard_normal((K, T))).astype(np.complex64))
+    basis = (rng.standard_normal((K, T)) + 1j * rng.standard_normal((K, T))).astype(
+        np.complex64
+    )
     sub_t = SubspaceSparseFFT(base_sub_t, basis, encoding_axis=-2)
     sub_n = SubspaceSparseFFT(base_sub_n, basis, encoding_axis=-2)
     x_sub = torch.randn(K, *grid, dtype=torch.complex64)
     t_toep, y_toep = _bench(sub_t.normal, x_sub, n_iter=5)
     t_nest, y_nest = _bench(sub_n.normal, x_sub, n_iter=5)
     err_sub = _rel_err(y_toep, y_nest)
-    print(f"Subspace (K={K}) Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
-          f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_sub:.2e}")
+    print(
+        f"Subspace (K={K}) Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
+        f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_sub:.2e}"
+    )
 
 
 
@@ -370,18 +389,18 @@ the high-level helpers).  For each gadget we compare ``op.normal`` for
 
  .. code-block:: none
 
-    ORC (L=4)   Toeplitz    0.56 ms  |  nested    0.96 ms  | speed-up x 1.71  | rel-err 1.37e-07
-    Subspace (K=4) Toeplitz    0.37 ms  |  nested   11.98 ms  | speed-up x32.54  | rel-err 1.87e-07
+    ORC (L=4)   Toeplitz    0.87 ms  |  nested    2.39 ms  | speed-up x 2.76  | rel-err 1.37e-07
+    Subspace (K=4) Toeplitz    0.83 ms  |  nested    5.09 ms  | speed-up x 6.11  | rel-err 1.87e-07
 
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 272-274
+.. GENERATED FROM PYTHON SOURCE LINES 291-293
 
 Accuracy summary
 ----------------
 
-.. GENERATED FROM PYTHON SOURCE LINES 274-286
+.. GENERATED FROM PYTHON SOURCE LINES 293-311
 
 .. code-block:: Python
 
@@ -392,9 +411,15 @@ Accuracy summary
     ax.set_yscale("log")
     ax.set_ylabel(r"max relative error  vs.  $A^H A$ via forward+adjoint")
     ax.set_title("Toeplitz `op.normal` accuracy")
-    for b, e in zip(bars, errs):
-        ax.text(b.get_x() + b.get_width() / 2, e, f"{e:.1e}",
-                ha="center", va="bottom", fontsize=9)
+    for b, e in zip(bars, errs, strict=False):
+        ax.text(
+            b.get_x() + b.get_width() / 2,
+            e,
+            f"{e:.1e}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
     plt.tight_layout()
     plt.show()
 
@@ -412,7 +437,7 @@ Accuracy summary
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 1.728 seconds)
+   **Total running time of the script:** (0 minutes 2.679 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_toeplitz.py:

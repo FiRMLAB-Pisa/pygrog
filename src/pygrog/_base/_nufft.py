@@ -82,7 +82,9 @@ class _MRIPytorchFinufft(FourierOperatorBase):
         samples = proper_trajectory(
             np.asarray(samples).astype(np.float32, copy=False), normalize="pi"
         )
-        self._samples = np.ascontiguousarray(samples)  # (n_samples, ndim) — required by base class n_samples property
+        self._samples = np.ascontiguousarray(
+            samples
+        )  # (n_samples, ndim) — required by base class n_samples property
         # Store transposed (ndim, n_samples) already contiguous so _get_points
         # doesn't create a non-contiguous view via .T every call (which causes
         # finufft "Argument x/y/z not C-contiguous" warnings at runtime).

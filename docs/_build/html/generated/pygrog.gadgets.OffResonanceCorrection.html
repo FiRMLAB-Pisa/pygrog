@@ -170,6 +170,7 @@
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_solve.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
@@ -543,6 +544,13 @@ other axes are singletons.  No memory is materialised.</p>
 <dd class="field-odd"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)">torch.Tensor</a></p>
 </dd>
 </dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This function uses <code class="docutils literal notranslate"><span class="pre">torch</span></code> internally, and will convert all its array
+argument to torch tensors, but will respect the device they are allocated
+on. The outputs will be converted back to the original array module and
+device.</p>
+</div>
 </dd></dl>
 
 <dl class="py method">
@@ -562,6 +570,13 @@ after reshape).</p>
 <dd class="field-odd"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)">torch.Tensor</a></p>
 </dd>
 </dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This function uses <code class="docutils literal notranslate"><span class="pre">torch</span></code> internally, and will convert all its array
+argument to torch tensors, but will respect the device they are allocated
+on. The outputs will be converted back to the original array module and
+device.</p>
+</div>
 </dd></dl>
 
 </dd></dl>

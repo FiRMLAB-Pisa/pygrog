@@ -155,12 +155,14 @@ def _prepare_real_inputs(cfg: BenchmarkConfig, data_dir: Path) -> BenchmarkInput
     # all K coefficients share this same FULL stacked trajectory.
     # We KEEP the natural shape so GROG's plan stores a multi-dim natural_shape
     # (T, k1, k0, kw); _make_nufft_operator flattens internally for FINUFFT.
-    sample_ref = trajectory.astype(np.float32)            # (T, k1, k0, 3)
-    density_ref = dcf.astype(np.float32)                  # (T, k1, k0)
+    sample_ref = trajectory.astype(np.float32)  # (T, k1, k0, 3)
+    density_ref = dcf.astype(np.float32)  # (T, k1, k0)
 
     # Convert from (T, C, spokes, readout) to (1, C, T, spokes, readout):
     # T becomes the k2 phase-encode encoding axis.
-    kspace_tcns = kspace_tcns.transpose(1, 0, 2, 3)[np.newaxis]  # (1, C, T, spokes, readout)
+    kspace_tcns = kspace_tcns.transpose(1, 0, 2, 3)[
+        np.newaxis
+    ]  # (1, C, T, spokes, readout)
 
     return BenchmarkInputs(
         shape=shape,
@@ -215,7 +217,9 @@ def _make_grog(
 ) -> tuple[GrogInterpolator, SparseFFT, dict[str, Any]]:
     coords = (samples * np.asarray(shape, dtype=np.float32)).astype(np.float32)
 
-    grog = GrogInterpolator(shape=shape, coords=coords, oversamp=1.25, kernel_width=2, image_shape=shape)
+    grog = GrogInterpolator(
+        shape=shape, coords=coords, oversamp=1.25, kernel_width=2, image_shape=shape
+    )
 
     coil_calib = smaps * calib_image[None, ...]
     fft_axes = tuple(range(-calib_image.ndim, 0))
@@ -255,10 +259,10 @@ def _grog_interpolate_all(
     by *sqrt_weights*.
     """
     kspace_t = torch.as_tensor(kspace_tcns, dtype=torch.complex64)
-    kspace_for_grog = kspace_t[0].permute(1, 0, 2, 3)   # (T, C, n_spokes, n_readout)
-    sparse = grog.interpolate(kspace_for_grog)            # (T, C, n_spokes, n_readout, kw)
+    kspace_for_grog = kspace_t[0].permute(1, 0, 2, 3)  # (T, C, n_spokes, n_readout)
+    sparse = grog.interpolate(kspace_for_grog)  # (T, C, n_spokes, n_readout, kw)
     pre_w_t = torch.as_tensor(sqrt_weights, dtype=torch.float32)
-    nat = grog.plan.natural_shape                         # (n_spokes, n_readout, kw)
+    nat = grog.plan.natural_shape  # (n_spokes, n_readout, kw)
     pre_w_view = pre_w_t.view(*nat).to(sparse.dtype)
     sparse = sparse * pre_w_view  # broadcasts over (T, C, *nat)
     return sparse.cpu().numpy()
@@ -309,10 +313,12 @@ def _grog_adjoint_from_sparse(
     mode: str,
     gpu_device: int,
 ) -> np.ndarray:
-    sparse = torch.as_tensor(sparse_tcn, dtype=torch.complex64)  # (T, n_coils, n_samples)
+    sparse = torch.as_tensor(
+        sparse_tcn, dtype=torch.complex64
+    )  # (T, n_coils, n_samples)
     if mode == "gpu-full":
         sparse = sparse.to(f"cuda:{gpu_device}")
-    return sparse_fft.forward(sparse).detach().cpu().numpy()     # (T, *image_shape)
+    return sparse_fft.forward(sparse).detach().cpu().numpy()  # (T, *image_shape)
 
 
 def _grog_forward_from_images(
@@ -321,10 +327,10 @@ def _grog_forward_from_images(
     mode: str,
     gpu_device: int,
 ) -> np.ndarray:
-    images = torch.as_tensor(images_t, dtype=torch.complex64)   # (T, *image_shape)
+    images = torch.as_tensor(images_t, dtype=torch.complex64)  # (T, *image_shape)
     if mode == "gpu-full":
         images = images.to(f"cuda:{gpu_device}")
-    return sparse_fft.adjoint(images).detach().cpu().numpy()     # (T, n_coils, n_samples)
+    return sparse_fft.adjoint(images).detach().cpu().numpy()  # (T, n_coils, n_samples)
 
 
 def _nufft_adjoint_all(op, kspace_tcns: np.ndarray) -> np.ndarray:
@@ -332,7 +338,7 @@ def _nufft_adjoint_all(op, kspace_tcns: np.ndarray) -> np.ndarray:
     imgs = []
     n_frames = kspace_tcns.shape[2]
     for t in range(n_frames):
-        kspace_t = kspace_tcns[0, :, t, :, :]         # (C, spokes, readout)
+        kspace_t = kspace_tcns[0, :, t, :, :]  # (C, spokes, readout)
         kspace_flat = kspace_t.reshape(kspace_t.shape[0], -1)  # (C, N)
         imgs.append(op.adj_op(kspace_flat))
     return np.stack(imgs, axis=0)
@@ -381,7 +387,7 @@ def _nufft_subspace_adjoint(
 
     Total: K NUFFT_adj calls, each on the FULL T*S*R-sample trajectory.
     """
-    n_coeff, n_frames = basis_kt.shape
+    n_coeff, _n_frames = basis_kt.shape
     # kspace_tcns: (1, C, T, spokes, readout)
     _, n_coils, T, S, R = kspace_tcns.shape
     full = kspace_tcns[0].astype(np.complex64)  # (C, T, S, R)
@@ -418,10 +424,12 @@ def _nufft_subspace_forward(
     T = n_frames
     for i in range(n_coeff):
         ksp_i = np.asarray(op.op(coeff[i]))  # (C, T*S*R) or higher-rank
-        ksp_i = ksp_i.reshape(ksp_i.shape[0], -1)   # (C, T*S*R)
+        ksp_i = ksp_i.reshape(ksp_i.shape[0], -1)  # (C, T*S*R)
         # Reshape into (C, T, S*R) then back to (T, C, S*R)
         n_per_frame = ksp_i.shape[1] // T
-        ksp_i = ksp_i.reshape(ksp_i.shape[0], T, n_per_frame).transpose(1, 0, 2)  # (T, C, S*R)
+        ksp_i = ksp_i.reshape(ksp_i.shape[0], T, n_per_frame).transpose(
+            1, 0, 2
+        )  # (T, C, S*R)
         phi_i = basis_kt[i].astype(np.complex64)  # (T,)
         contrib = phi_i[:, None, None] * ksp_i  # (T, C, S*R)
         kspace_out = contrib if kspace_out is None else kspace_out + contrib
@@ -879,9 +887,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
     sparse_natural_t = torch.as_tensor(sparse_natural_cpu, dtype=torch.complex64)
 
     # Subspace coefficient comparison: NUFFT vs GROG (quality check)
-    coeff_nufft = np.asarray(
-        _nufft_subspace_adjoint(nufft_sim, kspace_tcns, basis_kt)
-    )
+    coeff_nufft = np.asarray(_nufft_subspace_adjoint(nufft_sim, kspace_tcns, basis_kt))
     coeff_grog_cpu = (
         _grog_subspace_adjoint(sparse_natural_t, subspace_cpu).detach().cpu().numpy()
     )  # (K, *shape)
@@ -891,11 +897,13 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
     # do not inflate the error metric.  Saved arrays are also normalized so
     # that the figure MAPE reflects structural difference only.
     coeff_nufft_norm = coeff_nufft / (np.linalg.norm(coeff_nufft) + 1e-8)
-    coeff_grog_norm  = coeff_grog_cpu / (np.linalg.norm(coeff_grog_cpu) + 1e-8)
+    coeff_grog_norm = coeff_grog_cpu / (np.linalg.norm(coeff_grog_cpu) + 1e-8)
 
     coeff_rel = float(np.linalg.norm(coeff_nufft_norm - coeff_grog_norm))
     coeff_corr = float(
-        np.corrcoef(np.abs(coeff_nufft_norm).ravel(), np.abs(coeff_grog_norm).ravel())[0, 1]
+        np.corrcoef(np.abs(coeff_nufft_norm).ravel(), np.abs(coeff_grog_norm).ravel())[
+            0, 1
+        ]
     )
 
     np.save(output_dir / "coeff_nufft.npy", coeff_nufft_norm)
@@ -963,7 +971,9 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 smaps=torch.as_tensor(inputs.smaps).to(f"cuda:{cfg.gpu_device}"),
                 device=f"cuda:{cfg.gpu_device}",
             )
-            subspace_gpu_full = SubspaceSparseFFT(sparse_fft_gpu_full, basis_kt, encoding_axis=-4)
+            subspace_gpu_full = SubspaceSparseFFT(
+                sparse_fft_gpu_full, basis_kt, encoding_axis=-4
+            )
             _gpu_subspace = subspace_gpu_full
             _, grog_adj_gpu_full_m = profile(
                 _grog_subspace_adjoint,
@@ -991,7 +1001,9 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 smaps=torch.as_tensor(inputs.smaps),
                 device=f"cuda:{cfg.gpu_device}",
             )
-            subspace_gpu_dual = SubspaceSparseFFT(sparse_fft_gpu_dual, basis_kt, encoding_axis=-4)
+            subspace_gpu_dual = SubspaceSparseFFT(
+                sparse_fft_gpu_dual, basis_kt, encoding_axis=-4
+            )
             _, grog_adj_gpu_dual_m = profile(
                 _grog_subspace_adjoint,
                 sparse_natural_t,
@@ -1085,16 +1097,26 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 _nufft_subspace_adjoint(_gpu_nufft, kspace_tcns, basis_kt)
             )
             coeff_grog_cuda = (
-                _grog_subspace_adjoint(sparse_natural_t, _gpu_subspace).detach().cpu().numpy()
+                _grog_subspace_adjoint(sparse_natural_t, _gpu_subspace)
+                .detach()
+                .cpu()
+                .numpy()
             )
-            coeff_nufft_cuda_norm = coeff_nufft_cuda / (np.linalg.norm(coeff_nufft_cuda) + 1e-8)
-            coeff_grog_cuda_norm  = coeff_grog_cuda  / (np.linalg.norm(coeff_grog_cuda)  + 1e-8)
+            coeff_nufft_cuda_norm = coeff_nufft_cuda / (
+                np.linalg.norm(coeff_nufft_cuda) + 1e-8
+            )
+            coeff_grog_cuda_norm = coeff_grog_cuda / (
+                np.linalg.norm(coeff_grog_cuda) + 1e-8
+            )
             np.save(output_dir / "coeff_nufft_cuda.npy", coeff_nufft_cuda_norm)
             np.save(output_dir / "coeff_grog_cuda.npy", coeff_grog_cuda_norm)
-            coeff_cuda_rel = float(np.linalg.norm(coeff_nufft_cuda_norm - coeff_grog_cuda_norm))
+            coeff_cuda_rel = float(
+                np.linalg.norm(coeff_nufft_cuda_norm - coeff_grog_cuda_norm)
+            )
             coeff_cuda_corr = float(
                 np.corrcoef(
-                    np.abs(coeff_nufft_cuda_norm).ravel(), np.abs(coeff_grog_cuda_norm).ravel()
+                    np.abs(coeff_nufft_cuda_norm).ravel(),
+                    np.abs(coeff_grog_cuda_norm).ravel(),
                 )[0, 1]
             )
             results["steps"]["subspace_comparison"]["cuda"] = {
@@ -1106,7 +1128,11 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 "reason": str(exc)
             }
 
-    results["scaling"] = _build_scaling_suite(cfg, inputs, cufinufft_ok) if not cfg.skip_scaling else {"skipped": True}
+    results["scaling"] = (
+        _build_scaling_suite(cfg, inputs, cufinufft_ok)
+        if not cfg.skip_scaling
+        else {"skipped": True}
+    )
 
     return results
 
@@ -1116,12 +1142,8 @@ _BENCHMARK_DIR = Path(__file__).parent
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output-dir", type=Path, default=_BENCHMARK_DIR / "results"
-    )
-    parser.add_argument(
-        "--data-dir", type=Path, default=_BENCHMARK_DIR / "data"
-    )
+    parser.add_argument("--output-dir", type=Path, default=_BENCHMARK_DIR / "results")
+    parser.add_argument("--data-dir", type=Path, default=_BENCHMARK_DIR / "data")
     parser.add_argument(
         "--max-coeff",
         type=int,
@@ -1212,16 +1234,21 @@ def main() -> None:
         print(f"Saved benchmark results to {output_dir / 'results.json'}")
 
         # Auto-generate figures
-        import importlib.util, sys as _sys
+        import importlib.util
+
         _plot_path = _BENCHMARK_DIR / "plot_benchmarks.py"
         _spec = importlib.util.spec_from_file_location("plot_benchmarks", _plot_path)
         _plot_mod = importlib.util.module_from_spec(_spec)
         _spec.loader.exec_module(_plot_mod)
         print("Generating figures...")
-        _plot_mod.main([
-            "--results-json", str(output_dir / "results.json"),
-            "--output-dir", str(output_dir),
-        ])
+        _plot_mod.main(
+            [
+                "--results-json",
+                str(output_dir / "results.json"),
+                "--output-dir",
+                str(output_dir),
+            ]
+        )
         print("Figures saved to", output_dir)
     except Exception as exc:
         err = {

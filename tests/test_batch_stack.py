@@ -91,28 +91,33 @@ def test_sparse_fft_multi_axis_batch_matches_loop():
     indices = rng.integers(0, np.prod(grid), size=n_samples)
     weights = np.ones(n_samples, dtype=np.float32)
     smaps = (
-        rng.standard_normal((4, *img))
-        + 1j * rng.standard_normal((4, *img))
+        rng.standard_normal((4, *img)) + 1j * rng.standard_normal((4, *img))
     ).astype(np.complex64)
     op = SparseFFT(grid, img, indices, weights, smaps=torch.as_tensor(smaps))
 
     # *B = (B1, B2)
     ksp = torch.randn(2, 3, 4, n_samples, dtype=torch.complex64)
-    out = op.forward(ksp)
+    out = op.adjoint(ksp)
     assert out.shape == (2, 3, *img)
     ref = torch.stack(
-        [torch.stack([op.forward(ksp[i, j]) for j in range(3)], dim=0)
-         for i in range(2)], dim=0,
+        [
+            torch.stack([op.adjoint(ksp[i, j]) for j in range(3)], dim=0)
+            for i in range(2)
+        ],
+        dim=0,
     )
     torch.testing.assert_close(out, ref, rtol=1e-5, atol=1e-6)
 
-    # adjoint round
+    # forward round
     img_b = torch.randn(2, 3, *img, dtype=torch.complex64)
-    k_out = op.adjoint(img_b)
+    k_out = op.forward(img_b)
     assert k_out.shape == (2, 3, 4, n_samples)
     k_ref = torch.stack(
-        [torch.stack([op.adjoint(img_b[i, j]) for j in range(3)], dim=0)
-         for i in range(2)], dim=0,
+        [
+            torch.stack([op.forward(img_b[i, j]) for j in range(3)], dim=0)
+            for i in range(2)
+        ],
+        dim=0,
     )
     torch.testing.assert_close(k_out, k_ref, rtol=1e-5, atol=1e-6)
 
@@ -123,8 +128,9 @@ def test_sparse_fft_multi_axis_batch_matches_loop():
 
 
 def _make_stacked_op(n_stack=2, n_coils=2, shape=(48, 48), n_per_shot=48):
-    coords_list = [_spiral2d(seed=s, fov=shape[0], n_per_shot=n_per_shot)
-                   for s in range(n_stack)]
+    coords_list = [
+        _spiral2d(seed=s, fov=shape[0], n_per_shot=n_per_shot) for s in range(n_stack)
+    ]
     calib = _make_calib(shape=shape, n_coils=n_coils)
     interps = [_build_interp(c, shape, calib) for c in coords_list]
     rng = np.random.default_rng(7)
@@ -134,10 +140,12 @@ def _make_stacked_op(n_stack=2, n_coils=2, shape=(48, 48), n_per_shot=48):
     ).astype(np.complex64)
     plans = []
     sparse_per = []
-    for c, interp in zip(coords_list, interps):
+    for c, interp in zip(coords_list, interps, strict=False):
         ksp = torch.from_numpy(
-            (rng.standard_normal((n_coils, *c.shape[:-1]))
-             + 1j * rng.standard_normal((n_coils, *c.shape[:-1]))).astype(np.complex64)
+            (
+                rng.standard_normal((n_coils, *c.shape[:-1]))
+                + 1j * rng.standard_normal((n_coils, *c.shape[:-1]))
+            ).astype(np.complex64)
         )
         sparse = interp.interpolate(ksp)
         plans.append(interp.plan)
@@ -150,13 +158,13 @@ def _make_stacked_op(n_stack=2, n_coils=2, shape=(48, 48), n_per_shot=48):
 
 
 def test_sparse_fft_stacked_forward_matches_loop():
-    op_single, op_stk, sparse_per, plan_stk, _ = _make_stacked_op()
+    op_single, op_stk, sparse_per, _plan_stk, _ = _make_stacked_op()
     # Build stacked sparse input matching plan_stk.indices order.
     sparse_stk = torch.stack(sparse_per, dim=1)  # (C, S, *natural_per)
-    sparse_stk = sparse_stk.movedim(1, 0)        # (S, C, *natural_per)
-    out = op_stk.forward(sparse_stk)
+    sparse_stk = sparse_stk.movedim(1, 0)  # (S, C, *natural_per)
+    out = op_stk.adjoint(sparse_stk)
     ref = torch.stack(
-        [op_single[s].forward(sparse_per[s]) for s in range(len(op_single))],
+        [op_single[s].adjoint(sparse_per[s]) for s in range(len(op_single))],
         dim=0,
     )
     torch.testing.assert_close(out, ref, rtol=1e-4, atol=1e-5)
@@ -172,9 +180,16 @@ def test_nlinv_calib_batched_cartesian_matches_loop():
     B, C, N = 2, 4, 32
     y_full = rng.standard_normal((C, N, N)) + 1j * rng.standard_normal((C, N, N))
     y_batch = np.stack(
-        [y_full + 0.05 * b * (rng.standard_normal(y_full.shape)
-                              + 1j * rng.standard_normal(y_full.shape))
-         for b in range(B)],
+        [
+            y_full
+            + 0.05
+            * b
+            * (
+                rng.standard_normal(y_full.shape)
+                + 1j * rng.standard_normal(y_full.shape)
+            )
+            for b in range(B)
+        ],
         axis=0,
     ).astype(np.complex64)
 
@@ -187,9 +202,7 @@ def test_nlinv_calib_batched_cartesian_matches_loop():
     smaps_loop = torch.stack(smaps_loop, dim=0)
     train_loop = torch.stack(train_loop, dim=0)
 
-    smaps_b, train_b = nlinv_calib(
-        y_batch, ndim=2, cal_width=16, max_iter=2, cg_iter=4
-    )
+    smaps_b, train_b = nlinv_calib(y_batch, ndim=2, cal_width=16, max_iter=2, cg_iter=4)
     smaps_b = torch.as_tensor(smaps_b)
     train_b = torch.as_tensor(train_b)
     assert smaps_b.shape == (B, C, N, N)
@@ -200,8 +213,9 @@ def test_nlinv_calib_batched_cartesian_matches_loop():
 def test_nlinv_calib_train_reduce_mean():
     rng = np.random.default_rng(1)
     B, C, N = 2, 3, 24
-    y_batch = (rng.standard_normal((B, C, N, N))
-               + 1j * rng.standard_normal((B, C, N, N))).astype(np.complex64)
+    y_batch = (
+        rng.standard_normal((B, C, N, N)) + 1j * rng.standard_normal((B, C, N, N))
+    ).astype(np.complex64)
     _, train_none = nlinv_calib(
         y_batch, ndim=2, cal_width=12, max_iter=2, cg_iter=3, train_reduce="none"
     )
@@ -215,6 +229,8 @@ def test_nlinv_calib_train_reduce_mean():
 
 
 def test_nlinv_calib_invalid_train_reduce():
-    y = (np.random.randn(4, 16, 16) + 1j * np.random.randn(4, 16, 16)).astype(np.complex64)
+    y = (np.random.randn(4, 16, 16) + 1j * np.random.randn(4, 16, 16)).astype(
+        np.complex64
+    )
     with pytest.raises(ValueError, match="train_reduce"):
         nlinv_calib(y, ndim=2, cal_width=8, train_reduce="bogus")

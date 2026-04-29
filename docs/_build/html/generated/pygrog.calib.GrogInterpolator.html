@@ -168,6 +168,7 @@
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_solve.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
@@ -432,6 +433,7 @@
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.calib.GrogInterpolator._sparse_full"><code class="docutils literal notranslate"><span class="pre">GrogInterpolator._sparse_full()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.calib.GrogInterpolator._sparse_full_single"><code class="docutils literal notranslate"><span class="pre">GrogInterpolator._sparse_full_single()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.calib.GrogInterpolator._grid_shot"><code class="docutils literal notranslate"><span class="pre">GrogInterpolator._grid_shot()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.calib.GrogInterpolator._grid_kspace"><code class="docutils literal notranslate"><span class="pre">GrogInterpolator._grid_kspace()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.calib.GrogInterpolator.collect_shots"><code class="docutils literal notranslate"><span class="pre">GrogInterpolator.collect_shots()</span></code></a></li>
 </ul>
 </li>
@@ -559,7 +561,7 @@ fields.</p>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="pygrog.calib.GrogInterpolator.interpolate">
-<span class="sig-name descname"><span class="pre">interpolate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shot_index</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ret_image</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/calib/_grog.html#GrogInterpolator.interpolate"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.calib.GrogInterpolator.interpolate" title="Link to this definition">#</a></dt>
+<span class="sig-name descname"><span class="pre">interpolate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shot_index</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ret_image</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grid</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/calib/_grog.html#GrogInterpolator.interpolate"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.calib.GrogInterpolator.interpolate" title="Link to this definition">#</a></dt>
 <dd><p>Apply GROG interpolation to sparse Cartesian neighbour samples.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
@@ -568,12 +570,25 @@ fields.</p>
 <code class="docutils literal notranslate"><span class="pre">(coils,</span> <span class="pre">npts)</span></code> for shot-by-shot.</p></li>
 <li><p><strong>shot_index</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a><em> | </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><em>tuple</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a><em>] </em><em>| </em><em>None</em>) – If given, accumulate a single shot into the internal buffer.</p></li>
 <li><p><strong>ret_image</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – If <em>True</em>, return IFFT-reconstructed images.</p></li>
+<li><p><strong>grid</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – <p>If <em>True</em>, scatter the interpolated sparse samples onto a dense
+oversampled Cartesian grid and return the tuple
+<code class="docutils literal notranslate"><span class="pre">(gridded_kspace,</span> <span class="pre">mask,</span> <span class="pre">density)</span></code> where:</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">gridded_kspace</span></code> has shape <code class="docutils literal notranslate"><span class="pre">(*batch,</span> <span class="pre">*stack,</span> <span class="pre">C,</span> <span class="pre">*grid_shape)</span></code>;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">mask</span></code> has shape <code class="docutils literal notranslate"><span class="pre">(*stack,</span> <span class="pre">*grid_shape)</span></code>, real float (1 where
+at least one sample lands, 0 elsewhere);</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">density</span></code> has shape <code class="docutils literal notranslate"><span class="pre">(*stack,</span> <span class="pre">*grid_shape)</span></code>, real float (sum of
+squared GROG weights per grid cell — the Toeplitz PSF source).</p></li>
+</ul>
+<p>Mutually exclusive with <em>ret_image</em>.</p>
+</p></li>
 </ul>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
 <dd class="field-even"><p><ul class="simple">
-<li><p>Sparse Cartesian samples <code class="docutils literal notranslate"><span class="pre">(n_coils,</span> <span class="pre">n_samples)</span></code> (or image), or</p></li>
-<li><p><em>*None</em> when accumulating shots.*</p></li>
+<li><p>Sparse Cartesian samples <code class="docutils literal notranslate"><span class="pre">(n_coils,</span> <span class="pre">n_samples)</span></code> (or image when</p></li>
+<li><p>*ret_image=True*), or <code class="docutils literal notranslate"><span class="pre">(gridded_kspace,</span> <span class="pre">mask,</span> <span class="pre">density)</span></code> tuple when</p></li>
+<li><p><em>*grid=True</em>, or <em>None</em> when accumulating shots.*</p></li>
 </ul>
 </p>
 </dd>
@@ -585,7 +600,7 @@ fields.</p>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="pygrog.calib.GrogInterpolator.__call__">
-<span class="sig-name descname"><span class="pre">__call__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shot_index</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ret_image</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/calib/_grog.html#GrogInterpolator.__call__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.calib.GrogInterpolator.__call__" title="Link to this definition">#</a></dt>
+<span class="sig-name descname"><span class="pre">__call__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shot_index</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ret_image</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grid</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/calib/_grog.html#GrogInterpolator.__call__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.calib.GrogInterpolator.__call__" title="Link to this definition">#</a></dt>
 <dd><p>Call self as a function.</p>
 </dd></dl>
 
@@ -636,6 +651,30 @@ optional.</p>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
 <dd class="field-even"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="pygrog.calib.GrogInterpolator._grid_kspace">
+<span class="sig-name descname"><span class="pre">_grid_kspace</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sparse_flat</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">plan</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/calib/_grog.html#GrogInterpolator._grid_kspace"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.calib.GrogInterpolator._grid_kspace" title="Link to this definition">#</a></dt>
+<dd><p>Scatter density-compensated sparse samples onto the oversampled grid.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>sparse_flat</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – <code class="docutils literal notranslate"><span class="pre">(*batch,</span> <span class="pre">*stack,</span> <span class="pre">C,</span> <span class="pre">n_samples)</span></code> as returned by the
+main interpolation code path.</p></li>
+<li><p><strong>plan</strong> (<em>GrogPlan</em>) – Attached FFT plan with <code class="docutils literal notranslate"><span class="pre">indices</span></code>, <code class="docutils literal notranslate"><span class="pre">sqrt_weights</span></code>,
+<code class="docutils literal notranslate"><span class="pre">inv_perm</span></code>, <code class="docutils literal notranslate"><span class="pre">grid_shape</span></code>, <code class="docutils literal notranslate"><span class="pre">grid_size</span></code>, <code class="docutils literal notranslate"><span class="pre">stack_shape</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><strong>grid_kspace</strong> (<em>torch.Tensor</em>) – <code class="docutils literal notranslate"><span class="pre">(*batch,</span> <span class="pre">*stack,</span> <span class="pre">C,</span> <span class="pre">*grid_shape)</span></code></p></li>
+<li><p><strong>mask</strong> (<em>torch.Tensor</em>) – <code class="docutils literal notranslate"><span class="pre">(*stack,</span> <span class="pre">*grid_shape)</span></code> real float32 — 1 where ≥1 sample lands.</p></li>
+<li><p><strong>density</strong> (<em>torch.Tensor</em>) – <code class="docutils literal notranslate"><span class="pre">(*stack,</span> <span class="pre">*grid_shape)</span></code> real float32 — sum of squared weights.</p></li>
+</ul>
+</p>
 </dd>
 </dl>
 </dd></dl>
@@ -712,6 +751,7 @@ optional.</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.calib.GrogInterpolator._sparse_full"><code class="docutils literal notranslate"><span class="pre">GrogInterpolator._sparse_full()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.calib.GrogInterpolator._sparse_full_single"><code class="docutils literal notranslate"><span class="pre">GrogInterpolator._sparse_full_single()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.calib.GrogInterpolator._grid_shot"><code class="docutils literal notranslate"><span class="pre">GrogInterpolator._grid_shot()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.calib.GrogInterpolator._grid_kspace"><code class="docutils literal notranslate"><span class="pre">GrogInterpolator._grid_kspace()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.calib.GrogInterpolator.collect_shots"><code class="docutils literal notranslate"><span class="pre">GrogInterpolator.collect_shots()</span></code></a></li>
 </ul>
 </li>

@@ -114,7 +114,7 @@ def test_primitives_complex_scatter():
 def test_sparse_fft_forward_no_smaps(device):
     op = _make_op((32, 32), (24, 24), 256)
     ksp = torch.randn(4, 256, dtype=torch.complex64, device=device)
-    img = op.forward(ksp)
+    img = op.adjoint(ksp)
     assert img.shape == (4, 24, 24)
     assert img.device.type == device.type
 
@@ -123,7 +123,7 @@ def test_sparse_fft_forward_with_smaps(device):
     smaps = torch.randn(4, 24, 24, dtype=torch.complex64)
     op = _make_op((32, 32), (24, 24), 256, smaps=smaps)
     ksp = torch.randn(4, 256, dtype=torch.complex64, device=device)
-    img = op.forward(ksp)
+    img = op.adjoint(ksp)
     assert img.shape == (24, 24)
     assert img.device.type == device.type
 
@@ -131,7 +131,7 @@ def test_sparse_fft_forward_with_smaps(device):
 def test_sparse_fft_adjoint_no_smaps(device):
     op = _make_op((32, 32), (24, 24), 256)
     img = torch.randn(4, 24, 24, dtype=torch.complex64, device=device)
-    ksp = op.adjoint(img)
+    ksp = op.forward(img)
     assert ksp.shape == (4, 256)
     assert ksp.device.type == device.type
 
@@ -140,7 +140,7 @@ def test_sparse_fft_adjoint_with_smaps(device):
     smaps = torch.randn(4, 24, 24, dtype=torch.complex64)
     op = _make_op((32, 32), (24, 24), 256, smaps=smaps)
     img = torch.randn(24, 24, dtype=torch.complex64, device=device)
-    ksp = op.adjoint(img)
+    ksp = op.forward(img)
     assert ksp.shape == (4, 256)
     assert ksp.device.type == device.type
 
@@ -150,14 +150,14 @@ def test_sparse_fft_call_adjoint_flag(device):
     op = _make_op((32, 32), (24, 24), 256)
     ksp = torch.randn(4, 256, dtype=torch.complex64, device=device)
     img = torch.randn(4, 24, 24, dtype=torch.complex64, device=device)
-    torch.testing.assert_close(op(ksp), op.forward(ksp))
-    torch.testing.assert_close(op(img, adjoint=True), op.adjoint(img))
+    torch.testing.assert_close(op(img), op.forward(img))
+    torch.testing.assert_close(op(ksp, adjoint=True), op.adjoint(ksp))
 
 
 def test_sparse_fft_3d_shape(device):
     op = _make_op((16, 16, 16), (12, 12, 12), 128)
     ksp = torch.randn(2, 128, dtype=torch.complex64, device=device)
-    img = op.forward(ksp)
+    img = op.adjoint(ksp)
     assert img.shape == (2, 12, 12, 12)
 
 
@@ -171,7 +171,7 @@ def test_adjointness_no_smaps(device):
     x = torch.randn(4, 256, dtype=torch.complex64, device=device)
     y = torch.randn(4, 24, 24, dtype=torch.complex64, device=device)
     torch.testing.assert_close(
-        _cdot(op.forward(x), y), _cdot(x, op.adjoint(y)), rtol=1e-4, atol=1e-5
+        _cdot(op.adjoint(x), y), _cdot(x, op.forward(y)), rtol=1e-4, atol=1e-5
     )
 
 
@@ -182,7 +182,7 @@ def test_adjointness_with_smaps(device):
     x = torch.randn(4, 256, dtype=torch.complex64, device=device)
     y = torch.randn(24, 24, dtype=torch.complex64, device=device)
     torch.testing.assert_close(
-        _cdot(op.forward(x), y), _cdot(x, op.adjoint(y)), rtol=1e-4, atol=1e-5
+        _cdot(op.adjoint(x), y), _cdot(x, op.forward(y)), rtol=1e-4, atol=1e-5
     )
 
 
@@ -191,7 +191,7 @@ def test_adjointness_3d(device):
     x = torch.randn(2, 128, dtype=torch.complex64, device=device)
     y = torch.randn(2, 12, 12, 12, dtype=torch.complex64, device=device)
     torch.testing.assert_close(
-        _cdot(op.forward(x), y), _cdot(x, op.adjoint(y)), rtol=1e-4, atol=1e-5
+        _cdot(op.adjoint(x), y), _cdot(x, op.forward(y)), rtol=1e-4, atol=1e-5
     )
 
 
@@ -205,7 +205,7 @@ def test_adjointness_weighted(device):
     x = torch.randn(3, 200, dtype=torch.complex64, device=device)
     y = torch.randn(3, 24, 24, dtype=torch.complex64, device=device)
     torch.testing.assert_close(
-        _cdot(op.forward(x), y), _cdot(x, op.adjoint(y)), rtol=1e-4, atol=1e-5
+        _cdot(op.adjoint(x), y), _cdot(x, op.forward(y)), rtol=1e-4, atol=1e-5
     )
 
 
@@ -231,7 +231,9 @@ def test_batch_helpers_scatter_ifft_crop_vs_loop(device):
     for b in range(B_batch):
         grid = torch.zeros(op.grid_size, dtype=ksp.dtype, device=dev)
         scatter_add(grid, ksp[b][sp], idx, sw)
-        full_img = ifft(grid.reshape(op.grid_shape), axes=op.fft_axes)  # IFFT at grid size
+        full_img = ifft(
+            grid.reshape(op.grid_shape), axes=op.fft_axes
+        )  # IFFT at grid size
         img = full_img[op._pad_slices]  # center-crop image (not k-space)
         loop_imgs.append(img)
     loop_out = torch.stack(loop_imgs)
@@ -256,7 +258,9 @@ def test_batch_helpers_fft_pad_gather_vs_loop(device):
     for b in range(B_batch):
         padded = torch.zeros(*op.grid_shape, dtype=imgs.dtype, device=dev)
         padded[op._pad_slices] = imgs[b]  # zero-pad image in image space
-        ksp_b = gather(fft(padded, axes=op.fft_axes).reshape(-1), idx, sw)[inv]  # FFT at grid size
+        ksp_b = gather(fft(padded, axes=op.fft_axes).reshape(-1), idx, sw)[
+            inv
+        ]  # FFT at grid size
         loop_ksps.append(ksp_b)
     loop_out = torch.stack(loop_ksps)
 

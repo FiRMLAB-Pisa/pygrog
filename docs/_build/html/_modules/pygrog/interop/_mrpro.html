@@ -167,6 +167,7 @@
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_solve.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
@@ -391,7 +392,7 @@
 <span class="sd">  - ``adjoint(image)  -&gt; (kspace,)`` — measurement   (A)</span>
 <span class="sd">&quot;&quot;&quot;</span>
 
-<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;GrogLinearOp&quot;</span><span class="p">,</span> <span class="s2">&quot;GrogInterpolator&quot;</span><span class="p">,</span> <span class="s2">&quot;nlinv_calib&quot;</span><span class="p">,</span> <span class="s2">&quot;coil_compress&quot;</span><span class="p">]</span>
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;GrogInterpolator&quot;</span><span class="p">,</span> <span class="s2">&quot;GrogLinearOp&quot;</span><span class="p">,</span> <span class="s2">&quot;coil_compress&quot;</span><span class="p">,</span> <span class="s2">&quot;nlinv_calib&quot;</span><span class="p">]</span>
 
 <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
@@ -433,6 +434,7 @@
 
     <span class="c1"># Broadcast traj components to the data&#39;s spatial shape (k2, k1, k0).</span>
     <span class="n">spatial</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">kdata</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">3</span><span class="p">:])</span>
+
     <span class="c1"># Each component may have leading &quot;other&quot;/singleton dims; collapse to spatial.</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">_to_spatial</span><span class="p">(</span><span class="n">t</span><span class="p">):</span>
         <span class="c1"># Broadcast against an all-ones tensor of shape (*spatial,) so any</span>
@@ -491,9 +493,9 @@
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">if</span> <span class="n">ndim</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
         <span class="c1"># k2 (axis -3) must be 1.</span>
-        <span class="k">assert</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">3</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="p">(</span>
-            <span class="sa">f</span><span class="s2">&quot;2D interpolation expects k2 == 1; got </span><span class="si">{</span><span class="nb">tuple</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
-        <span class="p">)</span>
+        <span class="k">assert</span> <span class="p">(</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">3</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span>
+        <span class="p">),</span> <span class="sa">f</span><span class="s2">&quot;2D interpolation expects k2 == 1; got </span><span class="si">{</span><span class="nb">tuple</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
         <span class="n">new_shape</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">3</span><span class="p">]</span> <span class="o">+</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">:]</span>
         <span class="k">return</span> <span class="n">data</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">new_shape</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">data</span>
@@ -502,7 +504,7 @@
 <span class="k">def</span><span class="w"> </span><span class="nf">_spatial_to_kdata</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="n">ndim</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Inverse of :func:`_data_to_spatial`: re-insert the singleton k2 axis.&quot;&quot;&quot;</span>
     <span class="k">if</span> <span class="n">ndim</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
-        <span class="n">new_shape</span> <span class="o">=</span> <span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">+</span> <span class="p">(</span><span class="mi">1</span><span class="p">,)</span> <span class="o">+</span> <span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">:]</span>
+        <span class="n">new_shape</span> <span class="o">=</span> <span class="p">(</span><span class="o">*</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">2</span><span class="p">],</span> <span class="mi">1</span><span class="p">,</span> <span class="o">*</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">:])</span>
         <span class="k">return</span> <span class="n">arr</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">new_shape</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">arr</span>
 
@@ -627,7 +629,7 @@
                 <span class="k">return</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_to_mrpro</span><span class="p">(</span><span class="n">ksp</span><span class="p">),)</span>
 
             <span class="nd">@property</span>
-            <span class="k">def</span><span class="w"> </span><span class="nf">H</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>  <span class="c1"># noqa: N802</span>
+            <span class="k">def</span><span class="w"> </span><span class="nf">H</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">                </span><span class="sd">&quot;&quot;&quot;Adjoint LinearOperator with Toeplitz-aware ``.gram``.</span>
 
 <span class="sd">                In mrpro convention, ``self.forward`` is the</span>
@@ -695,7 +697,7 @@
             <span class="k">return</span> <span class="bp">self</span>  <span class="c1"># already a normal operator</span>
 
         <span class="nd">@property</span>
-        <span class="k">def</span><span class="w"> </span><span class="nf">H</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>  <span class="c1"># noqa: N802</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">H</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
             <span class="k">return</span> <span class="bp">self</span>  <span class="c1"># self-adjoint</span>
 
     <span class="k">return</span> <span class="n">_GrogImageNormalOp</span><span class="p">()</span>
@@ -792,7 +794,7 @@
         <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">calc_interp_table</span><span class="p">(</span><span class="n">calib_arr</span><span class="p">,</span> <span class="n">lamda</span><span class="o">=</span><span class="n">lamda</span><span class="p">,</span> <span class="n">precision</span><span class="o">=</span><span class="n">precision</span><span class="p">)</span>
 
     <span class="c1"># ------------------------------------------------------------------</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">interpolate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">kdata</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">return_plan</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">interpolate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">kdata</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">return_plan</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">grid</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;GROG-interpolate ``kdata`` onto the sparse Cartesian grid.</span>
 
 <span class="sd">        Parameters</span>
@@ -801,19 +803,31 @@
 <span class="sd">            K-space data sharing the trajectory/encoding used at</span>
 <span class="sd">            construction.</span>
 <span class="sd">        return_plan : bool, optional</span>
-<span class="sd">            If ``True`` (default) return ``(KData, GrogPlan)``; if</span>
-<span class="sd">            ``False`` return the ``KData`` only.</span>
+<span class="sd">            If ``True`` (default) return the plan alongside the output.</span>
+<span class="sd">        grid : bool, optional</span>
+<span class="sd">            If ``True``, scatter the interpolated samples onto a dense</span>
+<span class="sd">            oversampled Cartesian grid and return</span>
+<span class="sd">            ``(KData, mask, density[, plan])``.  The returned ``KData``</span>
+<span class="sd">            carries a regular Cartesian ``KTrajectory`` and has shape</span>
+<span class="sd">            ``(*other, n_coils, k2, k1, k0)`` matching ``grid_shape``</span>
+<span class="sd">            (``k2=1`` for 2D plans).  ``mask`` and ``density`` have shape</span>
+<span class="sd">            ``(*stack, *grid_shape)`` and can be passed directly to</span>
+<span class="sd">            :class:`~pygrog.operator.MaskedFFT`.</span>
 
 <span class="sd">        Returns</span>
 <span class="sd">        -------</span>
 <span class="sd">        KData (or (KData, GrogPlan))</span>
-<span class="sd">            ``data`` shape ``(*other, n_coils, k2&#39;, k1&#39;, k0&#39;)`` with the</span>
-<span class="sd">            GROG kernel width fused into ``k0&#39;``; ``traj`` updated to the</span>
-<span class="sd">            gridded sample positions; ``header`` carried over.</span>
+<span class="sd">            When ``grid=False`` (default): ``data`` shape</span>
+<span class="sd">            ``(*other, n_coils, k2&#39;, k1&#39;, k0&#39;)`` with the GROG kernel width</span>
+<span class="sd">            fused into ``k0&#39;``; ``traj`` updated to the gridded sample</span>
+<span class="sd">            positions; ``header`` carried over.</span>
+<span class="sd">        (KData, mask, density[, plan])</span>
+<span class="sd">            When ``grid=True``: dense Cartesian KData with Cartesian</span>
+<span class="sd">            trajectory, plus real-valued ``mask`` and ``density`` tensors.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
-        <span class="kn">from</span><span class="w"> </span><span class="nn">mrpro.data</span><span class="w"> </span><span class="kn">import</span> <span class="n">KData</span><span class="p">,</span> <span class="n">KTrajectory</span><span class="p">,</span> <span class="n">SpatialDimension</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">mrpro.data</span><span class="w"> </span><span class="kn">import</span> <span class="n">KData</span><span class="p">,</span> <span class="n">KTrajectory</span>
 
-        <span class="n">coords_np</span><span class="p">,</span> <span class="n">data_t</span><span class="p">,</span> <span class="n">enc_shape</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">_kdata_extract</span><span class="p">(</span><span class="n">kdata</span><span class="p">)</span>
+        <span class="n">_coords_np</span><span class="p">,</span> <span class="n">data_t</span><span class="p">,</span> <span class="n">enc_shape</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">_kdata_extract</span><span class="p">(</span><span class="n">kdata</span><span class="p">)</span>
         <span class="k">if</span> <span class="n">enc_shape</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enc_shape</span><span class="p">:</span>
             <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
                 <span class="sa">f</span><span class="s2">&quot;KData encoding_matrix </span><span class="si">{</span><span class="n">enc_shape</span><span class="si">}</span><span class="s2"> does not match &quot;</span>
@@ -822,13 +836,50 @@
 
         <span class="c1"># Drop singleton k2 for 2D plans before calling the base interpolate.</span>
         <span class="n">data_for_interp</span> <span class="o">=</span> <span class="n">_data_to_spatial</span><span class="p">(</span><span class="n">data_t</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ndim</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">grid</span><span class="p">:</span>
+            <span class="n">out</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">interpolate</span><span class="p">(</span><span class="n">data_for_interp</span><span class="p">,</span> <span class="n">grid</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">grid_kspace</span><span class="p">,</span> <span class="n">mask</span><span class="p">,</span> <span class="n">density</span> <span class="o">=</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">t</span><span class="p">)</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">out</span><span class="p">)</span>
+            <span class="c1"># grid_kspace: (*batch, *stack, C, *grid_shape)</span>
+            <span class="c1"># Re-insert singleton k2 for 2D → (*batch, *stack, C, 1, gy, gx)</span>
+            <span class="n">grid_data</span> <span class="o">=</span> <span class="n">_spatial_to_kdata</span><span class="p">(</span><span class="n">grid_kspace</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ndim</span><span class="p">)</span>
+
+            <span class="c1"># Build a regular Cartesian KTrajectory covering the oversampled grid.</span>
+            <span class="n">plan</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">plan</span>
+            <span class="n">grid_shape</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">plan</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">)</span>
+            <span class="n">traj_1d</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">gs</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">grid_shape</span><span class="p">):</span>
+                <span class="n">origin</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="o">-</span><span class="p">(</span><span class="n">enc_shape</span><span class="p">[</span><span class="n">d</span><span class="p">]</span> <span class="o">//</span> <span class="mi">2</span><span class="p">))</span>
+                <span class="n">step</span> <span class="o">=</span> <span class="p">(</span><span class="n">enc_shape</span><span class="p">[</span><span class="n">d</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">gs</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="k">if</span> <span class="n">gs</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="mf">1.0</span>
+                <span class="n">traj_1d</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">origin</span> <span class="o">+</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">gs</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span> <span class="o">*</span> <span class="n">step</span><span class="p">)</span>
+            <span class="c1"># meshgrid → each tensor has shape (*grid_shape)</span>
+            <span class="n">grids</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="o">*</span><span class="n">traj_1d</span><span class="p">,</span> <span class="n">indexing</span><span class="o">=</span><span class="s2">&quot;ij&quot;</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ndim</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+                <span class="c1"># 2D: grids[0]=ky, grids[1]=kx, each (gy, gx)</span>
+                <span class="c1"># mrpro KTrajectory layout: (*other, coil_singleton=1, k2, k1, k0)</span>
+                <span class="n">kz_new</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="o">*</span><span class="n">grid_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+                <span class="n">ky_new</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="n">grids</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                <span class="p">)</span>  <span class="c1"># (1,1,1,gy,gx)</span>
+                <span class="n">kx_new</span> <span class="o">=</span> <span class="n">grids</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># 3D: grids[0]=kz, grids[1]=ky, grids[2]=kx, each (gz,gy,gx)</span>
+                <span class="n">kz_new</span> <span class="o">=</span> <span class="n">grids</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>  <span class="c1"># (1,1,gz,gy,gx)</span>
+                <span class="n">ky_new</span> <span class="o">=</span> <span class="n">grids</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                <span class="n">kx_new</span> <span class="o">=</span> <span class="n">grids</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+            <span class="n">new_traj</span> <span class="o">=</span> <span class="n">KTrajectory</span><span class="p">(</span><span class="n">kz</span><span class="o">=</span><span class="n">kz_new</span><span class="p">,</span> <span class="n">ky</span><span class="o">=</span><span class="n">ky_new</span><span class="p">,</span> <span class="n">kx</span><span class="o">=</span><span class="n">kx_new</span><span class="p">)</span>
+            <span class="n">new_kdata</span> <span class="o">=</span> <span class="n">KData</span><span class="p">(</span><span class="n">header</span><span class="o">=</span><span class="n">kdata</span><span class="o">.</span><span class="n">header</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">grid_data</span><span class="p">,</span> <span class="n">traj</span><span class="o">=</span><span class="n">new_traj</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">return_plan</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">new_kdata</span><span class="p">,</span> <span class="n">mask</span><span class="p">,</span> <span class="n">density</span><span class="p">,</span> <span class="n">plan</span>
+            <span class="k">return</span> <span class="n">new_kdata</span><span class="p">,</span> <span class="n">mask</span><span class="p">,</span> <span class="n">density</span>
         <span class="n">sparse</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">interpolate</span><span class="p">(</span><span class="n">data_for_interp</span><span class="p">)</span>
         <span class="c1"># Reshape from flat (*other, coils, n_samples) → (*other, coils, *spatial, kw)</span>
         <span class="n">sparse</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">sparse</span><span class="p">)</span>
         <span class="n">sparse</span> <span class="o">=</span> <span class="n">sparse</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">sparse</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">plan</span><span class="o">.</span><span class="n">natural_shape</span><span class="p">)</span>
 
         <span class="c1"># Fuse kw into the last spatial axis to match mrpro layout.</span>
-        <span class="o">*</span><span class="n">lead</span><span class="p">,</span> <span class="n">n_coils</span> <span class="o">=</span> <span class="n">sparse</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span> <span class="o">-</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_ndim</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)]</span> <span class="o">+</span> <span class="p">(</span><span class="n">sparse</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_ndim</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)],)</span>
+        <span class="o">*</span><span class="n">_lead</span><span class="p">,</span> <span class="n">n_coils</span> <span class="o">=</span> <span class="p">(</span><span class="o">*</span><span class="n">sparse</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_ndim</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)],</span> <span class="n">sparse</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_ndim</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)])</span>
         <span class="n">spatial_kw</span> <span class="o">=</span> <span class="n">sparse</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_ndim</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span> <span class="p">:]</span>  <span class="c1"># (*spatial, kw)</span>
         <span class="n">spatial</span> <span class="o">=</span> <span class="n">spatial_kw</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
         <span class="n">kw</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">spatial_kw</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
@@ -857,12 +908,16 @@
         <span class="n">phys</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">gs</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">grid_shape</span><span class="p">):</span>
             <span class="n">origin</span> <span class="o">=</span> <span class="o">-</span><span class="p">(</span><span class="n">enc_shape</span><span class="p">[</span><span class="n">d</span><span class="p">]</span> <span class="o">//</span> <span class="mi">2</span><span class="p">)</span>
-            <span class="n">step</span> <span class="o">=</span> <span class="p">(</span>
-                <span class="p">(</span><span class="n">enc_shape</span><span class="p">[</span><span class="n">d</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">gs</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="k">if</span> <span class="n">gs</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="mf">1.0</span>
-            <span class="p">)</span>
+            <span class="n">step</span> <span class="o">=</span> <span class="p">(</span><span class="n">enc_shape</span><span class="p">[</span><span class="n">d</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">gs</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="k">if</span> <span class="n">gs</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="mf">1.0</span>
             <span class="n">phys</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">origin</span> <span class="o">+</span> <span class="n">coords_grid</span><span class="p">[</span><span class="n">d</span><span class="p">]</span><span class="o">.</span><span class="n">float</span><span class="p">()</span> <span class="o">*</span> <span class="n">step</span><span class="p">)</span>
         <span class="c1"># phys is list of tensors shape (*spatial, kw); stack &amp; flatten kw into last axis.</span>
-        <span class="n">phys_stack</span> <span class="o">=</span> <span class="p">[</span><span class="n">_spatial_to_kdata</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="o">*</span><span class="n">p</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">2</span><span class="p">],</span> <span class="n">p</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">*</span> <span class="n">p</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])),</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ndim</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">phys</span><span class="p">]</span>
+        <span class="n">phys_stack</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">_spatial_to_kdata</span><span class="p">(</span>
+                <span class="n">p</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="o">*</span><span class="n">p</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">2</span><span class="p">],</span> <span class="n">p</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">*</span> <span class="n">p</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])),</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ndim</span>
+            <span class="p">)</span>
+            <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">phys</span>
+        <span class="p">]</span>
+
         <span class="c1"># Each phys_stack[d] now has shape matching mrpro layout (k2&#39;, k1&#39;, k0&#39;).</span>
         <span class="c1"># Reshape into KTrajectory&#39;s expected (*other=1, coil=1, k2&#39;, k1&#39;, k0&#39;).</span>
         <span class="k">def</span><span class="w"> </span><span class="nf">_to_traj</span><span class="p">(</span><span class="n">t</span><span class="p">):</span>

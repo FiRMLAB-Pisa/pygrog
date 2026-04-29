@@ -71,6 +71,23 @@ reconstruction using GROG-accelerated sparse FFT operators.
 
 .. raw:: html
 
+    <div class="sphx-glr-thumbcontainer" tooltip="This example demonstrates the solve method exposed on every PyGROG operator (``SparseFFT``, MaskedFFT and their pygrog.gadgets decorators), and the pygrog.PolynomialPreconditioner accelerator.">
+
+.. only:: html
+
+  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example_solve_thumb.png
+    :alt:
+
+  :doc:`/generated/autoexamples/example_solve`
+
+.. raw:: html
+
+      <div class="sphx-glr-thumbnail-title">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</div>
+    </div>
+
+
+.. raw:: html
+
     <div class="sphx-glr-thumbcontainer" tooltip="Iterative reconstructions (CG, FISTA) repeatedly evaluate the normal operator A^H A.  PyGROG ships a Toeplitz-embedded short-circuit: op.normal(image) builds a small PSF once and replaces every forward+adjoint NUFFT pair by a pad → FFT → multiply → IFFT → crop sequence.">
 
 .. only:: html
@@ -116,6 +133,7 @@ reconstruction using GROG-accelerated sparse FFT operators.
    /generated/autoexamples/example_basic_usage
    /generated/autoexamples/example_gadgets
    /generated/autoexamples/example_interop
+   /generated/autoexamples/example_solve
    /generated/autoexamples/example_toeplitz
    /generated/autoexamples/example_utils
 

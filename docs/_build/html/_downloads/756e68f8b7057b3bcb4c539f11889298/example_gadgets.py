@@ -51,9 +51,7 @@ image = m0 / (m0.max() + 1e-8)
 shape = image.shape
 n_coils = 16
 
-samples = initialize_2D_spiral(Nc=48, Ns=600, nb_revolutions=10).astype(
-    np.float32
-)
+samples = initialize_2D_spiral(Nc=48, Ns=600, nb_revolutions=10).astype(np.float32)
 density = voronoi(samples)
 
 display_2D_trajectory(samples)
@@ -87,12 +85,12 @@ calib_cart = calib_cart_full[
     cx - calib_size // 2 : cx + calib_size // 2,
 ]
 
-grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=2, oversamp=1.25, image_shape=shape)
+grog = GrogInterpolator(
+    shape=shape, coords=coords, kernel_width=2, oversamp=1.25, image_shape=shape
+)
 grog.calc_interp_table(calib_cart, lamda=0.01, precision=1)
 
-base_op = SparseFFT(
-    plan=grog.plan, smaps=torch.as_tensor(smaps)
-)
+base_op = SparseFFT(plan=grog.plan, smaps=smaps)
 
 # %%
 # Gadget 1: SubspaceProjection / SubspaceSparseFFT
@@ -158,32 +156,33 @@ coeff_ref_nufft = np.stack(
 # natural_shape = (T, 1, n_shots, n_read, kw), encoding_axis=-5 -> T at nat-axis 0.
 n_shots, n_read = samples.shape[:2]
 coords_sub = np.broadcast_to(
-    coords[np.newaxis, np.newaxis],         # (1, 1, n_shots, n_read, 2)
-    (etl, 1, n_shots, n_read, 2),           # (T, 1, n_shots, n_read, 2)
+    coords[np.newaxis, np.newaxis],  # (1, 1, n_shots, n_read, 2)
+    (etl, 1, n_shots, n_read, 2),  # (T, 1, n_shots, n_read, 2)
 ).copy()
-grog_sub = GrogInterpolator(shape=shape, coords=coords_sub, kernel_width=2, oversamp=1.25, image_shape=shape)
+grog_sub = GrogInterpolator(
+    shape=shape, coords=coords_sub, kernel_width=2, oversamp=1.25, image_shape=shape
+)
 grog_sub.calc_interp_table(calib_cart, lamda=0.01, precision=1)
-base_op_sub = SparseFFT(plan=grog_sub.plan, smaps=torch.as_tensor(smaps))
+base_op_sub = SparseFFT(plan=grog_sub.plan, smaps=smaps)
 
 # kspace_frames: (T, C, n_shots*n_read) -> (T, C, 1, n_shots, n_read) -> (1, C, T, 1, n_shots, n_read)
 kspace_sub = (
-    kspace_frames
-    .reshape(etl, n_coils, 1, n_shots, n_read)  # (T, C, 1, n_shots, n_read)
-    .transpose(1, 0, 2, 3, 4)[np.newaxis]        # (1, C, T, 1, n_shots, n_read)
+    kspace_frames.reshape(
+        etl, n_coils, 1, n_shots, n_read
+    )  # (T, C, 1, n_shots, n_read)
+    .transpose(1, 0, 2, 3, 4)[np.newaxis]  # (1, C, T, 1, n_shots, n_read)
     .astype(np.complex64)
 )
-sparse_sub = grog_sub.interpolate(
-    torch.as_tensor(kspace_sub)
-)  # (1, C, T*1*n_shots*n_read*kw) flat
-# SubspaceSparseFFT expects natural shape preserved: (B, C, *natural_shape)
-sparse_sub = sparse_sub.reshape(
-    1, n_coils, *grog_sub.plan.natural_shape,
-)  # (1, C, T, 1, n_shots, n_read, kw)
+sparse_sub = torch.as_tensor(grog_sub.interpolate(kspace_sub)).reshape(
+    1, n_coils, *grog_sub.plan.natural_shape
+)
 
 proj = SubspaceProjection(n_components=rank)
 proj.fit(torch.as_tensor(train, dtype=torch.float32))
-sub_op = SubspaceSparseFFT(base_op_sub, proj.basis.to(torch.complex64), encoding_axis=-5)
-coeff_pygrog = sub_op.forward(sparse_sub).detach().cpu().numpy()
+sub_op = SubspaceSparseFFT(
+    base_op_sub, proj.basis.to(torch.complex64), encoding_axis=-5
+)
+coeff_pygrog = np.asarray(sub_op.adjoint(sparse_sub))
 # Drop leading B=1 batch axis -> (rank, H, W)
 coeff_pygrog = coeff_pygrog[0]
 
@@ -226,6 +225,8 @@ plt.show()
 from brainweb_dl import get_mri
 
 image_orc = np.flip(get_mri(0, "T1"), axis=(0, 1, 2))[90].astype(np.float32)
+
+
 # Center-crop / pad to match the GROG plan's image shape.
 def _center_crop_pad(arr, target):
     out = np.zeros(target, dtype=arr.dtype)
@@ -233,7 +234,7 @@ def _center_crop_pad(arr, target):
     # crop / pad each axis
     src = []
     dst = []
-    for si, ti in zip(s_in, target):
+    for si, ti in zip(s_in, target, strict=False):
         if si >= ti:
             off = (si - ti) // 2
             src.append(slice(off, off + ti))
@@ -245,15 +246,14 @@ def _center_crop_pad(arr, target):
     out[tuple(dst)] = arr[tuple(src)]
     return out
 
+
 image_orc = _center_crop_pad(image_orc, shape)
 image_orc = image_orc / (image_orc.max() + 1e-8)
 brain_mask = image_orc > 0.1 * image_orc.max()
 b0_map, _ = make_b0map(shape, b0range=(-200, 200), mask=brain_mask)
 
 # Per-readout timing — identical for every spiral arm (same as mri-nufft example).
-t_read = (
-    np.arange(samples.shape[1], dtype=np.float32) * Acquisition.default.raster_time
-)
+t_read = np.arange(samples.shape[1], dtype=np.float32) * Acquisition.default.raster_time
 readout_time = np.repeat(t_read[None, :], samples.shape[0], axis=0)  # (n_shots, n_read)
 
 orc_nufft = MRIFourierCorrected(
@@ -273,7 +273,7 @@ image_ref_orc = np.squeeze(np.abs(orc_nufft.adj_op(kspace_off)))
 n_shots, n_read = samples.shape[:2]
 
 base_op_orc = SparseFFT(plan=grog.plan)  # no smaps
-sqrt_w_orc = grog.plan.pre_weights        # (n_shots, n_read, kw)
+sqrt_w_orc = grog.plan.pre_weights  # (n_shots, n_read, kw)
 
 orc_pygrog = OffResonanceCorrection(
     base_op_orc,
@@ -286,22 +286,17 @@ orc_pygrog = OffResonanceCorrection(
 
 # GROG-interpolate the off-resonance k-space and pre-weight.
 sparse_off = torch.as_tensor(
-    np.asarray(
-        grog.interpolate(
-            kspace_off.astype(np.complex64).reshape(n_coils, *samples.shape[:2]),
-            ret_image=False,
-        )
-    ),
-    dtype=torch.complex64,
-)
-# Pre-multiply by sqrt density weights (natural shape kept; zero-weight sentinel
-# entries are killed by sqrt_w = 0 inside SparseFFT).
-sparse_off = sparse_off * sqrt_w_orc.to(sparse_off.dtype).unsqueeze(0)
+    grog.interpolate(
+        kspace_off.astype(np.complex64).reshape(n_coils, n_shots, n_read),
+        ret_image=False,
+    )
+) * sqrt_w_orc.unsqueeze(0)
 
 # Adjoint returns (n_coils, *image_shape) — combine with smaps
-smaps_t = torch.as_tensor(smaps)
 result_orc = orc_pygrog.adjoint(sparse_off)  # (n_coils, *image_shape)
-image_pygrog_orc = np.abs((result_orc * smaps_t.conj()).sum(0).detach().cpu().numpy())
+image_pygrog_orc = np.abs(
+    (result_orc * torch.as_tensor(smaps).conj()).sum(0).cpu().numpy()
+)
 
 image_no_orc /= image_no_orc.max() + 1e-12
 image_ref_orc /= image_ref_orc.max() + 1e-12

@@ -15,15 +15,13 @@ This example follows a realistic non-Cartesian pipeline:
 import matplotlib.pyplot as plt
 import numpy as np
 
-import torch
-
 from brainweb_dl import get_mri
 
 from mrinufft import display_2D_trajectory, get_operator, initialize_2D_spiral
 from mrinufft.density import voronoi
 
 from pygrog.calib import GrogInterpolator
-from pygrog.operator import MaskedFFT, MaskedFFTPlan, SparseFFT
+from pygrog.operator import MaskedFFT, SparseFFT
 
 
 def _synthetic_smaps(shape, n_coils=4):
@@ -54,9 +52,7 @@ image /= image.max() + 1e-8
 shape = image.shape
 n_coils = 16  # coils for simulation
 
-samples = initialize_2D_spiral(Nc=48, Ns=600, nb_revolutions=10).astype(
-    np.float32
-)
+samples = initialize_2D_spiral(Nc=48, Ns=600, nb_revolutions=10).astype(np.float32)
 density = voronoi(samples)
 
 plt.figure()
@@ -132,7 +128,9 @@ calib_cart = calib_cart_full[
 # mri-nufft coordinates are in [-0.5, 0.5): scale to PyGROG grid units.
 coords = (samples * np.asarray(shape, dtype=np.float32)).astype(np.float32)
 
-grog = GrogInterpolator(shape=shape, coords=coords, kernel_width=2, oversamp=1.25, image_shape=shape)
+grog = GrogInterpolator(
+    shape=shape, coords=coords, kernel_width=2, oversamp=1.25, image_shape=shape
+)
 grog.calc_interp_table(calib_cart, lamda=0.01, precision=1)
 
 # GrogInterpolator expects (n_coils, n_shots, n_readout).
@@ -149,13 +147,12 @@ print(f"PyGROG sparse shape : {kspace_sparse.shape}")
 # Step 2: Pre-multiply by plan.pre_weights once (caller's responsibility).
 #   plan.pre_weights gives sqrt(density_compensation) in the same sample order
 #   as interpolate() returns — no index arithmetic required.
-sqrt_w = grog.plan.pre_weights
-sparse_t = torch.as_tensor(np.asarray(kspace_sparse))
-sparse_weighted = sparse_t * sqrt_w.to(sparse_t.dtype).unsqueeze(0)
+sqrt_w = np.asarray(grog.plan.pre_weights)
+sparse_weighted = kspace_sparse * sqrt_w[np.newaxis]
 
-# Step 3: SparseFFT.forward applies sqrt_weights again → full density compensation.
-op = SparseFFT(plan=grog.plan, smaps=torch.as_tensor(smaps))
-image_grog_explicit = op.forward(sparse_weighted).abs().cpu().numpy()
+# Step 3: SparseFFT.adjoint applies sqrt_weights again → full density compensation.
+op = SparseFFT(plan=grog.plan, smaps=smaps)
+image_grog_explicit = np.abs(op.adjoint(sparse_weighted))
 
 # %%
 # Comparison
@@ -232,26 +229,22 @@ plt.show()
 vol = get_mri(0, "T1")
 vol = np.flip(vol, axis=(0, 2)).astype(np.float32)
 vol /= vol.max() + 1e-8
-slices = vol[88:91]                           # (B=3, ny, nx)
+slices = vol[88:91]  # (B=3, ny, nx)
 B = slices.shape[0]
 
 # Simulate batched k-space with the same trajectory but per-slice content.
 ksp_batch = np.stack(
-    [
-        nufft_sim.op(s.astype(np.complex64))
-        for s in slices
-    ],
+    [nufft_sim.op(s.astype(np.complex64)) for s in slices],
     axis=0,
-)                                              # (B, n_coils, n_samples)
+)  # (B, n_coils, n_samples)
 ksp_batch_shaped = ksp_batch.reshape(B, n_coils, *samples.shape[:2])
 
 # Single batched GROG interpolation.
 sparse_batch = grog.interpolate(ksp_batch_shaped, ret_image=False)
-sparse_batch_t = torch.as_tensor(np.asarray(sparse_batch))
-sparse_batch_w = sparse_batch_t * sqrt_w.to(sparse_batch_t.dtype)
+sparse_batch_w = sparse_batch * sqrt_w
 
 # Single batched SparseFFT recon — same operator instance handles ``*B``.
-recon_batch = op.forward(sparse_batch_w).abs().cpu().numpy()
+recon_batch = np.abs(op.adjoint(sparse_batch_w))
 
 fig, axes = plt.subplots(1, B, figsize=(4 * B, 4))
 for i in range(B):
@@ -291,11 +284,10 @@ print(f"fraction of mask set  : {masked_plan.mask.float().mean().item():.1%}")
 #
 #   kgrid, plan = grog.interpolate(kspace, grid=True)
 #   op = MaskedFFT(plan=plan, smaps=smaps)
-masked_fft = MaskedFFT(plan=masked_plan, smaps=torch.as_tensor(smaps))
+masked_fft = MaskedFFT(plan=masked_plan, smaps=smaps)
 
-# Forward pass: gridded k-space → SENSE-combined image.
-# MaskedFFT.forward expects (*batch, *stack, C, *grid_shape).
-image_masked = masked_fft.forward(grid_kspace).abs().cpu().numpy()
+# Adjoint pass: gridded k-space → SENSE-combined image.
+image_masked = np.abs(masked_fft.adjoint(grid_kspace))
 
 image_masked /= image_masked.max() + 1e-12
 ref_norm = ref_abs  # already normalised above
@@ -329,8 +321,7 @@ plt.show()
 # uses the density as a pre-computed PSF so the ``A^H A`` operation avoids
 # a second forward+adjoint FFT pair.
 
-x0 = torch.zeros(shape, dtype=torch.complex64)
-Ax = masked_fft.forward(grid_kspace)         # A^H applied by .forward internally
-AHAx = masked_fft.normal(Ax)                  # Toeplitz A^H A
+Ax = masked_fft.adjoint(grid_kspace)  # A^H
+AHAx = masked_fft.normal(Ax)  # Toeplitz A^H A
 
 print(f"normal() output shape : {AHAx.shape}")

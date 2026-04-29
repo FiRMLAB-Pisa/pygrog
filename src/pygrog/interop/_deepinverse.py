@@ -31,7 +31,7 @@ deepinv ``LinearPhysics`` contract:
   - ``A_dagger`` (pseudoinverse) is then provided by the base class.
 """
 
-__all__ = ["GrogLinearPhysics", "GrogInterpolator", "nlinv_calib", "coil_compress"]
+__all__ = ["GrogInterpolator", "GrogLinearPhysics", "coil_compress", "nlinv_calib"]
 
 import numpy as np
 import torch
@@ -106,7 +106,8 @@ class GrogLinearPhysics:
                 super().__init__(noise_model=noise_model or ZeroNoise())
                 self._op = op
                 self._n_coils = (
-                    int(op.smaps.shape[0]) if getattr(op, "smaps", None) is not None
+                    int(op.smaps.shape[0])
+                    if getattr(op, "smaps", None) is not None
                     else None
                 )
                 self._n_samples = int(op.indices.shape[0])
@@ -331,13 +332,12 @@ def nlinv_calib(
         has_batch = ks.ndim >= 3
         if not has_batch:
             ks_in = ks  # (n_coils, n_samples)
-            B = 1
         else:
             ks_in = ks  # (B, n_coils, n_samples) — passes through batched path
-            B = int(ks.shape[0])
+            int(ks.shape[0])
     else:
         ks_in = np.asarray(kspace)
-        B = ks_in.shape[0] if ks_in.ndim >= 3 else 1
+        ks_in.shape[0] if ks_in.ndim >= 3 else 1
 
     coords_np = (
         coords.detach().cpu().numpy()

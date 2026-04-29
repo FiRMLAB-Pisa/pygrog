@@ -64,8 +64,12 @@ class OffResonanceToeplitzOp:
             # MaskedFFT path: B is already gridded to (*grid_shape, L).
             # PSF[j, l', l] = density[j] * conj(B_grid[j, l']) * B_grid[j, l]
             # where B is the gridded ORC basis from OffResonanceMaskedFFT.
-            B_grid = orc_op.B.to(self.device)  # (*grid_shape, L) or (*S, *grid_shape, L)
-            density = base.density.to(self.device)  # (*S, *grid_shape) or (*grid_shape,)
+            B_grid = orc_op.B.to(
+                self.device
+            )  # (*grid_shape, L) or (*S, *grid_shape, L)
+            density = base.density.to(
+                self.device
+            )  # (*S, *grid_shape) or (*grid_shape,)
             psf_dtype = B_grid.dtype
             if not self.stack_shape:
                 # density: (*grid_shape,), B_grid: (*grid_shape, L)
@@ -89,12 +93,18 @@ class OffResonanceToeplitzOp:
                     * B_v.unsqueeze(-2).conj()
                     * B_v.unsqueeze(-1)
                 )  # (S, *grid_shape, L, L)
-                self.psf = psf.reshape(*self.stack_shape, *self.grid_shape, self.L, self.L)
+                self.psf = psf.reshape(
+                    *self.stack_shape, *self.grid_shape, self.L, self.L
+                )
         else:
             sort_perm = base.sort_perm.to(self.device)
-            sorted_B_full = orc_op.B.to(self.device).contiguous()[sort_perm].contiguous()
+            sorted_B_full = (
+                orc_op.B.to(self.device).contiguous()[sort_perm].contiguous()
+            )
             psf_dtype = sorted_B_full.dtype
-            real_dtype = torch.float32 if psf_dtype == torch.complex64 else torch.float64
+            real_dtype = (
+                torch.float32 if psf_dtype == torch.complex64 else torch.float64
+            )
 
             sqrt_w_full = base.sqrt_weights.to(self.device, dtype=real_dtype)
             indices_full = base.indices.to(self.device)
@@ -103,8 +113,11 @@ class OffResonanceToeplitzOp:
             if not self.stack_shape:
                 w_sq = (sqrt_w_full * sqrt_w_full).contiguous()
                 psf_flat = torch.zeros(
-                    base.grid_size, self.L, self.L,
-                    dtype=psf_dtype, device=self.device,
+                    base.grid_size,
+                    self.L,
+                    self.L,
+                    dtype=psf_dtype,
+                    device=self.device,
                 )
                 ext.psf_scatter_outer(psf_flat, indices_full, w_sq, sorted_B_full)
                 self.psf = psf_flat.reshape(*self.grid_shape, self.L, self.L)
@@ -122,11 +135,17 @@ class OffResonanceToeplitzOp:
                 w_sq_packed = (sqrt_w_v * sqrt_w_v).reshape(-1).contiguous()
                 sorted_B_packed = sorted_B_v.reshape(-1, self.L).contiguous()
                 psf_super = torch.zeros(
-                    S_total * base.grid_size, self.L, self.L,
-                    dtype=psf_dtype, device=self.device,
+                    S_total * base.grid_size,
+                    self.L,
+                    self.L,
+                    dtype=psf_dtype,
+                    device=self.device,
                 )
                 ext.psf_scatter_outer(
-                    psf_super, indices_packed, w_sq_packed, sorted_B_packed,
+                    psf_super,
+                    indices_packed,
+                    w_sq_packed,
+                    sorted_B_packed,
                 )
                 self.psf = psf_super.reshape(
                     *self.stack_shape, *self.grid_shape, self.L, self.L
@@ -148,7 +167,8 @@ class OffResonanceToeplitzOp:
         s_shape = self.stack_shape
         s_ndim = len(s_shape)
         single_ndim = (
-            len(self.image_shape) if base.smaps is not None
+            len(self.image_shape)
+            if base.smaps is not None
             else len(self.image_shape) + 1
         )
         prefix = tuple(int(s) for s in image.shape[: image.ndim - single_ndim])
@@ -166,7 +186,7 @@ class OffResonanceToeplitzOp:
 
         S_total = int(torch.tensor(s_shape).prod().item()) if s_shape else 1
         B_total = int(torch.tensor(B_shape).prod().item()) if B_shape else 1
-        single_shape = tuple(image.shape[image.ndim - single_ndim:])
+        single_shape = tuple(image.shape[image.ndim - single_ndim :])
         flat = image.reshape(B_total, S_total, *single_shape)
         outs = []
         for b in range(B_total):
@@ -229,8 +249,11 @@ class OffResonanceToeplitzOp:
             padded = weighted
         else:
             padded = torch.zeros(
-                B, L, *self.grid_shape,
-                dtype=weighted.dtype, device=weighted.device,
+                B,
+                L,
+                *self.grid_shape,
+                dtype=weighted.dtype,
+                device=weighted.device,
             )
             padded[(slice(None), slice(None), *self._pad_slices)] = weighted
 
@@ -239,10 +262,10 @@ class OffResonanceToeplitzOp:
 
         # Per-grid-cell (L, L) @ (L,) matvec, batched over B and spatial.
         # Move L to the last-but-one axis: (B, *grid_shape, L, 1).
-        Kk_perm = Kk.movedim(1, -1).unsqueeze(-1)        # (B, *G, L, 1)
+        Kk_perm = Kk.movedim(1, -1).unsqueeze(-1)  # (B, *G, L, 1)
         # psf broadcasts over B; matmul over (L, L) @ (L, 1).
         out_perm = torch.matmul(psf, Kk_perm).squeeze(-1)  # (B, *G, L)
-        out = out_perm.movedim(-1, 1)                    # (B, L, *G)
+        out = out_perm.movedim(-1, 1)  # (B, L, *G)
 
         # IFFT and crop.
         spatial = ifft(out, axes=self.fft_axes)

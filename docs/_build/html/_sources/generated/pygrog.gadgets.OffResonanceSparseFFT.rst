@@ -20,6 +20,7 @@
       ~OffResonanceSparseFFT.adjoint
       ~OffResonanceSparseFFT.forward
       ~OffResonanceSparseFFT.normal
+      ~OffResonanceSparseFFT.solve
    
    
 

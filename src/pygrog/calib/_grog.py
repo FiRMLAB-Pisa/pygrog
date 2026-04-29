@@ -109,14 +109,19 @@ class GrogPlan(SimpleNamespace):
             raise ValueError("Cannot stack an empty list of plans.")
         for p in plans:
             if getattr(p, "stack_shape", ()) != ():
-                raise ValueError(
-                    "GrogPlan.stack requires unstacked input plans."
-                )
+                raise ValueError("GrogPlan.stack requires unstacked input plans.")
         ref = plans[0]
         global_fields = (
-            "shape", "oversamp", "grid_shape", "kernel_width",
-            "kernel_shape", "radius", "image_shape", "grid_size",
-            "n_samples", "natural_shape",
+            "shape",
+            "oversamp",
+            "grid_shape",
+            "kernel_width",
+            "kernel_shape",
+            "radius",
+            "image_shape",
+            "grid_size",
+            "n_samples",
+            "natural_shape",
         )
         for f in global_fields:
             ref_v = getattr(ref, f, None)
@@ -142,15 +147,18 @@ class GrogPlan(SimpleNamespace):
 
         # Stacked trajectory-bound tensors.
         out.target_idx = torch.stack(
-            [torch.as_tensor(p.target_idx) for p in plans], dim=0,
+            [torch.as_tensor(p.target_idx) for p in plans],
+            dim=0,
         )
         out.weights = torch.stack(
-            [torch.as_tensor(p.weights) for p in plans], dim=0,
+            [torch.as_tensor(p.weights) for p in plans],
+            dim=0,
         )
         # distances is needed by calc_interp_table; preserve when present
         if all(getattr(p, "distances", None) is not None for p in plans):
             out.distances = torch.stack(
-                [torch.as_tensor(p.distances) for p in plans], dim=0,
+                [torch.as_tensor(p.distances) for p in plans],
+                dim=0,
             )
         else:
             out.distances = None
@@ -160,7 +168,8 @@ class GrogPlan(SimpleNamespace):
                     "GrogPlan.stack: all plans must agree on time_map presence"
                 )
             out.time_map = torch.stack(
-                [torch.as_tensor(p.time_map) for p in plans], dim=0,
+                [torch.as_tensor(p.time_map) for p in plans],
+                dim=0,
             )
         else:
             out.time_map = None
@@ -170,6 +179,7 @@ class GrogPlan(SimpleNamespace):
         out.sort_perm = torch.stack([p.sort_perm for p in plans], dim=0)
         out.inv_perm = torch.stack([p.inv_perm for p in plans], dim=0)
         return out
+
 
 # ---------------------------------------------------------------------------
 # Torch C++ extension (lazy, cached)
@@ -301,7 +311,12 @@ class GrogInterpolator:
         stack_shape: tuple[int, ...] = (),
     ):
         self.plan = _create_plan(
-            shape, coords, oversamp, kernel_width, kernel_shape, time_map,
+            shape,
+            coords,
+            oversamp,
+            kernel_width,
+            kernel_shape,
+            time_map,
             stack_shape=stack_shape,
         )
         # Attach FFT plan fields to self.plan for SparseFFT consumption
@@ -385,7 +400,9 @@ class GrogInterpolator:
         stepsize = 10 ** (-precision)
 
         # Quantise distances → kernel table index (all torch)
-        interp_idx = (self.plan.radius + torch.round(distances * pfac) / pfac) / stepsize
+        interp_idx = (
+            self.plan.radius + torch.round(distances * pfac) / pfac
+        ) / stepsize
         interp_idx = torch.round(interp_idx)
         strides = torch.tensor([nsteps**k for k in range(ndim)], dtype=torch.float32)
         interp_idx = torch.round(interp_idx * strides).to(torch.int32).sum(dim=-1)
@@ -484,7 +501,10 @@ class GrogInterpolator:
         # batch_prefix = leading dims BEFORE *S; stack prefix is fixed = s_shape
         batch_prefix = sparse.shape[: sparse.ndim - (nat_ndim + 1) - len(s_shape)]
         sparse_flat = sparse.reshape(
-            *batch_prefix, *s_shape, n_coils, plan.n_samples,
+            *batch_prefix,
+            *s_shape,
+            n_coils,
+            plan.n_samples,
         )
 
         if ret_image:
@@ -497,7 +517,7 @@ class GrogInterpolator:
             pre_w = plan.pre_weights.to(sparse_flat.dtype)
             # broadcast over *batch, coil axes — pre_w needs a coil axis
             pw = pre_w.unsqueeze(-2) if pre_w.ndim > 1 else pre_w.unsqueeze(0)
-            img_coils = op.forward(sparse_flat * pw)
+            img_coils = op.adjoint(sparse_flat * pw)
             # RSS over coil axis (the one immediately before *image_shape).
             img_ax = img_coils.ndim - len(plan.image_shape) - 1
             image = img_coils.abs().square().sum(img_ax).sqrt()
@@ -510,6 +530,7 @@ class GrogInterpolator:
             gc.collect()
             if is_numpy:
                 import numpy as _np
+
                 numpy_plan = masked_plan.__class__(
                     grid_shape=masked_plan.grid_shape,
                     image_shape=masked_plan.image_shape,
@@ -576,7 +597,9 @@ class GrogInterpolator:
             )
         # Validate stack prefix.
         if s_ndim > 0:
-            stack_prefix = tuple(int(s) for s in data.shape[ncoils_pos - s_ndim : ncoils_pos])
+            stack_prefix = tuple(
+                int(s) for s in data.shape[ncoils_pos - s_ndim : ncoils_pos]
+            )
             if stack_prefix != s_shape:
                 raise ValueError(
                     f"data stack prefix {stack_prefix} != plan.stack_shape {s_shape}"
@@ -591,8 +614,14 @@ class GrogInterpolator:
         if s_ndim == 0:
             # Fast path — single trajectory (unchanged from prior behaviour).
             return self._sparse_full_single(
-                data, batch_shape, ncoils, spatial, kw,
-                target_idx, interp_idx, kernel,
+                data,
+                batch_shape,
+                ncoils,
+                spatial,
+                kw,
+                target_idx,
+                interp_idx,
+                kernel,
             )
 
         # Stacked path — loop over *S (kernel call per stack element).
@@ -607,36 +636,53 @@ class GrogInterpolator:
         for s in range(S):
             outs.append(
                 self._sparse_full_single(
-                    data_v[:, s], batch_shape, ncoils, spatial, kw,
-                    target_idx[s] if s_ndim == 1 else target_idx.reshape(S, *spatial, kw)[s],
-                    interp_idx_v[s], kernel,
+                    data_v[:, s],
+                    batch_shape,
+                    ncoils,
+                    spatial,
+                    kw,
+                    (
+                        target_idx[s]
+                        if s_ndim == 1
+                        else target_idx.reshape(S, *spatial, kw)[s]
+                    ),
+                    interp_idx_v[s],
+                    kernel,
                 )
             )
         # Stack along *S, then reshape back to multi-axis stack prefix.
         # outs[i] has shape (*batch, C, *spatial, kw)
-        stacked = torch.stack(outs, dim=len(batch_shape))  # (*batch, S, C, *spatial, kw)
+        stacked = torch.stack(
+            outs, dim=len(batch_shape)
+        )  # (*batch, S, C, *spatial, kw)
         return stacked.reshape(*batch_shape, *s_shape, ncoils, *spatial, kw)
 
     @staticmethod
     def _sparse_full_single(
-        data, batch_shape, ncoils, spatial, kw,
-        target_idx, interp_idx, kernel,
+        data,
+        batch_shape,
+        ncoils,
+        spatial,
+        kw,
+        target_idx,
+        interp_idx,
+        kernel,
     ):
         """Single-trajectory kernel call. ``data`` has shape ``(*batch, C, *spatial)``."""
         B = int(np.prod(batch_shape)) if batch_shape else 1
         N = int(np.prod(spatial))
 
         data_bcn = data.reshape(B * ncoils, N)
-        data_rep = (
-            data_bcn.unsqueeze(-1).expand(-1, -1, kw).reshape(B * ncoils, N * kw)
-        )
+        data_rep = data_bcn.unsqueeze(-1).expand(-1, -1, kw).reshape(B * ncoils, N * kw)
         data_interp = data_rep.T.reshape(N * kw, B, ncoils).contiguous()
 
         idx_1d = interp_idx.reshape(-1)
         _interpolate(data_interp, idx_1d, kernel)
 
-        out = data_interp.permute(1, 2, 0).contiguous().reshape(
-            *batch_shape, ncoils, *spatial, kw
+        out = (
+            data_interp.permute(1, 2, 0)
+            .contiguous()
+            .reshape(*batch_shape, ncoils, *spatial, kw)
         )
         return out
 
@@ -717,8 +763,9 @@ class GrogInterpolator:
         s_ndim = len(s_shape)
         # sparse_dc has trailing (n_samples,) after (*batch, *stack, C)
         n_coils = int(sparse_dc.shape[-(s_ndim + 2 if s_ndim else 2)])
-        batch_prefix = tuple(int(s) for s in
-                             sparse_dc.shape[:sparse_dc.ndim - (s_ndim + 1 + 1)])
+        batch_prefix = tuple(
+            int(s) for s in sparse_dc.shape[: sparse_dc.ndim - (s_ndim + 1 + 1)]
+        )
         B_total = int(np.prod(batch_prefix)) if batch_prefix else 1
         S_total = int(np.prod(s_shape)) if s_shape else 1
         n_per = int(plan.n_samples)
@@ -729,13 +776,13 @@ class GrogInterpolator:
         # (batch, stack) combination at once.
         indices_full = plan.indices  # (*S, n_per) or (n_per,)
         sqrt_w_full = plan.sqrt_weights  # (*S, n_per) or (n_per,)
-        inv_perm_full = plan.inv_perm   # (*S, n_per) or (n_per,)
+        inv_perm_full = plan.inv_perm  # (*S, n_per) or (n_per,)
 
         if S_total == 1:
             # Unstacked or single-stack-element: trivial case.
             idx = indices_full.to(sparse_dc.device).reshape(-1)
             sqw = sqrt_w_full.to(sparse_dc.device).reshape(-1)
-            ip = inv_perm_full.to(sparse_dc.device).reshape(-1)
+            inv_perm_full.to(sparse_dc.device).reshape(-1)
             # The sparse_dc is already in pre_weight order, but flat is in
             # original order; reorder to match sorted indices for scatter_add.
             # sparse_dc is actually in natural (unsorted) order — we need to
@@ -744,15 +791,20 @@ class GrogInterpolator:
 
             # Allocate output grids.
             grid_kspace = torch.zeros(
-                B_total, n_coils, grid_size,
-                dtype=sparse_dc.dtype, device=sparse_dc.device,
+                B_total,
+                n_coils,
+                grid_size,
+                dtype=sparse_dc.dtype,
+                device=sparse_dc.device,
             )
             # density (real): sum of squared weights per grid cell
             density_flat = torch.zeros(
-                grid_size, dtype=torch.float32, device=sparse_dc.device,
+                grid_size,
+                dtype=torch.float32,
+                device=sparse_dc.device,
             )
             w_sq = (sqw * sqw).contiguous()
-            _scatter_add(density_flat, torch.ones(n_per, device=sparse_dc.device, dtype=torch.float32), idx, w_sq)
+            density_flat.index_add_(0, idx.long(), w_sq)
 
             for b in range(B_total):
                 for c in range(n_coils):
@@ -774,52 +826,66 @@ class GrogInterpolator:
             grid_off = (
                 torch.arange(S_total, device=sparse_dc.device, dtype=idx_v.dtype)
                 * grid_size
-            ).unsqueeze(-1)  # (S, 1)
+            ).unsqueeze(
+                -1
+            )  # (S, 1)
             data_off = (
-                torch.arange(S_total, device=sparse_dc.device, dtype=sp_v.dtype)
-                * n_per
+                torch.arange(S_total, device=sparse_dc.device, dtype=sp_v.dtype) * n_per
             ).unsqueeze(-1)
 
-            idx_packed = (idx_v + grid_off).reshape(-1).contiguous()   # (S*n_per,)
+            idx_packed = (idx_v + grid_off).reshape(-1).contiguous()  # (S*n_per,)
             sqw_packed = sqw_v.reshape(-1).contiguous()
             sp_packed = (sp_v + data_off).reshape(-1).contiguous()
 
             # density across the super-grid
             density_super = torch.zeros(
-                S_total * grid_size, dtype=torch.float32, device=sparse_dc.device,
+                S_total * grid_size,
+                dtype=torch.float32,
+                device=sparse_dc.device,
             )
             w_sq_packed = (sqw_packed * sqw_packed).contiguous()
-            _scatter_add(density_super,
-                         torch.ones(S_total * n_per, device=sparse_dc.device, dtype=torch.float32),
-                         idx_packed, w_sq_packed)
+            density_super.index_add_(0, idx_packed.long(), w_sq_packed)
 
             grid_kspace = torch.zeros(
-                B_total, S_total, n_coils, S_total * grid_size,
-                dtype=sparse_dc.dtype, device=sparse_dc.device,
+                B_total,
+                S_total,
+                n_coils,
+                S_total * grid_size,
+                dtype=sparse_dc.dtype,
+                device=sparse_dc.device,
             )
             for b in range(B_total):
                 # flat[b]: (S, C, n_per)
                 ksp_b = flat[b].permute(1, 0, 2).reshape(n_coils, -1)  # (C, S*n_per)
                 sorted_all = ksp_b[:, sp_packed]  # (C, S*n_per)
                 g_b = torch.zeros(
-                    n_coils, S_total * grid_size,
-                    dtype=sparse_dc.dtype, device=sparse_dc.device,
+                    n_coils,
+                    S_total * grid_size,
+                    dtype=sparse_dc.dtype,
+                    device=sparse_dc.device,
                 )
                 for c in range(n_coils):
                     _scatter_add(g_b[c], sorted_all[c], idx_packed, sqw_packed)
                 # Split super-grid back into (S, *grid_shape) slabs
-                grid_kspace[b] = g_b.reshape(n_coils, S_total, grid_size).permute(1, 0, 2)
+                grid_kspace[b] = g_b.reshape(n_coils, S_total, grid_size).permute(
+                    1, 0, 2
+                )
 
             density = density_super.reshape(*s_shape, *grid_shape)
             mask = (density > 0).float()
             grid_kspace = grid_kspace.reshape(B_total, S_total, n_coils, grid_size)
-            grid_kspace = grid_kspace.reshape(*batch_prefix if batch_prefix else (B_total,),
-                                              *s_shape, n_coils, *grid_shape)
+            grid_kspace = grid_kspace.reshape(
+                *batch_prefix if batch_prefix else (B_total,),
+                *s_shape,
+                n_coils,
+                *grid_shape,
+            )
 
         if not batch_prefix:
             grid_kspace = grid_kspace.reshape(*s_shape, n_coils, *grid_shape)
 
         from ..operator._masked_fft import MaskedFFTPlan
+
         masked_plan = MaskedFFTPlan(
             grid_shape=grid_shape,
             image_shape=tuple(plan.image_shape),
@@ -882,7 +948,9 @@ def _attach_fft_plan(plan, image_shape=None):
 
     stack_shape = tuple(getattr(plan, "stack_shape", ()) or ())
     s_ndim = len(stack_shape)
-    natural_shape = tuple(int(s) for s in target_idx.shape[s_ndim:])  # (*spatial, kw) per stack element
+    natural_shape = tuple(
+        int(s) for s in target_idx.shape[s_ndim:]
+    )  # (*spatial, kw) per stack element
     n_per = int(np.prod(natural_shape)) if natural_shape else 0
 
     # Reshape to (*S, n_per) for vectorised per-stack operations.
@@ -927,8 +995,9 @@ def _attach_fft_plan(plan, image_shape=None):
 # =====================================================================
 # Plan creation  (pure torch / numpy — no scipy)
 # =====================================================================
-def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map,
-                 stack_shape=()):
+def _create_plan(
+    shape, coords, oversamp, kernel_width, kernel_shape, time_map, stack_shape=()
+):
     """Build data-driven GROG plan.
 
     When ``stack_shape`` is non-empty, the leading ``*S`` axes of ``coords``
@@ -947,7 +1016,7 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map,
                 f"not match stack_shape {s_shape}"
             )
         s_total = int(np.prod(s_shape))
-        rest_shape = coords.shape[len(s_shape):]
+        rest_shape = coords.shape[len(s_shape) :]
         coords_flat = coords.reshape(s_total, *rest_shape)
         if time_map is not None:
             tm = np.asarray(time_map)
@@ -956,12 +1025,16 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map,
                     f"time_map leading shape {tm.shape[: len(s_shape)]} "
                     f"does not match stack_shape {s_shape}"
                 )
-            tm_flat = tm.reshape(s_total, *tm.shape[len(s_shape):])
+            tm_flat = tm.reshape(s_total, *tm.shape[len(s_shape) :])
         else:
             tm_flat = [None] * s_total
         plans = [
             _create_plan_single(
-                shape, coords_flat[i], oversamp, kernel_width, kernel_shape,
+                shape,
+                coords_flat[i],
+                oversamp,
+                kernel_width,
+                kernel_shape,
                 tm_flat[i],
             )
             for i in range(s_total)
@@ -973,8 +1046,14 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map,
         out = GrogPlan._stack(plans)
         if len(s_shape) > 1:
             # Re-shape stacked tensors from (s_total, ...) to (*S, ...).
-            for f in ("target_idx", "weights", "indices", "sqrt_weights",
-                      "sort_perm", "inv_perm"):
+            for f in (
+                "target_idx",
+                "weights",
+                "indices",
+                "sqrt_weights",
+                "sort_perm",
+                "inv_perm",
+            ):
                 t = getattr(out, f)
                 out_shape = s_shape + tuple(t.shape[1:])
                 setattr(out, f, t.reshape(out_shape))
@@ -984,12 +1063,16 @@ def _create_plan(shape, coords, oversamp, kernel_width, kernel_shape, time_map,
             out.stack_shape = s_shape
         return out
     return _create_plan_single(
-        shape, coords, oversamp, kernel_width, kernel_shape, time_map,
+        shape,
+        coords,
+        oversamp,
+        kernel_width,
+        kernel_shape,
+        time_map,
     )
 
 
-def _create_plan_single(shape, coords, oversamp, kernel_width, kernel_shape,
-                        time_map):
+def _create_plan_single(shape, coords, oversamp, kernel_width, kernel_shape, time_map):
     """Build data-driven GROG plan for a single (unstacked) trajectory.
 
     For each source point, enumerate all grid neighbours within the kernel
@@ -1038,9 +1121,7 @@ def _create_plan_single(shape, coords, oversamp, kernel_width, kernel_shape,
     coords_t = torch.from_numpy(coords_scaled)  # (..., npts, ndim) float32
     offsets_t = torch.from_numpy(offsets.astype(np.int32))  # (kw_eff, ndim)
 
-    origins = torch.tensor(
-        [-(s // 2) for s in shape], dtype=torch.float32
-    )  # (ndim,)
+    origins = torch.tensor([-(s // 2) for s in shape], dtype=torch.float32)  # (ndim,)
     grid_steps = torch.tensor(
         [
             (s - 1) / (gs - 1) if gs > 1 else 1.0
@@ -1059,12 +1140,18 @@ def _create_plan_single(shape, coords, oversamp, kernel_width, kernel_shape,
     target_nd = nearest.unsqueeze(-2) + offsets_t  # (..., npts, kw_eff, ndim)
 
     # Compute distances in coordinate space: target_coord - source_coord
-    target_coords_space = origins + target_nd.float() * grid_steps  # (..., npts, kw_eff, ndim)
-    distances = target_coords_space - coords_t.unsqueeze(-2)  # (..., npts, kw_eff, ndim)
+    target_coords_space = (
+        origins + target_nd.float() * grid_steps
+    )  # (..., npts, kw_eff, ndim)
+    distances = target_coords_space - coords_t.unsqueeze(
+        -2
+    )  # (..., npts, kw_eff, ndim)
 
     # In-bounds mask (grid boundary)
     grid_shape_t = torch.tensor(list(grid_shape), dtype=torch.int32)
-    in_bounds = ((target_nd >= 0) & (target_nd < grid_shape_t)).all(dim=-1)  # (..., npts, kw_eff)
+    in_bounds = ((target_nd >= 0) & (target_nd < grid_shape_t)).all(
+        dim=-1
+    )  # (..., npts, kw_eff)
 
     # GROG validity mask: each per-component shift must be within ±0.5
     # original-grid units so that G^d stays in the physically trained range.
@@ -1079,8 +1166,12 @@ def _create_plan_single(shape, coords, oversamp, kernel_width, kernel_shape,
     strides = torch.tensor(
         [int(np.prod(grid_shape[d + 1 :])) for d in range(ndim)], dtype=torch.int64
     )
-    target_flat = (target_nd.to(torch.int64) * strides).sum(dim=-1)  # (..., npts, kw_eff)
-    target_flat.masked_fill_(~in_bounds, -1)  # sentinel for out-of-bounds / GROG-invalid
+    target_flat = (target_nd.to(torch.int64) * strides).sum(
+        dim=-1
+    )  # (..., npts, kw_eff)
+    target_flat.masked_fill_(
+        ~in_bounds, -1
+    )  # sentinel for out-of-bounds / GROG-invalid
 
     # --- EGROG distance-based density compensation -------------------------
     # For each (source i, target t) pair compute a Gaussian kernel value
@@ -1105,9 +1196,7 @@ def _create_plan_single(shape, coords, oversamp, kernel_width, kernel_shape,
     flat_gauss = gauss_vals.reshape(-1)
     flat_valid = flat_targets >= 0
     gauss_sum = torch.zeros(grid_size, dtype=torch.float64)
-    gauss_sum.scatter_add_(
-        0, flat_targets[flat_valid], flat_gauss[flat_valid].double()
-    )
+    gauss_sum.scatter_add_(0, flat_targets[flat_valid], flat_gauss[flat_valid].double())
 
     # Normalised per-pair weights
     weights = torch.zeros_like(gauss_vals)

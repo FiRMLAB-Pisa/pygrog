@@ -64,13 +64,13 @@ def _rewrap_functorch(t: torch.Tensor, layers) -> torch.Tensor:
 
 
 class _GrogMeasureFn(Function):
-    """A: image → k-space.  Backward = A^H (SparseFFT.forward)."""
+    """A: image → k-space.  Backward = A^H (SparseFFT.adjoint)."""
 
     generate_vmap_rule = True
 
     @staticmethod
     def forward(x: torch.Tensor, op) -> torch.Tensor:
-        return op.adjoint(x)  # SparseFFT.adjoint  ≡  forward NUFFT  ≡  A
+        return op.forward(x)  # SparseFFT.forward  ≡  forward NUFFT  ≡  A
 
     @staticmethod
     def setup_context(ctx, inputs, output):
@@ -86,18 +86,18 @@ class _GrogMeasureFn(Function):
 
         plain, _ = _unwrap_functorch(grad)
         with temporarily_clear_interpreter_stack():
-            out = ctx.op.forward(plain.contiguous())  # A^H = SparseFFT.forward
+            out = ctx.op.adjoint(plain.contiguous())  # A^H = SparseFFT.adjoint
         return out, None
 
 
 class _GrogBackprojectFn(Function):
-    """A^H: k-space → image.  Backward = A (SparseFFT.adjoint)."""
+    """A^H: k-space → image.  Backward = A (SparseFFT.forward)."""
 
     generate_vmap_rule = True
 
     @staticmethod
     def forward(y: torch.Tensor, op) -> torch.Tensor:
-        return op.forward(y)  # SparseFFT.forward  ≡  adjoint NUFFT  ≡  A^H
+        return op.adjoint(y)  # SparseFFT.adjoint  ≡  adjoint NUFFT  ≡  A^H
 
     @staticmethod
     def setup_context(ctx, inputs, output):
@@ -111,8 +111,10 @@ class _GrogBackprojectFn(Function):
 
         plain, _ = _unwrap_functorch(grad)
         with temporarily_clear_interpreter_stack():
-            out = ctx.op._adjoint_flat(plain.contiguous())  # always (..., n_samples) flat
-            out = out.reshape(ctx.y_shape)                  # A = SparseFFT.adjoint
+            out = ctx.op._adjoint_flat(
+                plain.contiguous()
+            )  # always (..., n_samples) flat
+            out = out.reshape(ctx.y_shape)  # A = SparseFFT.forward
         return out, None
 
 

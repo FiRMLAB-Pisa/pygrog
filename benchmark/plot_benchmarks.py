@@ -86,7 +86,9 @@ def plot_preprocessing(results: dict, out: Path) -> bool:
     """Return False and skip if scaling cases are absent (--skip-scaling run)."""
     cases = _scaling_cases(results)
     if cases is None:
-        print("Skipping figure_preprocessing.png — no scaling data (run without --skip-scaling to include).")
+        print(
+            "Skipping figure_preprocessing.png — no scaling data (run without --skip-scaling to include)."
+        )
         return False
     labels = _size_labels(cases)
     n = len(cases)
@@ -218,8 +220,8 @@ def _three_views(vol: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         return s, s, s
     if vol.ndim == 3:
         mx, my, mz = vol.shape[0] // 2, vol.shape[1] // 2, vol.shape[2] // 2
-        axial    = np.rot90(vol[:, :, mz], k=1)
-        coronal  = np.rot90(vol[:, my, :], k=1)
+        axial = np.rot90(vol[:, :, mz], k=1)
+        coronal = np.rot90(vol[:, my, :], k=1)
         sagittal = np.rot90(vol[mx, :, :], k=1)
         return axial, coronal, sagittal
     # > 3-D: collapse leading dims first
@@ -256,12 +258,12 @@ def plot_subspace(
     for i in range(k):
         # Use the CCW-rotated axial view (first of _three_views)
         nufft_2d = _normalize_unit(_three_views(np.abs(coeff_nufft[i]))[0])
-        grog_2d  = _normalize_unit(_three_views(np.abs(coeff_grog[i]))[0])
+        grog_2d = _normalize_unit(_three_views(np.abs(coeff_grog[i]))[0])
         top_tiles.append(nufft_2d)
         mid_tiles.append(grog_2d)
         err = grog_2d - nufft_2d  # signed difference, both in [0,1]
         err_tiles.append(err.astype(np.float32))
-        nrmse = float(np.sqrt(np.mean(err ** 2)))
+        nrmse = float(np.sqrt(np.mean(err**2)))
         nrmse_vals.append(nrmse)
 
     top_row = np.concatenate(top_tiles, axis=1)
@@ -272,7 +274,8 @@ def plot_subspace(
     h = top_row.shape[0]
 
     fig, (ax_gray, ax_err) = plt.subplots(
-        2, 1,
+        2,
+        1,
         figsize=(3.2 * k, 9.6),
         gridspec_kw={"height_ratios": [2, 1], "hspace": 0.06},
     )
@@ -300,8 +303,12 @@ def plot_subspace(
     cursor = 0
     for w in tile_widths[:-1]:
         cursor += w
-        ax_gray.axvline(cursor - 0.5, color="#666666", linewidth=0.5, linestyle="--", alpha=0.6)
-        ax_err.axvline(cursor - 0.5,  color="#666666", linewidth=0.5, linestyle="--", alpha=0.6)
+        ax_gray.axvline(
+            cursor - 0.5, color="#666666", linewidth=0.5, linestyle="--", alpha=0.6
+        )
+        ax_err.axvline(
+            cursor - 0.5, color="#666666", linewidth=0.5, linestyle="--", alpha=0.6
+        )
 
     for spine in ["top", "right", "bottom", "left"]:
         ax_gray.spines[spine].set_visible(False)
@@ -322,21 +329,30 @@ def plot_subspace(
 
     # Annotate per-coefficient NRMSE above each error tile
     cursor = 0
-    for i, (w, nrmse) in enumerate(zip(tile_widths, nrmse_vals)):
+    for i, (w, nrmse) in enumerate(zip(tile_widths, nrmse_vals, strict=False)):
         cx = cursor + w / 2.0
         ax_err.text(
-            cx, -2, f"NRMSE={nrmse:.3f}",
-            ha="center", va="bottom", fontsize=10, color="black",
+            cx,
+            -2,
+            f"NRMSE={nrmse:.3f}",
+            ha="center",
+            va="bottom",
+            fontsize=10,
+            color="black",
             transform=ax_err.transData,
         )
         cursor += w
 
     # Global NRMSE in corner
     ax_err.text(
-        0.98, 0.05,
+        0.98,
+        0.05,
         f"avg NRMSE = {avg_nrmse:.3f}",
         transform=ax_err.transAxes,
-        ha="right", va="bottom", fontsize=12, color="white",
+        ha="right",
+        va="bottom",
+        fontsize=12,
+        color="white",
         bbox={"boxstyle": "round,pad=0.2", "facecolor": "black", "alpha": 0.5},
     )
 
@@ -440,7 +456,9 @@ def plot_grog_views(coeff_grog: np.ndarray, out: Path, label: str = "CPU") -> No
 def plot_linop(results: dict, out: Path) -> None:
     cases = _scaling_cases(results)
     if cases is None:
-        print("Skipping figure_linop.png — no scaling data (run without --skip-scaling to include).")
+        print(
+            "Skipping figure_linop.png — no scaling data (run without --skip-scaling to include)."
+        )
         return
     labels = _size_labels(cases)
     n = len(cases)
@@ -583,64 +601,121 @@ def plot_runtime(results: dict, out: Path) -> None:
 
     Always available regardless of ``--skip-scaling``.
     """
-    cpu      = results.get("steps", {}).get("runtime_cpu", {})
-    gpu      = results.get("steps", {}).get("runtime_gpu", {})
-    plan_s   = results.get("steps", {}).get("grog_plan_creation", {})
+    cpu = results.get("steps", {}).get("runtime_cpu", {})
+    gpu = results.get("steps", {}).get("runtime_gpu", {})
+    plan_s = results.get("steps", {}).get("grog_plan_creation", {})
     interp_s = results.get("steps", {}).get("grog_interpolation", {})
 
     # ── helpers ──────────────────────────────────────────────────────────────
     def _rt(d, key):
         e = d.get(key, {})
-        return float(e.get("runtime_mean_sec", float("nan"))), float(e.get("runtime_std_sec", 0.0))
+        return float(e.get("runtime_mean_sec", float("nan"))), float(
+            e.get("runtime_std_sec", 0.0)
+        )
 
     def _ram(d, key):
         v = d.get(key, {}).get("peak_ram_gb")
         return float(v) if v is not None else float("nan")
 
-    def _rt_g(grp, op):  return _rt(gpu.get(grp, {}), op)
-    def _ram_g(grp, op): return _ram(gpu.get(grp, {}), op)
+    def _rt_g(grp, op):
+        return _rt(gpu.get(grp, {}), op)
+
+    def _ram_g(grp, op):
+        return _ram(gpu.get(grp, {}), op)
 
     def _vram_g(grp, op):
         d = gpu.get(grp, {}).get(op, {})
-        for k in ("peak_gpu_mem_gb_nvml", "peak_gpu_mem_gb_torch", "peak_gpu_mem_gb_cupy"):
+        for k in (
+            "peak_gpu_mem_gb_nvml",
+            "peak_gpu_mem_gb_torch",
+            "peak_gpu_mem_gb_cupy",
+        ):
             v = d.get(k)
             if v:
                 return float(v)
         return 0.0
 
     ops = [("adjoint", "Adjoint\n(k→img)"), ("forward", "Forward\n(img→k)")]
-    x   = np.arange(len(ops))
+    x = np.arange(len(ops))
 
     nufft_gpu_avail = not np.isnan(_rt_g("nufft_cufinufft_gpu", "nufft_adjoint")[0])
-    grog_full_avail = not np.isnan(_rt_g("grog_full_gpu",        "grog_adjoint")[0])
+    grog_full_avail = not np.isnan(_rt_g("grog_full_gpu", "grog_adjoint")[0])
     grog_dual_avail = not np.isnan(_rt_g("grog_dual_stream_gpu", "grog_adjoint")[0])
 
     # (label, color, [(mean,std) per op], [ram per op], [vram per op])
     specs: list[tuple] = [
-        ("NUFFT CPU", "#4E79A7",
-         [_rt(cpu, "nufft_finufft_adjoint"),  _rt(cpu, "nufft_finufft_forward")],
-         [_ram(cpu, "nufft_finufft_adjoint"), _ram(cpu, "nufft_finufft_forward")],
-         [0.0, 0.0]),
-        ("GROG CPU",  "#F28E2B",
-         [_rt(cpu, "grog_adjoint"),  _rt(cpu, "grog_forward")],
-         [_ram(cpu, "grog_adjoint"), _ram(cpu, "grog_forward")],
-         [0.0, 0.0]),
+        (
+            "NUFFT CPU",
+            "#4E79A7",
+            [_rt(cpu, "nufft_finufft_adjoint"), _rt(cpu, "nufft_finufft_forward")],
+            [_ram(cpu, "nufft_finufft_adjoint"), _ram(cpu, "nufft_finufft_forward")],
+            [0.0, 0.0],
+        ),
+        (
+            "GROG CPU",
+            "#F28E2B",
+            [_rt(cpu, "grog_adjoint"), _rt(cpu, "grog_forward")],
+            [_ram(cpu, "grog_adjoint"), _ram(cpu, "grog_forward")],
+            [0.0, 0.0],
+        ),
     ]
     if nufft_gpu_avail:
-        specs.append(("NUFFT GPU", "#59A14F",
-            [_rt_g("nufft_cufinufft_gpu", "nufft_adjoint"),  _rt_g("nufft_cufinufft_gpu", "nufft_forward")],
-            [_ram_g("nufft_cufinufft_gpu", "nufft_adjoint"), _ram_g("nufft_cufinufft_gpu", "nufft_forward")],
-            [_vram_g("nufft_cufinufft_gpu", "nufft_adjoint"), _vram_g("nufft_cufinufft_gpu", "nufft_forward")]))
+        specs.append(
+            (
+                "NUFFT GPU",
+                "#59A14F",
+                [
+                    _rt_g("nufft_cufinufft_gpu", "nufft_adjoint"),
+                    _rt_g("nufft_cufinufft_gpu", "nufft_forward"),
+                ],
+                [
+                    _ram_g("nufft_cufinufft_gpu", "nufft_adjoint"),
+                    _ram_g("nufft_cufinufft_gpu", "nufft_forward"),
+                ],
+                [
+                    _vram_g("nufft_cufinufft_gpu", "nufft_adjoint"),
+                    _vram_g("nufft_cufinufft_gpu", "nufft_forward"),
+                ],
+            )
+        )
     if grog_full_avail:
-        specs.append(("GROG GPU (full)", "#E15759",
-            [_rt_g("grog_full_gpu", "grog_adjoint"),  _rt_g("grog_full_gpu", "grog_forward")],
-            [_ram_g("grog_full_gpu", "grog_adjoint"), _ram_g("grog_full_gpu", "grog_forward")],
-            [_vram_g("grog_full_gpu", "grog_adjoint"), _vram_g("grog_full_gpu", "grog_forward")]))
+        specs.append(
+            (
+                "GROG GPU (full)",
+                "#E15759",
+                [
+                    _rt_g("grog_full_gpu", "grog_adjoint"),
+                    _rt_g("grog_full_gpu", "grog_forward"),
+                ],
+                [
+                    _ram_g("grog_full_gpu", "grog_adjoint"),
+                    _ram_g("grog_full_gpu", "grog_forward"),
+                ],
+                [
+                    _vram_g("grog_full_gpu", "grog_adjoint"),
+                    _vram_g("grog_full_gpu", "grog_forward"),
+                ],
+            )
+        )
     if grog_dual_avail:
-        specs.append(("GROG GPU (dual)", "#B07AA1",
-            [_rt_g("grog_dual_stream_gpu", "grog_adjoint"),  _rt_g("grog_dual_stream_gpu", "grog_forward")],
-            [_ram_g("grog_dual_stream_gpu", "grog_adjoint"), _ram_g("grog_dual_stream_gpu", "grog_forward")],
-            [_vram_g("grog_dual_stream_gpu", "grog_adjoint"), _vram_g("grog_dual_stream_gpu", "grog_forward")]))
+        specs.append(
+            (
+                "GROG GPU (dual)",
+                "#B07AA1",
+                [
+                    _rt_g("grog_dual_stream_gpu", "grog_adjoint"),
+                    _rt_g("grog_dual_stream_gpu", "grog_forward"),
+                ],
+                [
+                    _ram_g("grog_dual_stream_gpu", "grog_adjoint"),
+                    _ram_g("grog_dual_stream_gpu", "grog_forward"),
+                ],
+                [
+                    _vram_g("grog_dual_stream_gpu", "grog_adjoint"),
+                    _vram_g("grog_dual_stream_gpu", "grog_forward"),
+                ],
+            )
+        )
 
     n_m = len(specs)
     bar_w = min(0.7 / n_m, 0.18)
@@ -655,15 +730,16 @@ def plot_runtime(results: dict, out: Path) -> None:
         ax.set_ylim(0, ymax * 1.45)
         margin = ymax * 0.03
         for bar, m, std in valid:
-            kw: dict = dict(ha="center", va="bottom")
+            kw: dict = {"ha": "center", "va": "bottom"}
             if bold:
                 kw.update(fontsize=10, fontweight="bold")
             else:
                 kw["fontsize"] = 7
                 if rot:
                     kw["rotation"] = 35
-            ax.text(bar.get_x() + bar.get_width() / 2,
-                    m + std + margin, formatter(m), **kw)
+            ax.text(
+                bar.get_x() + bar.get_width() / 2, m + std + margin, formatter(m), **kw
+            )
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     ax_rt, ax_sp, ax_mem, ax_prep = axes[0, 0], axes[0, 1], axes[1, 0], axes[1, 1]
@@ -672,13 +748,18 @@ def plot_runtime(results: dict, out: Path) -> None:
     bar_ann_rt: list[tuple] = []
     for mi, (label, color, rt_pairs, _ram_vals, _vram_vals) in enumerate(specs):
         means = [v[0] for v in rt_pairs]
-        stds  = [v[1] for v in rt_pairs]
-        bars  = ax_rt.bar(
-            x + bar_off + mi * bar_w, means, bar_w,
-            color=color, label=label,
-            yerr=stds, capsize=3, error_kw={"elinewidth": 1},
+        stds = [v[1] for v in rt_pairs]
+        bars = ax_rt.bar(
+            x + bar_off + mi * bar_w,
+            means,
+            bar_w,
+            color=color,
+            label=label,
+            yerr=stds,
+            capsize=3,
+            error_kw={"elinewidth": 1},
         )
-        for bar, m, std in zip(bars, means, stds):
+        for bar, m, std in zip(bars, means, stds, strict=False):
             if not np.isnan(m):
                 bar_ann_rt.append((bar, m, std))
     ax_rt.set_xticks(x)
@@ -696,20 +777,32 @@ def plot_runtime(results: dict, out: Path) -> None:
     sp_vals_map: dict[str, list[float]] = {
         "CPU": [
             _sp(_rt(cpu, "nufft_finufft_adjoint")[0], _rt(cpu, "grog_adjoint")[0]),
-            _sp(_rt(cpu, "nufft_finufft_forward")[0],  _rt(cpu, "grog_forward")[0]),
+            _sp(_rt(cpu, "nufft_finufft_forward")[0], _rt(cpu, "grog_forward")[0]),
         ],
     }
     if nufft_gpu_avail and grog_full_avail:
         sp_types.append(("GPU (full)", "#E15759"))
         sp_vals_map["GPU (full)"] = [
-            _sp(_rt_g("nufft_cufinufft_gpu", "nufft_adjoint")[0], _rt_g("grog_full_gpu", "grog_adjoint")[0]),
-            _sp(_rt_g("nufft_cufinufft_gpu", "nufft_forward")[0],  _rt_g("grog_full_gpu", "grog_forward")[0]),
+            _sp(
+                _rt_g("nufft_cufinufft_gpu", "nufft_adjoint")[0],
+                _rt_g("grog_full_gpu", "grog_adjoint")[0],
+            ),
+            _sp(
+                _rt_g("nufft_cufinufft_gpu", "nufft_forward")[0],
+                _rt_g("grog_full_gpu", "grog_forward")[0],
+            ),
         ]
     if nufft_gpu_avail and grog_dual_avail:
         sp_types.append(("GPU (dual)", "#B07AA1"))
         sp_vals_map["GPU (dual)"] = [
-            _sp(_rt_g("nufft_cufinufft_gpu", "nufft_adjoint")[0], _rt_g("grog_dual_stream_gpu", "grog_adjoint")[0]),
-            _sp(_rt_g("nufft_cufinufft_gpu", "nufft_forward")[0],  _rt_g("grog_dual_stream_gpu", "grog_forward")[0]),
+            _sp(
+                _rt_g("nufft_cufinufft_gpu", "nufft_adjoint")[0],
+                _rt_g("grog_dual_stream_gpu", "grog_adjoint")[0],
+            ),
+            _sp(
+                _rt_g("nufft_cufinufft_gpu", "nufft_forward")[0],
+                _rt_g("grog_dual_stream_gpu", "grog_forward")[0],
+            ),
         ]
 
     n_sp = len(sp_types)
@@ -719,7 +812,7 @@ def plot_runtime(results: dict, out: Path) -> None:
     for si, (slabel, scolor) in enumerate(sp_types):
         vals = sp_vals_map[slabel]
         bars = ax_sp.bar(x + sp_off + si * sp_w, vals, sp_w, color=scolor, label=slabel)
-        for bar, v in zip(bars, vals):
+        for bar, v in zip(bars, vals, strict=False):
             if not np.isnan(v):
                 bar_ann_sp.append((bar, v, 0.0))
     ax_sp.axhline(1.0, color="black", linestyle="--", linewidth=0.8)
@@ -735,30 +828,47 @@ def plot_runtime(results: dict, out: Path) -> None:
         margin_sp = max(ymax_sp * 0.03, 0.05)
         for bar, v, _ in bar_ann_sp:
             if not np.isnan(v):
-                ax_sp.text(bar.get_x() + bar.get_width() / 2, v + margin_sp,
-                           f"{v:.1f}×", ha="center", va="bottom",
-                           fontsize=10, fontweight="bold")
+                ax_sp.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    v + margin_sp,
+                    f"{v:.1f}×",
+                    ha="center",
+                    va="bottom",
+                    fontsize=10,
+                    fontweight="bold",
+                )
 
     # ── (1,0) Memory footprint ────────────────────────────────────────────
     bar_ann_mem: list[tuple] = []
     any_vram = False
     for mi, (label, color, _rt_pairs, ram_list, vram_list) in enumerate(specs):
-        xpos  = x + bar_off + mi * bar_w
-        total = [r + v if not np.isnan(r) else float("nan")
-                 for r, v in zip(ram_list, vram_list)]
-        ax_mem.bar(xpos, ram_list,  bar_w, color=color, label=label)
+        xpos = x + bar_off + mi * bar_w
+        total = [
+            r + v if not np.isnan(r) else float("nan")
+            for r, v in zip(ram_list, vram_list, strict=False)
+        ]
+        ax_mem.bar(xpos, ram_list, bar_w, color=color, label=label)
         if any(v > 0.0 for v in vram_list):
-            ax_mem.bar(xpos, vram_list, bar_w, bottom=ram_list,
-                       color=color, hatch="///", alpha=0.85)
+            ax_mem.bar(
+                xpos,
+                vram_list,
+                bar_w,
+                bottom=ram_list,
+                color=color,
+                hatch="///",
+                alpha=0.85,
+            )
             any_vram = True
         ghost = ax_mem.bar(xpos, total, bar_w, alpha=0.0)
-        for bar, m in zip(ghost, total):
+        for bar, m in zip(ghost, total, strict=False):
             if not np.isnan(m):
                 bar_ann_mem.append((bar, m, 0.0))
     ax_mem.set_xticks(x)
     ax_mem.set_xticklabels([lb for _, lb in ops])
     ax_mem.set_ylabel("Peak memory (GB)")
-    title_mem = "Memory footprint  (RAM + VRAM)" if any_vram else "Memory footprint  (peak RAM)"
+    title_mem = (
+        "Memory footprint  (RAM + VRAM)" if any_vram else "Memory footprint  (peak RAM)"
+    )
     ax_mem.set_title(title_mem)
     ax_mem.legend(fontsize=8, loc="upper right")
     if any_vram:
@@ -767,26 +877,46 @@ def plot_runtime(results: dict, out: Path) -> None:
 
     # ── (1,1) GROG preprocessing ─────────────────────────────────────────
     prep_labels = ["Plan\ncreation", "Interpolation"]
-    plan_rt    = float(plan_s.get("runtime_mean_sec",  float("nan")))
-    interp_rt  = float(interp_s.get("runtime_mean_sec", float("nan")))
-    plan_std   = float(plan_s.get("runtime_std_sec",   0.0))
-    interp_std = float(interp_s.get("runtime_std_sec",  0.0))
-    plan_ram   = float(plan_s.get("peak_ram_gb",   float("nan")))
-    interp_ram = float(interp_s.get("peak_ram_gb",  float("nan")))
+    plan_rt = float(plan_s.get("runtime_mean_sec", float("nan")))
+    interp_rt = float(interp_s.get("runtime_mean_sec", float("nan")))
+    plan_std = float(plan_s.get("runtime_std_sec", 0.0))
+    interp_std = float(interp_s.get("runtime_std_sec", 0.0))
+    plan_ram = float(plan_s.get("peak_ram_gb", float("nan")))
+    interp_ram = float(interp_s.get("peak_ram_gb", float("nan")))
 
-    prep_x   = np.arange(len(prep_labels))
+    prep_x = np.arange(len(prep_labels))
     ax_prep2 = ax_prep.twinx()
-    bar_prt  = ax_prep.bar(
-        prep_x - 0.2, [plan_rt, interp_rt], 0.35,
-        color="#76B7B2", label="Runtime (s)",
-        yerr=[plan_std, interp_std], capsize=3, error_kw={"elinewidth": 1},
+    bar_prt = ax_prep.bar(
+        prep_x - 0.2,
+        [plan_rt, interp_rt],
+        0.35,
+        color="#76B7B2",
+        label="Runtime (s)",
+        yerr=[plan_std, interp_std],
+        capsize=3,
+        error_kw={"elinewidth": 1},
     )
     bar_pram = ax_prep2.bar(
-        prep_x + 0.2, [plan_ram, interp_ram], 0.35,
-        color="#EDC948", label="Peak RAM (GB)", alpha=0.8,
+        prep_x + 0.2,
+        [plan_ram, interp_ram],
+        0.35,
+        color="#EDC948",
+        label="Peak RAM (GB)",
+        alpha=0.8,
     )
-    _finalize(ax_prep,  [(b, m, s) for b, m, s in zip(bar_prt,  [plan_rt,  interp_rt],  [plan_std, interp_std])],  _format_runtime)
-    _finalize(ax_prep2, [(b, m, 0.0) for b, m in zip(bar_pram, [plan_ram, interp_ram])], _format_memory)
+    _finalize(
+        ax_prep,
+        [
+            (b, m, s)
+            for b, m, s in zip(bar_prt, [plan_rt, interp_rt], [plan_std, interp_std], strict=False)
+        ],
+        _format_runtime,
+    )
+    _finalize(
+        ax_prep2,
+        [(b, m, 0.0) for b, m in zip(bar_pram, [plan_ram, interp_ram], strict=False)],
+        _format_memory,
+    )
     ax_prep.set_xticks(prep_x)
     ax_prep.set_xticklabels(prep_labels)
     ax_prep.set_ylabel("Runtime (s)", color="#76B7B2")

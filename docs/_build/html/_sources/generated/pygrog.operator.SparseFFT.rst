@@ -20,6 +20,7 @@
       ~SparseFFT.adjoint
       ~SparseFFT.forward
       ~SparseFFT.normal
+      ~SparseFFT.solve
    
    
 

@@ -6,7 +6,7 @@
 
 Computation times
 =================
-**01:08.775** total execution time for 5 files **from all galleries**:
+**01:34.624** total execution time for 6 files **from all galleries**:
 
 .. container::
 
@@ -33,17 +33,20 @@ Computation times
      - Time
      - Mem (MB)
    * - :ref:`sphx_glr_generated_autoexamples_example_gadgets.py` (``../examples/example_gadgets.py``)
-     - 00:45.470
+     - 00:47.345
      - 0.0
    * - :ref:`sphx_glr_generated_autoexamples_example_utils.py` (``../examples/example_utils.py``)
-     - 00:10.048
+     - 00:14.679
      - 0.0
    * - :ref:`sphx_glr_generated_autoexamples_example_interop.py` (``../examples/example_interop.py``)
-     - 00:07.462
+     - 00:12.630
+     - 0.0
+   * - :ref:`sphx_glr_generated_autoexamples_example_solve.py` (``../examples/example_solve.py``)
+     - 00:12.177
      - 0.0
    * - :ref:`sphx_glr_generated_autoexamples_example_basic_usage.py` (``../examples/example_basic_usage.py``)
-     - 00:04.067
+     - 00:05.113
      - 0.0
    * - :ref:`sphx_glr_generated_autoexamples_example_toeplitz.py` (``../examples/example_toeplitz.py``)
-     - 00:01.728
+     - 00:02.679
      - 0.0

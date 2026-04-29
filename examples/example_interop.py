@@ -42,7 +42,6 @@ from brainweb_dl import get_mri
 from mrinufft import get_operator, initialize_2D_spiral
 from mrinufft.density import voronoi
 
-
 # %%
 # Shared synthetic acquisition
 # ============================
@@ -51,10 +50,11 @@ from mrinufft.density import voronoi
 # :class:`numpy.ndarray` and let each framework's adapters convert it to
 # the appropriate native container.
 
+
 def _center_crop_pad(arr, target):
     out = np.zeros(target, dtype=arr.dtype)
     src, dst = [], []
-    for si, ti in zip(arr.shape, target):
+    for si, ti in zip(arr.shape, target, strict=False):
         if si >= ti:
             off = (si - ti) // 2
             src.append(slice(off, off + ti))
@@ -107,8 +107,7 @@ kspace_raw = nufft.op(image_np.astype(np.complex64))  # (n_coils_full, n_samples
 rng = np.random.default_rng(0)
 sigma = 0.001 * np.abs(kspace_raw).max()
 kspace_raw = kspace_raw + sigma * (
-    rng.standard_normal(kspace_raw.shape)
-    + 1j * rng.standard_normal(kspace_raw.shape)
+    rng.standard_normal(kspace_raw.shape) + 1j * rng.standard_normal(kspace_raw.shape)
 ).astype(np.complex64)
 
 n_compressed = 4
@@ -167,15 +166,15 @@ grog_s = pg_sigpy.GrogInterpolator(
 )
 grog_s.calc_interp_table(calib_s, lamda=0.01, precision=1)
 sparse_s, plan_s = grog_s.interpolate(ksp_s_arms)
-sparse_s_t = torch.as_tensor(np.asarray(sparse_s))
+sparse_s_t = torch.as_tensor(sparse_s)
 # pre_weights is flat (n_samples,); reshape to natural to align with the
 # natural-shape sparse output ``(n_coils, *natural_shape)``.
-pre_w = plan_s.pre_weights.reshape(*plan_s.natural_shape).to(sparse_s_t.dtype)
+pre_w = plan_s.pre_weights.reshape(*plan_s.natural_shape)
 sparse_s_t = sparse_s_t * pre_w
 
 # 4. SparseFFT + sigpy linop wrapper.
-op_s = SparseFFT(plan=plan_s, smaps=torch.as_tensor(smaps_s))
-img_zf = op_s.forward(sparse_s_t).detach().cpu().numpy()
+op_s = SparseFFT(plan=plan_s, smaps=smaps_s)
+img_zf = op_s.adjoint(sparse_s_t).numpy()
 
 # 5. L1-wavelet FISTA via ``LinearLeastSquares``.
 M_sigpy = GrogLinop(op_s).H
@@ -184,7 +183,11 @@ A_sigpy = M_sigpy * W_sigpy.H
 y_sigpy = sparse_s_t.reshape(n_compressed, op_s.indices.shape[0]).numpy()
 proxg = sp.prox.L1Reg(W_sigpy.oshape, lamda=5e-4)
 wav_hat = sp.app.LinearLeastSquares(
-    A=A_sigpy, y=y_sigpy, proxg=proxg, max_iter=80, show_pbar=False,
+    A=A_sigpy,
+    y=y_sigpy,
+    proxg=proxg,
+    max_iter=80,
+    show_pbar=False,
 ).run()
 img_sigpy = np.abs(W_sigpy.H(wav_hat))
 print(f"  done — output shape {img_sigpy.shape}")
@@ -238,7 +241,9 @@ grog_d = pg_deepinv.GrogInterpolator(
 )
 grog_d.calc_interp_table(calib_d[0], lamda=0.01, precision=1)
 sparse_d, plan_d = grog_d.interpolate(ksp_d_arms)  # (1, n_v, *natural, kw)
-sparse_d = sparse_d * plan_d.pre_weights.reshape(*plan_d.natural_shape).to(sparse_d.dtype)
+sparse_d = sparse_d * plan_d.pre_weights.reshape(*plan_d.natural_shape).to(
+    sparse_d.dtype
+)
 
 # 4. SparseFFT + deepinv physics wrapper.
 op_d = SparseFFT(plan=plan_d, smaps=smaps_d[0])
@@ -253,9 +258,7 @@ with torch.no_grad():
     for _ in range(15):
         v = physics.A_adjoint(physics.A(v))
         v = v / (v.norm() + 1e-12)
-    lipschitz = (
-        physics.A_adjoint(physics.A(v)).norm() / (v.norm() + 1e-12)
-    ).item()
+    lipschitz = (physics.A_adjoint(physics.A(v)).norm() / (v.norm() + 1e-12)).item()
 
 prior = WaveletPrior(wv="db4", wvdim=2, level=3, is_complex=True)
 prior.explicit_prior = False
@@ -311,9 +314,7 @@ ky_t = torch.as_tensor(coords[..., 0]).reshape(1, 1, 1, n_shots, n_read)
 kz_t = torch.zeros_like(kx_t)
 traj = KTrajectory(kz=kz_t, ky=ky_t, kx=kx_t)
 data_t = (
-    torch.as_tensor(kspace_raw)
-    .reshape(n_coils_full, 1, n_shots, n_read)
-    .unsqueeze(0)
+    torch.as_tensor(kspace_raw).reshape(n_coils_full, 1, n_shots, n_read).unsqueeze(0)
 )
 spatial = SpatialDimension(z=1, y=shape[0], x=shape[1])
 header = KHeader(
@@ -329,7 +330,10 @@ kdata = pg_mrpro.coil_compress(kdata, n_compressed)
 
 # 2. NLINV self-calibration through pygrog (returns smaps + cal patch).
 smaps_m, calib_m = pg_mrpro.nlinv_calib(
-    kdata, cal_width=24, max_iter=12, ret_cal=True,
+    kdata,
+    cal_width=24,
+    max_iter=12,
+    ret_cal=True,
 )  # smaps: (n_v, 1, H, W); calib: (n_v, *cal_shape)
 
 # 3. GROG — interpolation snaps the trajectory onto the grid and fuses
@@ -372,6 +376,7 @@ print(f"  done — output shape {img_mrpro.shape}")
 # Display
 # =======
 
+
 def _norm(x):
     return x / (x.max() + 1e-12)
 
@@ -384,7 +389,7 @@ panels = [
     ("deepinv (L1-wavelet)", _norm(img_deepinv)),
     ("mrpro (L1-wavelet)", _norm(img_mrpro)),
 ]
-for ax, (title, im) in zip(axes, panels):
+for ax, (title, im) in zip(axes, panels, strict=False):
     ax.imshow(im, cmap="gray", origin="lower", vmin=0.0, vmax=1.0)
     ax.set_xticks([])
     ax.set_yticks([])

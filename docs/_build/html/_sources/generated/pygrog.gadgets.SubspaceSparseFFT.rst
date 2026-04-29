@@ -20,6 +20,7 @@
       ~SubspaceSparseFFT.adjoint
       ~SubspaceSparseFFT.forward
       ~SubspaceSparseFFT.normal
+      ~SubspaceSparseFFT.solve
    
    
 

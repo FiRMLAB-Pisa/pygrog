@@ -18,11 +18,11 @@ the operator and receives numpy/cupy back.
 """
 
 __all__ = [
+    "GrogInterpolator",
     "GrogLinop",
     "GrogNormalLinop",
-    "GrogInterpolator",
-    "nlinv_calib",
     "coil_compress",
+    "nlinv_calib",
 ]
 
 import numpy as np
@@ -122,7 +122,7 @@ class GrogLinop:
                     n_coils = op.smaps.shape[0] if op.smaps is not None else 1
                     n_samples = op.indices.shape[0]
                     return op._adjoint_flat(input).reshape(n_coils, n_samples)
-                return self._op.forward(input)
+                return self._op.adjoint(input)
 
             def _adjoint_linop(self):
                 return _GrogLinopImpl(self._op, _adjoint=not self._is_adjoint)
@@ -181,9 +181,7 @@ class GrogNormalLinop:
                 if op.smaps is not None:
                     img_shape = list(op.image_shape)
                 else:
-                    n_coils = (
-                        op.smaps.shape[0] if op.smaps is not None else 1
-                    )
+                    n_coils = op.smaps.shape[0] if op.smaps is not None else 1
                     img_shape = [n_coils, *list(op.image_shape)]
                 super().__init__(img_shape, img_shape)
 

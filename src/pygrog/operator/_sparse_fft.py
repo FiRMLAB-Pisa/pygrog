@@ -32,6 +32,7 @@ from mrinufft._array_compat import with_torch
 
 from .._base._fftc import fft, ifft
 from .._utils import resize
+from .._solve._mixin import SolveMixin
 
 # ---------------------------------------------------------------------------
 # Torch C++ extension (lazy, cached)
@@ -183,7 +184,7 @@ def gather(
 # =====================================================================
 # SparseFFT
 # =====================================================================
-class SparseFFT:
+class SparseFFT(SolveMixin):
     """Sparse FFT / IFFT operator with coil combination.
 
     Accepts either a pre-built plan (from
@@ -383,10 +384,13 @@ class SparseFFT:
         sp2d = self.sort_perm.reshape(S_total, n_per).to(comp_device)
         ip2d = self.inv_perm.reshape(S_total, n_per).to(comp_device)
 
-        grid_off = (torch.arange(S_total, device=comp_device, dtype=idx2d.dtype)
-                    * self.grid_size).unsqueeze(-1)
-        data_off = (torch.arange(S_total, device=comp_device, dtype=sp2d.dtype)
-                    * n_per).unsqueeze(-1)
+        grid_off = (
+            torch.arange(S_total, device=comp_device, dtype=idx2d.dtype)
+            * self.grid_size
+        ).unsqueeze(-1)
+        data_off = (
+            torch.arange(S_total, device=comp_device, dtype=sp2d.dtype) * n_per
+        ).unsqueeze(-1)
 
         packed = (
             (idx2d + grid_off).reshape(-1).contiguous(),
@@ -403,7 +407,7 @@ class SparseFFT:
     # Forward: sparse k-space -> image  (adjoint NUFFT direction)
     # ------------------------------------------------------------------
     @with_torch
-    def forward(self, sparse_kspace: torch.Tensor) -> torch.Tensor:
+    def adjoint(self, sparse_kspace: torch.Tensor) -> torch.Tensor:
         """Sparse k-space to image.
 
         Accepted input layouts (with optional leading ``*B`` batch and, for
@@ -418,8 +422,11 @@ class SparseFFT:
         """
         # Natural-shape (multi-dim) input → fold trailing dims into n_samples.
         nat = self.natural_shape
-        if len(nat) > 1 and tuple(int(s) for s in sparse_kspace.shape[-len(nat):]) == nat:
-            flat_shape = tuple(int(s) for s in sparse_kspace.shape[:-len(nat)]) + (self.n_samples,)
+        if (
+            len(nat) > 1
+            and tuple(int(s) for s in sparse_kspace.shape[-len(nat) :]) == nat
+        ):
+            flat_shape = (*tuple(int(s) for s in sparse_kspace.shape[:-len(nat)]), self.n_samples)
             sparse_kspace = sparse_kspace.reshape(flat_shape)
 
         # x now has trailing (n_coils, n_samples).  Split prefix into (*B, *S).
@@ -458,7 +465,8 @@ class SparseFFT:
                 outs.append(self._forward_single(flat[b, 0], 0).unsqueeze(0))
         # Single-frame output shape:
         single_out_shape = (
-            tuple(self.image_shape) if self.smaps is not None
+            tuple(self.image_shape)
+            if self.smaps is not None
             else (n_coils, *self.image_shape)
         )
         stacked = torch.stack(outs, dim=0)  # (B_total, S_total, *single_out)
@@ -534,7 +542,7 @@ class SparseFFT:
         comp_device = self.device if self.device is not None else src_device
         dtype = sparse_kspace.dtype
 
-        idx_p, sqw_p, sp_p, _, S_total, n_per = self._packed_arrays(comp_device)
+        idx_p, sqw_p, sp_p, _, S_total, _n_per = self._packed_arrays(comp_device)
 
         n_coils = int(sparse_kspace.shape[-2])
         # Bring data on compute device, fold (S, n_coils, n_per) -> (n_coils, S*n_per)
@@ -542,16 +550,19 @@ class SparseFFT:
         # Globally sort once via packed_sort_perm (one indexing op per coil).
         sorted_all = ksp_d[:, sp_p]  # (n_coils, S*n_per)
 
-        super_grid = torch.empty(S_total * self.grid_size,
-                                 dtype=dtype, device=comp_device)
+        super_grid = torch.empty(
+            S_total * self.grid_size, dtype=dtype, device=comp_device
+        )
 
         if self.smaps is not None:
             conj_smaps = self._conj_smaps.to(comp_device, dtype=dtype)
-            accum = torch.zeros(S_total, *self.image_shape,
-                                dtype=dtype, device=comp_device)
+            accum = torch.zeros(
+                S_total, *self.image_shape, dtype=dtype, device=comp_device
+            )
         else:
-            accum = torch.zeros(S_total, n_coils, *self.image_shape,
-                                dtype=dtype, device=comp_device)
+            accum = torch.zeros(
+                S_total, n_coils, *self.image_shape, dtype=dtype, device=comp_device
+            )
 
         for c in range(n_coils):
             super_grid.zero_()
@@ -573,7 +584,7 @@ class SparseFFT:
     # Adjoint: image -> sparse k-space  (forward NUFFT direction)
     # ------------------------------------------------------------------
     @with_torch
-    def adjoint(self, image: torch.Tensor) -> torch.Tensor:
+    def forward(self, image: torch.Tensor) -> torch.Tensor:
         """Image to sparse k-space.
 
         Accepted input layouts (with optional leading ``*B`` batch and, for
@@ -597,7 +608,7 @@ class SparseFFT:
         s_ndim = len(s_shape)
         # Single-frame ndim (no batch, no stack):
         single_ndim = len(self.image_shape) + (0 if self.smaps is not None else 1)
-        prefix = tuple(int(s) for s in image.shape[:image.ndim - single_ndim])
+        prefix = tuple(int(s) for s in image.shape[: image.ndim - single_ndim])
 
         if s_ndim:
             if len(prefix) < s_ndim or tuple(prefix[-s_ndim:]) != s_shape:
@@ -615,13 +626,14 @@ class SparseFFT:
         S_total = int(np.prod(s_shape)) if s_shape else 1
         B_total = int(np.prod(B_shape)) if B_shape else 1
         # Reshape image to (B_total, S_total, *single_shape)
-        single_shape = tuple(image.shape[image.ndim - single_ndim:])
+        single_shape = tuple(image.shape[image.ndim - single_ndim :])
         flat = image.reshape(B_total, S_total, *single_shape)
         if s_ndim:
             outs = [self._adjoint_packed(flat[b]) for b in range(B_total)]
         else:
-            outs = [self._adjoint_single(flat[b, 0], 0).unsqueeze(0)
-                    for b in range(B_total)]
+            outs = [
+                self._adjoint_single(flat[b, 0], 0).unsqueeze(0) for b in range(B_total)
+            ]
         # Each entry has shape (S_total, n_coils, n_samples)
         n_coils = outs[0].shape[1]
         stacked = torch.stack(outs, dim=0)  # (B_total, S_total, n_coils, n_samples)
@@ -709,30 +721,34 @@ class SparseFFT:
 
         # Pre-allocate a packed (S, *grid_shape) zero-padded buffer reused
         # per coil; one batched FFT per coil over the full stack.
-        padded = torch.zeros(S_total, *self.grid_shape,
-                             dtype=dtype, device=comp_device)
+        padded = torch.zeros(S_total, *self.grid_shape, dtype=dtype, device=comp_device)
         slc = (slice(None), *self._pad_slices)
 
         # Output is built sorted in packed layout, then unsorted via inv_perm
         # at the end (single indexing op per coil).
-        output_unsorted = torch.empty(n_coils, S_total * n_per,
-                                      dtype=dtype, device=comp_device)
+        output_unsorted = torch.empty(
+            n_coils, S_total * n_per, dtype=dtype, device=comp_device
+        )
 
         for c in range(n_coils):
             if self.smaps is not None:
-                coil_imgs = image_d * smaps[c]            # (S, *image_shape)
+                coil_imgs = image_d * smaps[c]  # (S, *image_shape)
             else:
-                coil_imgs = image_d[:, c]                  # (S, *image_shape)
+                coil_imgs = image_d[:, c]  # (S, *image_shape)
             padded.zero_()
             padded[slc] = coil_imgs
-            kgrid = fft(padded, axes=self.fft_axes)        # (S, *grid_shape)
-            super_flat = kgrid.reshape(-1)                 # (S*grid_size,)
+            kgrid = fft(padded, axes=self.fft_axes)  # (S, *grid_shape)
+            super_flat = kgrid.reshape(-1)  # (S*grid_size,)
             # Single C++ kernel call across the whole stack.
             sorted_packed = _gather(super_flat, idx_p, sqw_p)  # (S*n_per,)
             # Undo per-stack sort with one indexing op.
             output_unsorted[c] = sorted_packed[ip_p]
 
-        out = output_unsorted.reshape(n_coils, S_total, n_per).permute(1, 0, 2).contiguous()
+        out = (
+            output_unsorted.reshape(n_coils, S_total, n_per)
+            .permute(1, 0, 2)
+            .contiguous()
+        )
         return out.to(src_device)
 
     def __call__(self, x, adjoint=False):
@@ -749,8 +765,11 @@ class SparseFFT:
 
         When ``self.toeplitz`` is True, uses a pre-computed PSF on
         ``grid_shape`` (built lazily on first call) and applies
-        pad / FFT / PSF / IFFT / crop per coil.  Otherwise falls back to
-        ``forward(adjoint(image))``.
+        pad / FFT / PSF / IFFT / crop per coil.  Otherwise dispatches to
+        a fused ``forward(adjoint(.))`` helper that *skips* the
+        ``inv_perm`` (in adjoint) and ``sort_perm`` (in forward) round-
+        trip — the intermediate sparse k-space is kept in sorted order
+        end-to-end ("sort-once" optimisation).
 
         Parameters
         ----------
@@ -766,15 +785,176 @@ class SparseFFT:
             if self._toep_op is None:
                 # Local import to avoid circular import at module load.
                 from .._toep._grog_toep import GrogToeplitzOp
+
                 self._toep_op = GrogToeplitzOp(self, device=self.device)
             return self._toep_op(image)
-        return self.forward(self.adjoint(image))
+        return self._normal_no_toep(image)
+
+    # ------------------------------------------------------------------
+    # Sort-once non-Toeplitz normal
+    # ------------------------------------------------------------------
+    @with_torch
+    def _normal_no_toep(self, image: torch.Tensor) -> torch.Tensor:
+        """Batched/stacked dispatcher for :meth:`_normal_*_no_toep`.
+
+        Mirrors the dispatch logic of :meth:`forward` / :meth:`adjoint`
+        but routes per-frame work to fused helpers that omit the
+        ``inv_perm`` / ``sort_perm`` round-trip in the intermediate
+        sparse-k-space buffer.
+        """
+        s_shape = self.stack_shape
+        s_ndim = len(s_shape)
+        single_ndim = (
+            len(self.image_shape)
+            if self.smaps is not None
+            else len(self.image_shape) + 1
+        )
+        prefix = tuple(int(s) for s in image.shape[: image.ndim - single_ndim])
+        if s_ndim:
+            if len(prefix) < s_ndim or tuple(prefix[-s_ndim:]) != s_shape:
+                raise ValueError(
+                    f"image prefix {prefix} must end with stack_shape {s_shape}"
+                )
+            B_shape = prefix[:-s_ndim]
+        else:
+            B_shape = prefix
+
+        if not prefix:
+            return self._normal_single_no_toep(image, 0)
+
+        S_total = int(np.prod(s_shape)) if s_shape else 1
+        B_total = int(np.prod(B_shape)) if B_shape else 1
+        single_shape = tuple(image.shape[image.ndim - single_ndim :])
+        flat = image.reshape(B_total, S_total, *single_shape)
+        outs = []
+        if s_ndim:
+            for b in range(B_total):
+                outs.append(self._normal_packed_no_toep(flat[b]))
+        else:
+            for b in range(B_total):
+                outs.append(self._normal_single_no_toep(flat[b, 0], 0).unsqueeze(0))
+        stacked = torch.stack(outs, dim=0)
+        return stacked.reshape(*B_shape, *s_shape, *single_shape)
+
+    def _normal_single_no_toep(self, image: torch.Tensor, s_flat_idx: int = 0):
+        """Sort-once single-frame ``A^H A``; intermediate stays sorted."""
+        src_device = image.device
+        comp_device = self.device if self.device is not None else src_device
+        dtype = image.dtype
+
+        idx_s, sqw_s, _, _ = self._stack_arrays(s_flat_idx)
+        indices = idx_s.to(comp_device)
+        sqrt_w = sqw_s.to(comp_device)
+        self._ensure_bins(comp_device)
+
+        image_d = image.to(comp_device)
+        if self.smaps is not None:
+            smaps = self.smaps.to(comp_device, dtype=dtype)
+            n_coils = smaps.shape[0]
+            accum = torch.zeros(self.image_shape, dtype=dtype, device=comp_device)
+        else:
+            n_coils = image_d.shape[0]
+            accum = torch.zeros(
+                (n_coils, *self.image_shape),
+                dtype=dtype,
+                device=comp_device,
+            )
+
+        padded = torch.empty(*self.grid_shape, dtype=dtype, device=comp_device)
+        grid = torch.empty(self.grid_size, dtype=dtype, device=comp_device)
+
+        for c in range(n_coils):
+            coil_img = image_d * smaps[c] if self.smaps is not None else image_d[c]
+            # adjoint: pad -> FFT -> gather (sorted; skip [inv_perm])
+            padded.zero_()
+            padded[self._pad_slices] = coil_img
+            kgrid = fft(padded, axes=self.fft_axes).reshape(-1)
+            sorted_kspace = _gather(kgrid, indices, sqrt_w)
+            # forward: scatter (presorted; skip [sort_perm]) -> IFFT -> crop
+            img_c = self._scatter_ifft_crop(
+                sorted_kspace,
+                indices,
+                sqrt_w,
+                grid,
+                dtype,
+            )
+            if self.smaps is not None:
+                accum.addcmul_(img_c, smaps[c].conj())
+            else:
+                accum[c] = img_c
+
+        return accum.to(src_device)
+
+    def _normal_packed_no_toep(self, image: torch.Tensor) -> torch.Tensor:
+        """Sort-once packed-stack ``A^H A`` over all S elements at once."""
+        src_device = image.device
+        comp_device = self.device if self.device is not None else src_device
+        dtype = image.dtype
+
+        idx_p, sqw_p, _, _, S_total, _n_per = self._packed_arrays(comp_device)
+
+        image_d = image.to(comp_device)
+        if self.smaps is not None:
+            smaps = self.smaps.to(comp_device, dtype=dtype)
+            n_coils = smaps.shape[0]
+            accum = torch.zeros(
+                S_total,
+                *self.image_shape,
+                dtype=dtype,
+                device=comp_device,
+            )
+        else:
+            n_coils = image_d.shape[1]
+            accum = torch.zeros(
+                S_total,
+                n_coils,
+                *self.image_shape,
+                dtype=dtype,
+                device=comp_device,
+            )
+
+        padded = torch.zeros(S_total, *self.grid_shape, dtype=dtype, device=comp_device)
+        super_grid = torch.empty(
+            S_total * self.grid_size,
+            dtype=dtype,
+            device=comp_device,
+        )
+        slc = (slice(None), *self._pad_slices)
+
+        for c in range(n_coils):
+            coil_imgs = image_d * smaps[c] if self.smaps is not None else image_d[:, c]
+            # adj packed: pad/FFT/gather (sorted-packed; skip [ip_p])
+            padded.zero_()
+            padded[slc] = coil_imgs
+            kgrid_super = fft(padded, axes=self.fft_axes).reshape(-1)
+            sorted_packed = _gather(kgrid_super, idx_p, sqw_p)  # (S*n_per,)
+            # fwd packed presorted: scatter (skip [:, sp_p]) / IFFT / crop
+            super_grid.zero_()
+            _scatter_add(super_grid, sorted_packed, idx_p, sqw_p)
+            full_imgs = ifft(
+                super_grid.reshape(S_total, *self.grid_shape),
+                axes=self.fft_axes,
+            )
+            imgs = resize(full_imgs, (S_total, *self.image_shape))
+            if self.smaps is not None:
+                accum.addcmul_(imgs, smaps[c].conj().unsqueeze(0))
+            else:
+                accum[:, c] = imgs
+
+        return accum.to(src_device)
+
+    # ------------------------------------------------------------------
+    # Iterative solve
+    # ------------------------------------------------------------------
+    # Provided by SolveMixin (attached at module import time).
 
     # ------------------------------------------------------------------
     # Batch helpers for decorators  (Tier-1 FFT fusion)
     # ------------------------------------------------------------------
     def _scatter_ifft_crop_batch(
-        self, batch_kspace: torch.Tensor, s_flat_idx: int = 0,
+        self,
+        batch_kspace: torch.Tensor,
+        s_flat_idx: int = 0,
     ) -> torch.Tensor:
         """Scatter (per-component loop) → **one batched IFFT** → crop.
 
@@ -825,7 +1005,9 @@ class SparseFFT:
         return imgs.to(src_device)
 
     def _fft_pad_gather_batch(
-        self, batch_imgs: torch.Tensor, s_flat_idx: int = 0,
+        self,
+        batch_imgs: torch.Tensor,
+        s_flat_idx: int = 0,
     ) -> torch.Tensor:
         """ONE batched FFT -> zero-pad -> gather (per-component loop).
 

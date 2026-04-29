@@ -157,7 +157,7 @@ plt.show()
 
 from pygrog.utils import nlinv_calib
 
-acs = 8         # fully-sampled ACS centre width (columns), as in MATLAB reference
+acs = 8  # fully-sampled ACS centre width (columns), as in MATLAB reference
 cal_width = 24  # NLINV internal calibration resolution for Step 2
 
 # Cartesian undersampling mask: R=2 readout subsampling + 16-col ACS centre
@@ -272,15 +272,11 @@ smaps_cal, grappa_train, image_cal = nlinv_calib(
     ret_image=True,
 )
 
-smaps_cal_np = (
-    smaps_cal.numpy() if isinstance(smaps_cal, torch.Tensor) else smaps_cal
-)
+smaps_cal_np = smaps_cal.numpy() if isinstance(smaps_cal, torch.Tensor) else smaps_cal
 grappa_train_np = (
     grappa_train.numpy() if isinstance(grappa_train, torch.Tensor) else grappa_train
 )
-image_cal_np = (
-    image_cal.numpy() if isinstance(image_cal, torch.Tensor) else image_cal
-)
+image_cal_np = image_cal.numpy() if isinstance(image_cal, torch.Tensor) else image_cal
 
 print(f"\n[Step 2] Smaps shape       : {smaps_cal_np.shape}")
 print(f"[Step 2] Low-res image shape: {image_cal_np.shape}")
@@ -314,9 +310,7 @@ acr_zf = kspace_us[
 
 fig, axes = plt.subplots(2, ncols_show, figsize=(3 * ncols_show, 5.5))
 for i in range(ncols_show):
-    axes[0, i].imshow(
-        np.log1p(np.abs(acr_zf[i])), cmap="inferno", origin="lower"
-    )
+    axes[0, i].imshow(np.log1p(np.abs(acr_zf[i])), cmap="inferno", origin="lower")
     axes[0, i].set_title(f"Zero-filled — coil {i + 1}")
     axes[0, i].axis("off")
     axes[1, i].imshow(

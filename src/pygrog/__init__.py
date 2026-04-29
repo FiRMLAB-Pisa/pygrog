@@ -17,3 +17,6 @@ from . import operator  # noqa
 from . import gadgets  # noqa
 from . import utils  # noqa
 from . import interop  # noqa
+
+# Iterative solvers + polynomial preconditioner.
+from ._solve import cg, lsmr, solve, PolynomialPreconditioner  # noqa

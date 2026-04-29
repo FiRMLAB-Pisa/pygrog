@@ -17,7 +17,12 @@ def _make_grog(rng, shape, n_coils, n_views, n_readout, image_shape=None, **kw):
         image_shape = shape
     coords = rng.standard_normal((n_views, n_readout, 2)).astype(np.float32)
     grog = GrogInterpolator(
-        shape=shape, coords=coords, kernel_width=2, oversamp=2.0, image_shape=image_shape, **kw
+        shape=shape,
+        coords=coords,
+        kernel_width=2,
+        oversamp=2.0,
+        image_shape=image_shape,
+        **kw,
     )
     calib = (
         rng.standard_normal((n_coils, *shape))
@@ -69,12 +74,12 @@ def test_ret_image_matches_sparsefft_forward_rss():
     image = grog.interpolate(data, ret_image=True)
 
     # Caller must pre-multiply by plan.pre_weights before passing to
-    # SparseFFT.forward — this is what ret_image=True does internally.
+    # SparseFFT.adjoint — this is what ret_image=True does internally.
     op = SparseFFT(plan=grog.plan)
     sqrt_w = grog.plan.pre_weights
     sparse_t = torch.as_tensor(np.asarray(sparse))
     sparse_weighted = sparse_t * sqrt_w.to(sparse_t.dtype).unsqueeze(0)
-    expected = op.forward(sparse_weighted)
+    expected = op.adjoint(sparse_weighted)
     expected = expected.abs().square().sum(0).sqrt().cpu().numpy()
 
     np.testing.assert_allclose(image, expected, rtol=1e-5, atol=1e-5)

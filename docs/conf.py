@@ -33,7 +33,14 @@ extensions = [
 ]
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "api/index.rst", "build.md", "installation_guide.md"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    "api/index.rst",
+    "build.md",
+    "installation_guide.md",
+]
 
 suppress_warnings = ["myst.xref_missing"]
 

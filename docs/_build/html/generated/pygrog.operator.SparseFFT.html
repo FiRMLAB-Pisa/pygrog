@@ -51,6 +51,8 @@
     <script src="../_static/copybutton.js?v=f281be69"></script>
     <script src="../_static/sg-tags.js?v=d80f6fa4"></script>
     <script src="../_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
+    <script>window.MathJax = {"options": {"processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+    <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'generated/pygrog.operator.SparseFFT';</script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
@@ -168,6 +170,7 @@
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_solve.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
 <li class="toctree-l2"><a class="reference internal" href="autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
@@ -427,15 +430,18 @@
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._scatter"><code class="docutils literal notranslate"><span class="pre">SparseFFT._scatter()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._stack_arrays"><code class="docutils literal notranslate"><span class="pre">SparseFFT._stack_arrays()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._packed_arrays"><code class="docutils literal notranslate"><span class="pre">SparseFFT._packed_arrays()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.forward"><code class="docutils literal notranslate"><span class="pre">SparseFFT.forward()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.adjoint"><code class="docutils literal notranslate"><span class="pre">SparseFFT.adjoint()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._forward_single"><code class="docutils literal notranslate"><span class="pre">SparseFFT._forward_single()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._forward_packed"><code class="docutils literal notranslate"><span class="pre">SparseFFT._forward_packed()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.adjoint"><code class="docutils literal notranslate"><span class="pre">SparseFFT.adjoint()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.forward"><code class="docutils literal notranslate"><span class="pre">SparseFFT.forward()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._adjoint_flat"><code class="docutils literal notranslate"><span class="pre">SparseFFT._adjoint_flat()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._adjoint_single"><code class="docutils literal notranslate"><span class="pre">SparseFFT._adjoint_single()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._adjoint_packed"><code class="docutils literal notranslate"><span class="pre">SparseFFT._adjoint_packed()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.__call__"><code class="docutils literal notranslate"><span class="pre">SparseFFT.__call__()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.normal"><code class="docutils literal notranslate"><span class="pre">SparseFFT.normal()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._normal_no_toep"><code class="docutils literal notranslate"><span class="pre">SparseFFT._normal_no_toep()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._normal_single_no_toep"><code class="docutils literal notranslate"><span class="pre">SparseFFT._normal_single_no_toep()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._normal_packed_no_toep"><code class="docutils literal notranslate"><span class="pre">SparseFFT._normal_packed_no_toep()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._scatter_ifft_crop_batch"><code class="docutils literal notranslate"><span class="pre">SparseFFT._scatter_ifft_crop_batch()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._fft_pad_gather_batch"><code class="docutils literal notranslate"><span class="pre">SparseFFT._fft_pad_gather_batch()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._scatter_ifft_crop"><code class="docutils literal notranslate"><span class="pre">SparseFFT._scatter_ifft_crop()</span></code></a></li>
@@ -460,7 +466,7 @@
 <dl class="py class">
 <dt class="sig sig-object py" id="pygrog.operator.SparseFFT">
 <span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">pygrog.operator.</span></span><span class="sig-name descname"><span class="pre">SparseFFT</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">grid_shape</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">image_shape</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">indices</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">weights</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">smaps</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">plan</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">toeplitz</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/operator/_sparse_fft.html#SparseFFT"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.operator.SparseFFT" title="Link to this definition">#</a></dt>
-<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">SolveMixin</span></code></p>
 <p>Sparse FFT / IFFT operator with coil combination.</p>
 <p>Accepts either a pre-built plan (from
 <code class="xref py py-meth docutils literal notranslate"><span class="pre">fft_plan()</span></code>) or raw arrays.
@@ -493,13 +499,16 @@ disabled on CUDA (matches <code class="xref py py-func docutils literal notransl
 <td><p></p></td>
 </tr>
 <tr class="row-even"><td><p><a class="reference internal" href="#pygrog.operator.SparseFFT.adjoint" title="pygrog.operator.SparseFFT.adjoint"><code class="xref py py-obj docutils literal notranslate"><span class="pre">adjoint</span></code></a></p></td>
-<td><p>Image to sparse k-space.</p></td>
+<td><p>Sparse k-space to image.</p></td>
 </tr>
 <tr class="row-odd"><td><p><a class="reference internal" href="#pygrog.operator.SparseFFT.forward" title="pygrog.operator.SparseFFT.forward"><code class="xref py py-obj docutils literal notranslate"><span class="pre">forward</span></code></a></p></td>
-<td><p>Sparse k-space to image.</p></td>
+<td><p>Image to sparse k-space.</p></td>
 </tr>
 <tr class="row-even"><td><p><a class="reference internal" href="#pygrog.operator.SparseFFT.normal" title="pygrog.operator.SparseFFT.normal"><code class="xref py py-obj docutils literal notranslate"><span class="pre">normal</span></code></a></p></td>
 <td><p>Self-adjoint application: <code class="docutils literal notranslate"><span class="pre">A^H</span> <span class="pre">A</span> <span class="pre">image</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">solve</span></code></p></td>
+<td><p>Solve <span class="math notranslate nohighlight">\(\arg\min_x \|A x - b\|^2 + \lambda^2 \|x\|^2\)</span>.</p></td>
 </tr>
 </tbody>
 </table>
@@ -543,8 +552,8 @@ grid land in disjoint per-stack slabs.  Cached per device.</p>
 </dd></dl>
 
 <dl class="py method">
-<dt class="sig sig-object py" id="pygrog.operator.SparseFFT.forward">
-<span class="sig-name descname"><span class="pre">forward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sparse_kspace</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/operator/_sparse_fft.html#SparseFFT.forward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.operator.SparseFFT.forward" title="Link to this definition">#</a></dt>
+<dt class="sig sig-object py" id="pygrog.operator.SparseFFT.adjoint">
+<span class="sig-name descname"><span class="pre">adjoint</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sparse_kspace</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/operator/_sparse_fft.html#SparseFFT.adjoint"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.operator.SparseFFT.adjoint" title="Link to this definition">#</a></dt>
 <dd><p>Sparse k-space to image.</p>
 <p>Accepted input layouts (with optional leading <code class="docutils literal notranslate"><span class="pre">*B</span></code> batch and, for
 stacked plans, leading <code class="docutils literal notranslate"><span class="pre">*S</span></code> stack axes inserted between batch and
@@ -606,8 +615,8 @@ else <code class="docutils literal notranslate"><span class="pre">(S_total,</spa
 </dd></dl>
 
 <dl class="py method">
-<dt class="sig sig-object py" id="pygrog.operator.SparseFFT.adjoint">
-<span class="sig-name descname"><span class="pre">adjoint</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/operator/_sparse_fft.html#SparseFFT.adjoint"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.operator.SparseFFT.adjoint" title="Link to this definition">#</a></dt>
+<dt class="sig sig-object py" id="pygrog.operator.SparseFFT.forward">
+<span class="sig-name descname"><span class="pre">forward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/operator/_sparse_fft.html#SparseFFT.forward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.operator.SparseFFT.forward" title="Link to this definition">#</a></dt>
 <dd><p>Image to sparse k-space.</p>
 <p>Accepted input layouts (with optional leading <code class="docutils literal notranslate"><span class="pre">*B</span></code> batch and, for
 stacked plans, leading <code class="docutils literal notranslate"><span class="pre">*S</span></code> stack axes):</p>
@@ -698,8 +707,11 @@ device.</p>
 <dd><p>Self-adjoint application: <code class="docutils literal notranslate"><span class="pre">A^H</span> <span class="pre">A</span> <span class="pre">image</span></code>.</p>
 <p>When <code class="docutils literal notranslate"><span class="pre">self.toeplitz</span></code> is True, uses a pre-computed PSF on
 <code class="docutils literal notranslate"><span class="pre">grid_shape</span></code> (built lazily on first call) and applies
-pad / FFT / PSF / IFFT / crop per coil.  Otherwise falls back to
-<code class="docutils literal notranslate"><span class="pre">forward(adjoint(image))</span></code>.</p>
+pad / FFT / PSF / IFFT / crop per coil.  Otherwise dispatches to
+a fused <code class="docutils literal notranslate"><span class="pre">forward(adjoint(.))</span></code> helper that <em>skips</em> the
+<code class="docutils literal notranslate"><span class="pre">inv_perm</span></code> (in adjoint) and <code class="docutils literal notranslate"><span class="pre">sort_perm</span></code> (in forward) round-
+trip — the intermediate sparse k-space is kept in sorted order
+end-to-end (“sort-once” optimisation).</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>image</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – Same shape as the output of <a class="reference internal" href="#pygrog.operator.SparseFFT.forward" title="pygrog.operator.SparseFFT.forward"><code class="xref py py-meth docutils literal notranslate"><span class="pre">forward()</span></code></a>.</p>
@@ -718,6 +730,59 @@ argument to torch tensors, but will respect the device they are allocated
 on. The outputs will be converted back to the original array module and
 device.</p>
 </div>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="pygrog.operator.SparseFFT._normal_no_toep">
+<span class="sig-name descname"><span class="pre">_normal_no_toep</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/operator/_sparse_fft.html#SparseFFT._normal_no_toep"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.operator.SparseFFT._normal_no_toep" title="Link to this definition">#</a></dt>
+<dd><p>Batched/stacked dispatcher for <code class="xref py py-meth docutils literal notranslate"><span class="pre">_normal_*_no_toep()</span></code>.</p>
+<p>Mirrors the dispatch logic of <a class="reference internal" href="#pygrog.operator.SparseFFT.forward" title="pygrog.operator.SparseFFT.forward"><code class="xref py py-meth docutils literal notranslate"><span class="pre">forward()</span></code></a> / <a class="reference internal" href="#pygrog.operator.SparseFFT.adjoint" title="pygrog.operator.SparseFFT.adjoint"><code class="xref py py-meth docutils literal notranslate"><span class="pre">adjoint()</span></code></a>
+but routes per-frame work to fused helpers that omit the
+<code class="docutils literal notranslate"><span class="pre">inv_perm</span></code> / <code class="docutils literal notranslate"><span class="pre">sort_perm</span></code> round-trip in the intermediate
+sparse-k-space buffer.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This function uses <code class="docutils literal notranslate"><span class="pre">torch</span></code> internally, and will convert all its array
+argument to torch tensors, but will respect the device they are allocated
+on. The outputs will be converted back to the original array module and
+device.</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>image</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="pygrog.operator.SparseFFT._normal_single_no_toep">
+<span class="sig-name descname"><span class="pre">_normal_single_no_toep</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">s_flat_idx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/operator/_sparse_fft.html#SparseFFT._normal_single_no_toep"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.operator.SparseFFT._normal_single_no_toep" title="Link to this definition">#</a></dt>
+<dd><p>Sort-once single-frame <code class="docutils literal notranslate"><span class="pre">A^H</span> <span class="pre">A</span></code>; intermediate stays sorted.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>image</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a>)</p></li>
+<li><p><strong>s_flat_idx</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="pygrog.operator.SparseFFT._normal_packed_no_toep">
+<span class="sig-name descname"><span class="pre">_normal_packed_no_toep</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/operator/_sparse_fft.html#SparseFFT._normal_packed_no_toep"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.operator.SparseFFT._normal_packed_no_toep" title="Link to this definition">#</a></dt>
+<dd><p>Sort-once packed-stack <code class="docutils literal notranslate"><span class="pre">A^H</span> <span class="pre">A</span></code> over all S elements at once.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>image</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a></p>
+</dd>
+</dl>
 </dd></dl>
 
 <dl class="py method">
@@ -855,15 +920,18 @@ Reuses the <em>padded</em> buffer to avoid a fresh allocation per coil.</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._scatter"><code class="docutils literal notranslate"><span class="pre">SparseFFT._scatter()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._stack_arrays"><code class="docutils literal notranslate"><span class="pre">SparseFFT._stack_arrays()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._packed_arrays"><code class="docutils literal notranslate"><span class="pre">SparseFFT._packed_arrays()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.forward"><code class="docutils literal notranslate"><span class="pre">SparseFFT.forward()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.adjoint"><code class="docutils literal notranslate"><span class="pre">SparseFFT.adjoint()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._forward_single"><code class="docutils literal notranslate"><span class="pre">SparseFFT._forward_single()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._forward_packed"><code class="docutils literal notranslate"><span class="pre">SparseFFT._forward_packed()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.adjoint"><code class="docutils literal notranslate"><span class="pre">SparseFFT.adjoint()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.forward"><code class="docutils literal notranslate"><span class="pre">SparseFFT.forward()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._adjoint_flat"><code class="docutils literal notranslate"><span class="pre">SparseFFT._adjoint_flat()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._adjoint_single"><code class="docutils literal notranslate"><span class="pre">SparseFFT._adjoint_single()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._adjoint_packed"><code class="docutils literal notranslate"><span class="pre">SparseFFT._adjoint_packed()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.__call__"><code class="docutils literal notranslate"><span class="pre">SparseFFT.__call__()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT.normal"><code class="docutils literal notranslate"><span class="pre">SparseFFT.normal()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._normal_no_toep"><code class="docutils literal notranslate"><span class="pre">SparseFFT._normal_no_toep()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._normal_single_no_toep"><code class="docutils literal notranslate"><span class="pre">SparseFFT._normal_single_no_toep()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._normal_packed_no_toep"><code class="docutils literal notranslate"><span class="pre">SparseFFT._normal_packed_no_toep()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._scatter_ifft_crop_batch"><code class="docutils literal notranslate"><span class="pre">SparseFFT._scatter_ifft_crop_batch()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._fft_pad_gather_batch"><code class="docutils literal notranslate"><span class="pre">SparseFFT._fft_pad_gather_batch()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.operator.SparseFFT._scatter_ifft_crop"><code class="docutils literal notranslate"><span class="pre">SparseFFT._scatter_ifft_crop()</span></code></a></li>

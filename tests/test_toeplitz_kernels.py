@@ -94,8 +94,9 @@ def test_psf_scatter_outer_matches_reference(device, M):
     indices = torch.randint(0, grid_size, (n,), dtype=torch.int64, device=device)
     indices, _ = torch.sort(indices)
     w_sq = torch.rand(n, dtype=torch.float32, device=device) + 0.1
-    basis = (torch.randn(n, M, dtype=torch.float32, device=device)
-             + 1j * torch.randn(n, M, dtype=torch.float32, device=device))
+    basis = torch.randn(n, M, dtype=torch.float32, device=device) + 1j * torch.randn(
+        n, M, dtype=torch.float32, device=device
+    )
     basis = basis.to(torch.complex64)
 
     psf = torch.zeros(grid_size, M, M, dtype=torch.complex64, device=device)
@@ -116,8 +117,9 @@ def test_psf_scatter_outer_basis_matches_reference(device, K, T):
     indices = torch.randint(0, grid_size, (n,), dtype=torch.int64, device=device)
     indices, _ = torch.sort(indices)
     w_sq = torch.rand(n, dtype=torch.float32, device=device) + 0.1
-    basis = (torch.randn(K, T, dtype=torch.float32, device=device)
-             + 1j * torch.randn(K, T, dtype=torch.float32, device=device))
+    basis = torch.randn(K, T, dtype=torch.float32, device=device) + 1j * torch.randn(
+        K, T, dtype=torch.float32, device=device
+    )
     basis = basis.to(torch.complex64)
     time_index = torch.randint(0, T, (n,), dtype=torch.int64, device=device)
 
@@ -137,11 +139,10 @@ def test_psf_scatter_outer_is_hermitian(device):
     indices = torch.randint(0, grid_size, (n,), dtype=torch.int64, device=device)
     indices, _ = torch.sort(indices)
     w_sq = torch.rand(n, dtype=torch.float32, device=device) + 0.1
-    basis = (torch.randn(n, M, dtype=torch.complex64, device=device))
+    basis = torch.randn(n, M, dtype=torch.complex64, device=device)
     psf = torch.zeros(grid_size, M, M, dtype=torch.complex64, device=device)
     ext.psf_scatter_outer(psf, indices, w_sq, basis)
-    torch.testing.assert_close(psf, psf.conj().transpose(-2, -1),
-                               rtol=1e-5, atol=1e-5)
+    torch.testing.assert_close(psf, psf.conj().transpose(-2, -1), rtol=1e-5, atol=1e-5)
 
 
 def test_psf_scatter_outer_basis_is_hermitian(device):
@@ -155,5 +156,4 @@ def test_psf_scatter_outer_basis_is_hermitian(device):
     time_index = torch.randint(0, T, (n,), dtype=torch.int64, device=device)
     psf = torch.zeros(grid_size, K, K, dtype=torch.complex64, device=device)
     ext.psf_scatter_outer_basis(psf, indices, w_sq, basis, time_index)
-    torch.testing.assert_close(psf, psf.conj().transpose(-2, -1),
-                               rtol=1e-5, atol=1e-5)
+    torch.testing.assert_close(psf, psf.conj().transpose(-2, -1), rtol=1e-5, atol=1e-5)

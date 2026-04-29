@@ -168,6 +168,7 @@
 <li class="toctree-l2"><a class="reference internal" href="example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
 <li class="toctree-l2"><a class="reference internal" href="example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
 <li class="toctree-l2"><a class="reference internal" href="example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
+<li class="toctree-l2"><a class="reference internal" href="example_solve.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
 <li class="toctree-l2"><a class="reference internal" href="example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
 <li class="toctree-l2"><a class="reference internal" href="example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
 </ul>
@@ -437,6 +438,9 @@ reconstruction using GROG-accelerated sparse FFT operators.</p>
 </div><div class="sphx-glr-thumbcontainer" tooltip="PyGROG ships native adapters for the full preprocessing chain:"><img alt="" src="../../_images/sphx_glr_example_interop_thumb.png" />
 <p><a class="reference internal" href="example_interop.html"><span class="doc">End-to-end CS reconstruction with sigpy, deepinv and mrpro</span></a></p>
   <div class="sphx-glr-thumbnail-title">End-to-end CS reconstruction with sigpy, deepinv and mrpro</div>
+</div><div class="sphx-glr-thumbcontainer" tooltip="This example demonstrates the solve method exposed on every PyGROG operator (``SparseFFT``, MaskedFFT and their pygrog.gadgets decorators), and the pygrog.PolynomialPreconditioner accelerator."><img alt="" src="../../_images/sphx_glr_example_solve_thumb.png" />
+<p><a class="reference internal" href="example_solve.html"><span class="doc">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</span></a></p>
+  <div class="sphx-glr-thumbnail-title">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</div>
 </div><div class="sphx-glr-thumbcontainer" tooltip="Iterative reconstructions (CG, FISTA) repeatedly evaluate the normal operator A^H A.  PyGROG ships a Toeplitz-embedded short-circuit: op.normal(image) builds a small PSF once and replaces every forward+adjoint NUFFT pair by a pad → FFT → multiply → IFFT → crop sequence."><img alt="" src="../../_images/sphx_glr_example_toeplitz_thumb.png" />
 <p><a class="reference internal" href="example_toeplitz.html"><span class="doc">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</span></a></p>
   <div class="sphx-glr-thumbnail-title">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</div>

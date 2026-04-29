@@ -41,9 +41,7 @@ class SubspaceToeplitzOp:
     def __init__(self, sub_op, device=None):
         base = sub_op._base
         if base.smaps is None:
-            raise NotImplementedError(
-                "SubspaceToeplitzOp requires base_op.smaps"
-            )
+            raise NotImplementedError("SubspaceToeplitzOp requires base_op.smaps")
         self._base = base
         self._sub = sub_op
 
@@ -71,7 +69,9 @@ class SubspaceToeplitzOp:
             # PSF[j, k', k] = density[j] * conj(basis[k', t_j]) * basis[k, t_j]
             basis = sub_op.basis.to(self.device).contiguous()  # (K, T)
             psf_dtype = basis.dtype
-            density = base.density.to(self.device)  # (*S, *grid_shape) or (*grid_shape,)
+            density = base.density.to(
+                self.device
+            )  # (*S, *grid_shape) or (*grid_shape,)
 
             # Build per-grid-cell time index: shape (*grid_shape,) int64
             # The t-axis position within grid_shape (== natural_shape for MaskedFFT).
@@ -92,21 +92,31 @@ class SubspaceToeplitzOp:
             # basis: (K, T) → per-cell: (G, K)
             basis_at_j = basis[:, t_flat].T.contiguous()  # (G, K)
             # PSF_flat[j, k', k] = conj(basis_at_j[j, k']) * basis_at_j[j, k]
-            psf_flat_nodens = (
-                basis_at_j.unsqueeze(1).conj() * basis_at_j.unsqueeze(2)
+            psf_flat_nodens = basis_at_j.unsqueeze(1).conj() * basis_at_j.unsqueeze(
+                2
             )  # (G, K, K)
 
             if not self.stack_shape:
                 dens_flat = density.reshape(-1)  # (G,)
-                psf_flat = dens_flat.to(dtype=psf_dtype).unsqueeze(-1).unsqueeze(-1) * psf_flat_nodens
+                psf_flat = (
+                    dens_flat.to(dtype=psf_dtype).unsqueeze(-1).unsqueeze(-1)
+                    * psf_flat_nodens
+                )
                 # Transpose to match the SparseFFT PSF layout (see transpose at end of SparseFFT path)
-                self.psf = psf_flat.transpose(-2, -1).contiguous().reshape(*self.grid_shape, self.K, self.K)
+                self.psf = (
+                    psf_flat.transpose(-2, -1)
+                    .contiguous()
+                    .reshape(*self.grid_shape, self.K, self.K)
+                )
             else:
                 S_total = int(np.prod(self.stack_shape))
                 dens_v = density.reshape(S_total, -1)  # (S, G)
-                psf_v = dens_v.to(dtype=psf_dtype).unsqueeze(-1).unsqueeze(-1) * psf_flat_nodens.unsqueeze(0)
+                psf_v = dens_v.to(dtype=psf_dtype).unsqueeze(-1).unsqueeze(
+                    -1
+                ) * psf_flat_nodens.unsqueeze(0)
                 self.psf = (
-                    psf_v.transpose(-2, -1).contiguous()
+                    psf_v.transpose(-2, -1)
+                    .contiguous()
                     .reshape(*self.stack_shape, *self.grid_shape, self.K, self.K)
                 )
         else:
@@ -119,12 +129,15 @@ class SubspaceToeplitzOp:
                 np.asarray(unraveled[sub_op._t_axis_in_nat], dtype=np.int64)
             )
             sort_perm_full = base.sort_perm.to("cpu")
-            sorted_time_index_full = time_index_natural[sort_perm_full].to(self.device).contiguous()
+            sorted_time_index_full = (
+                time_index_natural[sort_perm_full].to(self.device).contiguous()
+            )
 
             basis = sub_op.basis.to(self.device).contiguous()  # (K, T)
             psf_dtype = basis.dtype
-            real_dtype = (torch.float32 if psf_dtype == torch.complex64
-                          else torch.float64)
+            real_dtype = (
+                torch.float32 if psf_dtype == torch.complex64 else torch.float64
+            )
 
             sqrt_w_full = base.sqrt_weights.to(self.device, dtype=real_dtype)
             indices_full = base.indices.to(self.device)
@@ -134,14 +147,22 @@ class SubspaceToeplitzOp:
                 w_n = sqrt_w_full * sqrt_w_full
                 w_eff = (w_n * w_n).contiguous()
                 psf_flat = torch.zeros(
-                    base.grid_size, self.K, self.K,
-                    dtype=psf_dtype, device=self.device,
+                    base.grid_size,
+                    self.K,
+                    self.K,
+                    dtype=psf_dtype,
+                    device=self.device,
                 )
                 ext.psf_scatter_outer_basis(
-                    psf_flat, indices_full, w_eff, basis, sorted_time_index_full,
+                    psf_flat,
+                    indices_full,
+                    w_eff,
+                    basis,
+                    sorted_time_index_full,
                 )
                 self.psf = (
-                    psf_flat.transpose(-2, -1).contiguous()
+                    psf_flat.transpose(-2, -1)
+                    .contiguous()
                     .reshape(*self.grid_shape, self.K, self.K)
                 )
             else:
@@ -159,14 +180,22 @@ class SubspaceToeplitzOp:
                 w_eff_packed = (w_n * w_n).reshape(-1).contiguous()
                 time_packed = time_v.reshape(-1).contiguous()
                 psf_super = torch.zeros(
-                    S_total * base.grid_size, self.K, self.K,
-                    dtype=psf_dtype, device=self.device,
+                    S_total * base.grid_size,
+                    self.K,
+                    self.K,
+                    dtype=psf_dtype,
+                    device=self.device,
                 )
                 ext.psf_scatter_outer_basis(
-                    psf_super, indices_packed, w_eff_packed, basis, time_packed,
+                    psf_super,
+                    indices_packed,
+                    w_eff_packed,
+                    basis,
+                    time_packed,
                 )
                 self.psf = (
-                    psf_super.transpose(-2, -1).contiguous()
+                    psf_super.transpose(-2, -1)
+                    .contiguous()
                     .reshape(*self.stack_shape, *self.grid_shape, self.K, self.K)
                 )
 
@@ -201,7 +230,7 @@ class SubspaceToeplitzOp:
 
         S_total = int(np.prod(s_shape)) if s_shape else 1
         B_total = int(np.prod(B_shape)) if B_shape else 1
-        single_shape = tuple(coeffs.shape[coeffs.ndim - single_ndim:])
+        single_shape = tuple(coeffs.shape[coeffs.ndim - single_ndim :])
         flat = coeffs.reshape(B_total, S_total, *single_shape)
         outs = []
         for b in range(B_total):
@@ -252,8 +281,11 @@ class SubspaceToeplitzOp:
             padded = coil_coeffs
         else:
             padded = torch.zeros(
-                B, K, *self.grid_shape,
-                dtype=coil_coeffs.dtype, device=coil_coeffs.device,
+                B,
+                K,
+                *self.grid_shape,
+                dtype=coil_coeffs.dtype,
+                device=coil_coeffs.device,
             )
             padded[(slice(None), slice(None), *self._pad_slices)] = coil_coeffs
 
@@ -261,9 +293,9 @@ class SubspaceToeplitzOp:
         Kk = fft(padded, axes=self.fft_axes)
 
         # Per-grid-cell (K, K) @ (K,) matvec, batched over B and spatial.
-        Kk_perm = Kk.movedim(1, -1).unsqueeze(-1)         # (B, *G, K, 1)
+        Kk_perm = Kk.movedim(1, -1).unsqueeze(-1)  # (B, *G, K, 1)
         out_perm = torch.matmul(psf, Kk_perm).squeeze(-1)  # (B, *G, K)
-        out = out_perm.movedim(-1, 1)                     # (B, K, *G)
+        out = out_perm.movedim(-1, 1)  # (B, K, *G)
 
         spatial = ifft(out, axes=self.fft_axes)
         if self.grid_shape != self.image_shape:

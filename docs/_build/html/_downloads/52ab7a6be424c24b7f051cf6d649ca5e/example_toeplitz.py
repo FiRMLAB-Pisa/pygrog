@@ -79,15 +79,17 @@ image /= image.max() + 1e-8
 shape = image.shape
 n_coils = 8
 
-samples = initialize_2D_spiral(
-    Nc=48, Ns=600, nb_revolutions=10
-).astype(np.float32)
+samples = initialize_2D_spiral(Nc=48, Ns=600, nb_revolutions=10).astype(np.float32)
 density = voronoi(samples)
 
 smaps = _synthetic_smaps(shape, n_coils=n_coils)
 nufft_sim = get_operator("finufft")(
-    samples=samples, shape=shape, n_coils=n_coils,
-    smaps=smaps, density=density, squeeze_dims=True,
+    samples=samples,
+    shape=shape,
+    n_coils=n_coils,
+    smaps=smaps,
+    density=density,
+    squeeze_dims=True,
 )
 kspace = nufft_sim.op(image.astype(np.complex64))
 
@@ -100,21 +102,23 @@ calib_full = np.fft.fftshift(
 cy, cx = shape[0] // 2, shape[1] // 2
 calib_size = 24
 calib = calib_full[
-    :, cy - calib_size // 2 : cy + calib_size // 2,
+    :,
+    cy - calib_size // 2 : cy + calib_size // 2,
     cx - calib_size // 2 : cx + calib_size // 2,
 ]
 
 coords = (samples * np.asarray(shape, dtype=np.float32)).astype(np.float32)
 grog = GrogInterpolator(
-    shape=shape, coords=coords, kernel_width=2,
-    oversamp=1.25, image_shape=shape,
+    shape=shape,
+    coords=coords,
+    kernel_width=2,
+    oversamp=1.25,
+    image_shape=shape,
 )
 grog.calc_interp_table(calib, lamda=0.01, precision=1)
 
-op_t = SparseFFT(plan=grog.plan, smaps=torch.as_tensor(smaps),
-                 toeplitz=True)
-op_n = SparseFFT(plan=grog.plan, smaps=torch.as_tensor(smaps),
-                 toeplitz=False)
+op_t = SparseFFT(plan=grog.plan, smaps=smaps, toeplitz=True)
+op_n = SparseFFT(plan=grog.plan, smaps=smaps, toeplitz=False)
 
 # A^H A timing on a random image
 torch.manual_seed(0)
@@ -122,8 +126,10 @@ x = torch.randn(*shape, dtype=torch.complex64)
 t_toep, y_toep = _bench(op_t.normal, x)
 t_nest, y_nest = _bench(op_n.normal, x)
 err_sparse = _rel_err(y_toep, y_nest)
-print(f"SparseFFT  Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
-      f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_sparse:.2e}")
+print(
+    f"SparseFFT  Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
+    f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_sparse:.2e}"
+)
 
 
 # %%
@@ -148,16 +154,10 @@ def cg(A_normal, b, n_iter=12):
 # Right-hand side b = A^H y with density compensation.
 n_shots, n_read = samples.shape[:2]
 sparse = grog.interpolate(
-    torch.as_tensor(
-        kspace.reshape(n_coils, n_shots, n_read).astype(np.complex64),
-    ),
+    kspace.reshape(n_coils, n_shots, n_read).astype(np.complex64),
     ret_image=False,
 )
-sparse = torch.as_tensor(np.asarray(sparse), dtype=torch.complex64)
-sw = grog.plan.pre_weights.to(sparse.dtype)
-sparse = sparse * sw
-# In pygrog convention SparseFFT.forward is sparse → image (a.k.a. A^H).
-b = op_t.forward(sparse)
+b = op_t.adjoint(torch.as_tensor(sparse) * grog.plan.pre_weights)
 
 t0 = time.perf_counter()
 recon_toep = cg(op_t.normal, b, n_iter=12)
@@ -166,8 +166,10 @@ t0 = time.perf_counter()
 recon_nest = cg(op_n.normal, b, n_iter=12)
 t_cg_nest = time.perf_counter() - t0
 
-print(f"CG (12 iter):  Toeplitz {t_cg_toep:.2f} s  |  nested {t_cg_nest:.2f} s"
-      f"  | speed-up x{t_cg_nest/t_cg_toep:.2f}")
+print(
+    f"CG (12 iter):  Toeplitz {t_cg_toep:.2f} s  |  nested {t_cg_nest:.2f} s"
+    f"  | speed-up x{t_cg_nest/t_cg_toep:.2f}"
+)
 
 recon_t_np = np.abs(recon_toep.detach().cpu().numpy())
 recon_n_np = np.abs(recon_nest.detach().cpu().numpy())
@@ -199,16 +201,20 @@ plt.show()
 # ``toeplitz=True`` and ``toeplitz=False``.
 def _make_small_sparse_fft(grid, n_samples, n_coils, *, toeplitz, seed=0):
     rng = np.random.default_rng(seed)
-    indices = torch.from_numpy(
-        rng.integers(0, int(np.prod(grid)), n_samples).astype(np.int64))
-    weights = torch.from_numpy(rng.random(n_samples).astype(np.float32) + 0.1)
-    smaps = torch.from_numpy(
-        (rng.standard_normal((n_coils, *grid))
-         + 1j * rng.standard_normal((n_coils, *grid))
-         ).astype(np.complex64) * 0.5)
-    return SparseFFT(grid_shape=grid, image_shape=grid,
-                     indices=indices, weights=weights,
-                     smaps=smaps, toeplitz=toeplitz)
+    indices = rng.integers(0, int(np.prod(grid)), n_samples).astype(np.int64)
+    weights = rng.random(n_samples).astype(np.float32) + 0.1
+    smaps = (
+        rng.standard_normal((n_coils, *grid))
+        + 1j * rng.standard_normal((n_coils, *grid))
+    ).astype(np.complex64) * 0.5
+    return SparseFFT(
+        grid_shape=grid,
+        image_shape=grid,
+        indices=indices,
+        weights=weights,
+        smaps=smaps,
+        toeplitz=toeplitz,
+    )
 
 
 # ---- ORC ----------------------------------------------------------------
@@ -218,54 +224,67 @@ L = 4
 op_b_t = _make_small_sparse_fft(grid, n_samples, 4, toeplitz=True, seed=0)
 op_b_n = _make_small_sparse_fft(grid, n_samples, 4, toeplitz=False, seed=0)
 rng = np.random.default_rng(11)
-B = (rng.standard_normal((n_samples, L))
-     + 1j * rng.standard_normal((n_samples, L))).astype(np.complex64)
-C = (rng.standard_normal((L, *grid))
-     + 1j * rng.standard_normal((L, *grid))).astype(np.complex64)
+B = (
+    rng.standard_normal((n_samples, L)) + 1j * rng.standard_normal((n_samples, L))
+).astype(np.complex64)
+C = (rng.standard_normal((L, *grid)) + 1j * rng.standard_normal((L, *grid))).astype(
+    np.complex64
+)
 orc_t = OffResonanceSparseFFT(op_b_t, B, C, toeplitz=True)
 orc_n = OffResonanceSparseFFT(op_b_n, B, C, toeplitz=False)
 x_orc = torch.randn(*grid, dtype=torch.complex64)
 t_toep, y_toep = _bench(orc_t.normal, x_orc, n_iter=5)
 t_nest, y_nest = _bench(orc_n.normal, x_orc, n_iter=5)
 err_orc = _rel_err(y_toep, y_nest)
-print(f"ORC (L={L})   Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
-      f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_orc:.2e}")
+print(
+    f"ORC (L={L})   Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
+    f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_orc:.2e}"
+)
 
 # ---- Subspace -----------------------------------------------------------
 import types
+
 T = 12
 K = 4
 n_pts = 60
 n_samples_sub = T * n_pts
 rng = np.random.default_rng(13)
-indices = torch.from_numpy(
-    rng.integers(0, int(np.prod(grid)), n_samples_sub).astype(np.int64))
-weights = torch.from_numpy(rng.random(n_samples_sub).astype(np.float32) + 0.1)
-smaps_sub = torch.from_numpy(
-    (rng.standard_normal((4, *grid))
-     + 1j * rng.standard_normal((4, *grid))).astype(np.complex64) * 0.5)
-sort_perm = torch.argsort(indices)
+indices = rng.integers(0, int(np.prod(grid)), n_samples_sub).astype(np.int64)
+weights = rng.random(n_samples_sub).astype(np.float32) + 0.1
+smaps_sub = (
+    rng.standard_normal((4, *grid)) + 1j * rng.standard_normal((4, *grid))
+).astype(np.complex64) * 0.5
+sort_perm = torch.argsort(torch.as_tensor(indices))
 inv_perm = torch.empty_like(sort_perm)
 inv_perm[sort_perm] = torch.arange(n_samples_sub)
+indices_t = torch.as_tensor(indices)
+weights_t = torch.as_tensor(weights)
 plan = types.SimpleNamespace(
-    grid_shape=grid, image_shape=grid, grid_size=int(np.prod(grid)),
-    indices=indices[sort_perm], sqrt_weights=torch.sqrt(weights)[sort_perm],
-    sort_perm=sort_perm, inv_perm=inv_perm,
-    natural_shape=(T, n_pts), n_samples=n_samples_sub,
+    grid_shape=grid,
+    image_shape=grid,
+    grid_size=int(np.prod(grid)),
+    indices=indices_t[sort_perm],
+    sqrt_weights=torch.sqrt(weights_t)[sort_perm],
+    sort_perm=sort_perm,
+    inv_perm=inv_perm,
+    natural_shape=(T, n_pts),
+    n_samples=n_samples_sub,
 )
 base_sub_t = SparseFFT(plan=plan, smaps=smaps_sub, toeplitz=True)
 base_sub_n = SparseFFT(plan=plan, smaps=smaps_sub, toeplitz=False)
-basis = torch.from_numpy(
-    (rng.standard_normal((K, T))
-     + 1j * rng.standard_normal((K, T))).astype(np.complex64))
+basis = (rng.standard_normal((K, T)) + 1j * rng.standard_normal((K, T))).astype(
+    np.complex64
+)
 sub_t = SubspaceSparseFFT(base_sub_t, basis, encoding_axis=-2)
 sub_n = SubspaceSparseFFT(base_sub_n, basis, encoding_axis=-2)
 x_sub = torch.randn(K, *grid, dtype=torch.complex64)
 t_toep, y_toep = _bench(sub_t.normal, x_sub, n_iter=5)
 t_nest, y_nest = _bench(sub_n.normal, x_sub, n_iter=5)
 err_sub = _rel_err(y_toep, y_nest)
-print(f"Subspace (K={K}) Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
-      f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_sub:.2e}")
+print(
+    f"Subspace (K={K}) Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
+    f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_sub:.2e}"
+)
 
 
 # %%
@@ -278,8 +297,14 @@ bars = ax.bar(labels, errs, color=["C0", "C1", "C2"])
 ax.set_yscale("log")
 ax.set_ylabel(r"max relative error  vs.  $A^H A$ via forward+adjoint")
 ax.set_title("Toeplitz `op.normal` accuracy")
-for b, e in zip(bars, errs):
-    ax.text(b.get_x() + b.get_width() / 2, e, f"{e:.1e}",
-            ha="center", va="bottom", fontsize=9)
+for b, e in zip(bars, errs, strict=False):
+    ax.text(
+        b.get_x() + b.get_width() / 2,
+        e,
+        f"{e:.1e}",
+        ha="center",
+        va="bottom",
+        fontsize=9,
+    )
 plt.tight_layout()
 plt.show()

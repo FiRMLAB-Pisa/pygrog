@@ -63,9 +63,9 @@ def main() -> None:
     cal_width = args.cal_width
 
     print(f"Loading benchmark data from {data_dir} ...")
-    kspace = np.load(data_dir / "kspace.npy")          # (T, C, spokes, readout)
+    kspace = np.load(data_dir / "kspace.npy")  # (T, C, spokes, readout)
     trajectory = np.load(data_dir / "trajectory.npy")  # (T, spokes, readout, ndim)
-    dcf = np.load(data_dir / "dcf.npy")                # (T, spokes, readout)
+    dcf = np.load(data_dir / "dcf.npy")  # (T, spokes, readout)
 
     n_frames, n_coils, n_spokes, n_readout = kspace.shape
     ndim = trajectory.shape[-1]
@@ -121,14 +121,14 @@ def main() -> None:
         """Complex 2D array → RGB image: hue=phase, value=magnitude."""
         mag = np.abs(arr2d)
         mag_norm = mag / (mag.max() + 1e-8)
-        hue = (np.angle(arr2d) + np.pi) / (2 * np.pi)   # [0, 1]
+        hue = (np.angle(arr2d) + np.pi) / (2 * np.pi)  # [0, 1]
         sat = np.ones_like(hue)
         return mcolors.hsv_to_rgb(np.stack([hue, sat, mag_norm], axis=-1))
 
     n_show = min(n_coils, 6)
     ncols = 1 + n_show
     row_labels = ["Axial", "Coronal", "Sagittal"]
-    axes_idx = [2, 1, 0]   # axis2=axial (x,y), axis1=coronal (x,z), axis0=sagittal (y,z)
+    axes_idx = [2, 1, 0]  # axis2=axial (x,y), axis1=coronal (x,z), axis0=sagittal (y,z)
 
     img_vol = np.abs(np.asarray(image)) if image is not None else None
 
@@ -141,7 +141,7 @@ def main() -> None:
         fontsize=11,
     )
 
-    for row, (label, ax_idx) in enumerate(zip(row_labels, axes_idx)):
+    for row, (label, ax_idx) in enumerate(zip(row_labels, axes_idx, strict=False)):
         # col 0: NLINV image (magnitude)
         ax = axes[row, 0]
         if img_vol is not None:

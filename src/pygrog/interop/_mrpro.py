@@ -30,7 +30,7 @@ mrpro ``LinearOperator`` contract (this adapter's convention):
   - ``adjoint(image)  -> (kspace,)`` — measurement   (A)
 """
 
-__all__ = ["GrogLinearOp", "GrogInterpolator", "nlinv_calib", "coil_compress"]
+__all__ = ["GrogInterpolator", "GrogLinearOp", "coil_compress", "nlinv_calib"]
 
 import numpy as np
 import torch
@@ -72,6 +72,7 @@ def _kdata_extract(kdata):
 
     # Broadcast traj components to the data's spatial shape (k2, k1, k0).
     spatial = tuple(int(s) for s in kdata.data.shape[-3:])
+
     # Each component may have leading "other"/singleton dims; collapse to spatial.
     def _to_spatial(t):
         # Broadcast against an all-ones tensor of shape (*spatial,) so any
@@ -130,9 +131,9 @@ def _data_to_spatial(data, ndim):
     """
     if ndim == 2:
         # k2 (axis -3) must be 1.
-        assert data.shape[-3] == 1, (
-            f"2D interpolation expects k2 == 1; got {tuple(data.shape)}"
-        )
+        assert (
+            data.shape[-3] == 1
+        ), f"2D interpolation expects k2 == 1; got {tuple(data.shape)}"
         new_shape = data.shape[:-3] + data.shape[-2:]
         return data.reshape(new_shape)
     return data
@@ -141,7 +142,7 @@ def _data_to_spatial(data, ndim):
 def _spatial_to_kdata(arr, ndim):
     """Inverse of :func:`_data_to_spatial`: re-insert the singleton k2 axis."""
     if ndim == 2:
-        new_shape = arr.shape[:-2] + (1,) + arr.shape[-2:]
+        new_shape = (*arr.shape[:-2], 1, *arr.shape[-2:])
         return arr.reshape(new_shape)
     return arr
 
@@ -264,7 +265,7 @@ class GrogLinearOp:
                 return (self._to_mrpro(ksp),)
 
             @property
-            def H(self):  # noqa: N802
+            def H(self):
                 """Adjoint LinearOperator with Toeplitz-aware ``.gram``.
 
                 In mrpro convention, ``self.forward`` is the
@@ -331,7 +332,7 @@ def _make_image_normal_op(outer):
             return self  # already a normal operator
 
         @property
-        def H(self):  # noqa: N802
+        def H(self):
             return self  # self-adjoint
 
     return _GrogImageNormalOp()
@@ -459,9 +460,9 @@ class GrogInterpolator(_GrogInterpolatorBase):
             When ``grid=True``: dense Cartesian KData with Cartesian
             trajectory, plus real-valued ``mask`` and ``density`` tensors.
         """
-        from mrpro.data import KData, KTrajectory, SpatialDimension
+        from mrpro.data import KData, KTrajectory
 
-        coords_np, data_t, enc_shape, _ = _kdata_extract(kdata)
+        _coords_np, data_t, enc_shape, _ = _kdata_extract(kdata)
         if enc_shape != self._enc_shape:
             raise ValueError(
                 f"KData encoding_matrix {enc_shape} does not match "
@@ -484,9 +485,7 @@ class GrogInterpolator(_GrogInterpolatorBase):
             for d, gs in enumerate(grid_shape):
                 origin = float(-(enc_shape[d] // 2))
                 step = (enc_shape[d] - 1) / (gs - 1) if gs > 1 else 1.0
-                traj_1d.append(
-                    origin + torch.arange(gs, dtype=torch.float32) * step
-                )
+                traj_1d.append(origin + torch.arange(gs, dtype=torch.float32) * step)
             # meshgrid → each tensor has shape (*grid_shape)
             grids = torch.meshgrid(*traj_1d, indexing="ij")
 
@@ -494,7 +493,9 @@ class GrogInterpolator(_GrogInterpolatorBase):
                 # 2D: grids[0]=ky, grids[1]=kx, each (gy, gx)
                 # mrpro KTrajectory layout: (*other, coil_singleton=1, k2, k1, k0)
                 kz_new = torch.zeros(1, 1, 1, *grid_shape, dtype=torch.float32)
-                ky_new = grids[0].unsqueeze(0).unsqueeze(0).unsqueeze(0)  # (1,1,1,gy,gx)
+                ky_new = (
+                    grids[0].unsqueeze(0).unsqueeze(0).unsqueeze(0)
+                )  # (1,1,1,gy,gx)
                 kx_new = grids[1].unsqueeze(0).unsqueeze(0).unsqueeze(0)
             else:
                 # 3D: grids[0]=kz, grids[1]=ky, grids[2]=kx, each (gz,gy,gx)
@@ -513,7 +514,7 @@ class GrogInterpolator(_GrogInterpolatorBase):
         sparse = sparse.reshape(*sparse.shape[:-1], *self.plan.natural_shape)
 
         # Fuse kw into the last spatial axis to match mrpro layout.
-        *lead, n_coils = sparse.shape[: -(self._ndim + 1)] + (sparse.shape[-(self._ndim + 1)],)
+        *_lead, n_coils = (*sparse.shape[:-(self._ndim + 1)], sparse.shape[-(self._ndim + 1)])
         spatial_kw = sparse.shape[-(self._ndim + 1) + 1 :]  # (*spatial, kw)
         spatial = spatial_kw[:-1]
         kw = int(spatial_kw[-1])
@@ -542,12 +543,16 @@ class GrogInterpolator(_GrogInterpolatorBase):
         phys = []
         for d, gs in enumerate(grid_shape):
             origin = -(enc_shape[d] // 2)
-            step = (
-                (enc_shape[d] - 1) / (gs - 1) if gs > 1 else 1.0
-            )
+            step = (enc_shape[d] - 1) / (gs - 1) if gs > 1 else 1.0
             phys.append(origin + coords_grid[d].float() * step)
         # phys is list of tensors shape (*spatial, kw); stack & flatten kw into last axis.
-        phys_stack = [_spatial_to_kdata(p.reshape((*p.shape[:-2], p.shape[-2] * p.shape[-1])), self._ndim) for p in phys]
+        phys_stack = [
+            _spatial_to_kdata(
+                p.reshape((*p.shape[:-2], p.shape[-2] * p.shape[-1])), self._ndim
+            )
+            for p in phys
+        ]
+
         # Each phys_stack[d] now has shape matching mrpro layout (k2', k1', k0').
         # Reshape into KTrajectory's expected (*other=1, coil=1, k2', k1', k0').
         def _to_traj(t):

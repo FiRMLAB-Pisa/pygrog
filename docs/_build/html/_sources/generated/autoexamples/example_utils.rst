@@ -266,7 +266,7 @@ The mask mirrors the MATLAB reference: R=2 subsampling in the **readout
 
     from pygrog.utils import nlinv_calib
 
-    acs = 8         # fully-sampled ACS centre width (columns), as in MATLAB reference
+    acs = 8  # fully-sampled ACS centre width (columns), as in MATLAB reference
     cal_width = 24  # NLINV internal calibration resolution for Step 2
 
     # Cartesian undersampling mask: R=2 readout subsampling + 16-col ACS centre
@@ -425,7 +425,7 @@ The panel shows the low-resolution image and smaps (what NLINV actually
 solved at 24×24), followed by a log-magnitude comparison of the
 zero-filled vs NLINV-synthesized central k-space patch.
 
-.. GENERATED FROM PYTHON SOURCE LINES 265-289
+.. GENERATED FROM PYTHON SOURCE LINES 265-285
 
 .. code-block:: Python
 
@@ -439,15 +439,11 @@ zero-filled vs NLINV-synthesized central k-space patch.
         ret_image=True,
     )
 
-    smaps_cal_np = (
-        smaps_cal.numpy() if isinstance(smaps_cal, torch.Tensor) else smaps_cal
-    )
+    smaps_cal_np = smaps_cal.numpy() if isinstance(smaps_cal, torch.Tensor) else smaps_cal
     grappa_train_np = (
         grappa_train.numpy() if isinstance(grappa_train, torch.Tensor) else grappa_train
     )
-    image_cal_np = (
-        image_cal.numpy() if isinstance(image_cal, torch.Tensor) else image_cal
-    )
+    image_cal_np = image_cal.numpy() if isinstance(image_cal, torch.Tensor) else image_cal
 
     print(f"\n[Step 2] Smaps shape       : {smaps_cal_np.shape}")
     print(f"[Step 2] Low-res image shape: {image_cal_np.shape}")
@@ -469,7 +465,7 @@ zero-filled vs NLINV-synthesized central k-space patch.
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 290-306
+.. GENERATED FROM PYTHON SOURCE LINES 286-302
 
 .. code-block:: Python
 
@@ -501,7 +497,7 @@ zero-filled vs NLINV-synthesized central k-space patch.
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 307-335
+.. GENERATED FROM PYTHON SOURCE LINES 303-329
 
 .. code-block:: Python
 
@@ -515,9 +511,7 @@ zero-filled vs NLINV-synthesized central k-space patch.
 
     fig, axes = plt.subplots(2, ncols_show, figsize=(3 * ncols_show, 5.5))
     for i in range(ncols_show):
-        axes[0, i].imshow(
-            np.log1p(np.abs(acr_zf[i])), cmap="inferno", origin="lower"
-        )
+        axes[0, i].imshow(np.log1p(np.abs(acr_zf[i])), cmap="inferno", origin="lower")
         axes[0, i].set_title(f"Zero-filled — coil {i + 1}")
         axes[0, i].axis("off")
         axes[1, i].imshow(
@@ -545,7 +539,7 @@ zero-filled vs NLINV-synthesized central k-space patch.
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 336-343
+.. GENERATED FROM PYTHON SOURCE LINES 330-337
 
 .. note::
    In calibration mode (integer ``cal_width``) the sensitivity maps are
@@ -555,7 +549,7 @@ zero-filled vs NLINV-synthesized central k-space patch.
    ``cal_width`` when only the synthesized k-space patch and fast coil
    estimates are needed (e.g.\ as input to GROG/GRAPPA kernel training).
 
-.. GENERATED FROM PYTHON SOURCE LINES 343-347
+.. GENERATED FROM PYTHON SOURCE LINES 337-341
 
 .. code-block:: Python
 
@@ -570,7 +564,7 @@ zero-filled vs NLINV-synthesized central k-space patch.
 
 
 
-.. GENERATED FROM PYTHON SOURCE LINES 348-356
+.. GENERATED FROM PYTHON SOURCE LINES 342-350
 
 Multi-slice batched NLINV calibration
 =====================================
@@ -581,7 +575,7 @@ reconstructions are returned per-slice; the synthesized GRAPPA training
 k-space can optionally be averaged across the batch with
 ``train_reduce='mean'`` to produce a single shared kernel.
 
-.. GENERATED FROM PYTHON SOURCE LINES 356-385
+.. GENERATED FROM PYTHON SOURCE LINES 350-379
 
 .. code-block:: Python
 
@@ -639,7 +633,7 @@ k-space can optionally be averaged across the batch with
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 10.048 seconds)
+   **Total running time of the script:** (0 minutes 14.679 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_utils.py:
