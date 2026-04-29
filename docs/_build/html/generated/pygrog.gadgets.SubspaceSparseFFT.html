@@ -431,6 +431,9 @@
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._adjoint_single"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._adjoint_single()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._forward_impl"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._forward_impl()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._forward_single"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._forward_single()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._use_dual_stream"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._use_dual_stream()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._adjoint_single_dual"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._adjoint_single_dual()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._forward_single_dual"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._forward_single_dual()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT.__call__"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT.__call__()</span></code></a></li>
 </ul>
 </li>
@@ -598,6 +601,61 @@ Output: <code class="docutils literal notranslate"><span class="pre">(C,</span> 
 </dd></dl>
 
 <dl class="py method">
+<dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT._use_dual_stream">
+<span class="sig-name descname"><span class="pre">_use_dual_stream</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT._use_dual_stream"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT._use_dual_stream" title="Link to this definition">#</a></dt>
+<dd><p>Return True when <code class="docutils literal notranslate"><span class="pre">x</span></code> lives on CPU and the base operator
+computes on a CUDA device — the only configuration where coil-level
+stream overlap pays off.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>x</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT._adjoint_single_dual">
+<span class="sig-name descname"><span class="pre">_adjoint_single_dual</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sparse_kspace</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">s_flat_idx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT._adjoint_single_dual"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT._adjoint_single_dual" title="Link to this definition">#</a></dt>
+<dd><p>Coil-pipelined adjoint: H2D of next coil overlapped with the
+K-batched scatter+IFFT+FMA of the current coil.</p>
+<p>Input: <code class="docutils literal notranslate"><span class="pre">(C,</span> <span class="pre">*natural)</span></code> on CPU.  Output: <code class="docutils literal notranslate"><span class="pre">(K,</span> <span class="pre">*image_shape)</span></code> on CPU
+(mirrors the synchronous fast-path return device).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>sparse_kspace</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a>)</p></li>
+<li><p><strong>s_flat_idx</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT._forward_single_dual">
+<span class="sig-name descname"><span class="pre">_forward_single_dual</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">coeffs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">s_flat_idx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT._forward_single_dual"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT._forward_single_dual" title="Link to this definition">#</a></dt>
+<dd><p>Coil-pipelined forward: per-coil K-batched FFT+gather on the
+compute stream, async D2H of the result on the data stream.</p>
+<p>Input: <code class="docutils literal notranslate"><span class="pre">(K,</span> <span class="pre">*image_shape)</span></code> on CPU.  Output: <code class="docutils literal notranslate"><span class="pre">(C,</span> <span class="pre">*natural)</span></code> on CPU.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>coeffs</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a>)</p></li>
+<li><p><strong>s_flat_idx</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
 <dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT.__call__">
 <span class="sig-name descname"><span class="pre">__call__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">adjoint</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT.__call__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT.__call__" title="Link to this definition">#</a></dt>
 <dd><p>Call self as a function.</p>
@@ -660,6 +718,9 @@ Output: <code class="docutils literal notranslate"><span class="pre">(C,</span> 
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._adjoint_single"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._adjoint_single()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._forward_impl"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._forward_impl()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._forward_single"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._forward_single()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._use_dual_stream"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._use_dual_stream()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._adjoint_single_dual"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._adjoint_single_dual()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._forward_single_dual"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._forward_single_dual()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT.__call__"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT.__call__()</span></code></a></li>
 </ul>
 </li>

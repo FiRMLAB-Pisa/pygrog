@@ -874,6 +874,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
             f"FINUFFT backend is required for this benchmark: {finufft_err}"
         )
     cufinufft_ok, cufinufft_err = _safe_backend_available("cufinufft")
+    print(f"[bench] cufinufft available: {cufinufft_ok}" + (f" ({cufinufft_err})" if not cufinufft_ok else ""), flush=True)
 
     nufft_sim = _make_nufft_operator(
         "finufft", inputs.samples, inputs.shape, inputs.smaps, inputs.density
@@ -883,6 +884,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
 
     # GROG plan creation
     _cuda_available = torch.cuda.is_available() and not cfg.no_gpu
+    print("[bench] GROG plan creation ...", flush=True)
     _, plan_metrics = profile(
         _make_grog,
         inputs.shape,
@@ -901,6 +903,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
     )
     results["steps"]["grog_plan_creation"] = _serialize_metrics(plan_metrics)
     results["steps"]["grog_plan_creation"]["prep"] = grog_aux["prep"]
+    print("[bench] GROG interpolation (natural shape) ...", flush=True)
 
     # Single GROG interpolation of the whole acquisition (shape-preserving).
     # The SubspaceSparseFFT gadget then applies φ and sqrt_w internally per
@@ -924,7 +927,9 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
     sparse_natural_t = torch.as_tensor(sparse_natural_cpu, dtype=torch.complex64)
 
     # Subspace coefficient comparison: NUFFT vs GROG (quality check)
+    print("[bench] Subspace comparison: NUFFT adjoint (CPU) ...", flush=True)
     coeff_nufft = np.asarray(_nufft_subspace_adjoint(nufft_sim, kspace_tcns, basis_kt))
+    print("[bench] Subspace comparison: GROG adjoint (CPU) ...", flush=True)
     coeff_grog_cpu = (
         _grog_subspace_adjoint(sparse_natural_t, subspace_cpu).detach().cpu().numpy()
     )  # (K, *shape)
@@ -955,6 +960,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
     # Forward: K SparseFFT.adjoint calls   (coeff images → sparse k-space)
     coeff_nufft_t = torch.as_tensor(coeff_nufft, dtype=torch.complex64)
 
+    print("[bench] CPU timing: NUFFT adjoint ...", flush=True)
     _, nufft_adj_cpu_m = profile(
         _nufft_subspace_adjoint,
         nufft_sim,
@@ -964,6 +970,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         repeat=cfg.repeats,
         gpu_device=None,
     )
+    print("[bench] CPU timing: NUFFT forward ...", flush=True)
     _, nufft_fwd_cpu_m = profile(
         _nufft_subspace_forward,
         nufft_sim,
@@ -973,6 +980,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         repeat=cfg.repeats,
         gpu_device=None,
     )
+    print("[bench] CPU timing: GROG adjoint ...", flush=True)
     _, grog_adj_cpu_m = profile(
         _grog_subspace_adjoint,
         sparse_natural_t,
@@ -981,6 +989,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         repeat=cfg.repeats,
         gpu_device=None,
     )
+    print("[bench] CPU timing: GROG forward ...", flush=True)
     _, grog_fwd_cpu_m = profile(
         _grog_subspace_forward,
         coeff_nufft_t,
@@ -1003,6 +1012,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
     _gpu_nufft = None
     if _cuda_available:
         try:
+            print("[bench] GPU timing: GROG full-GPU adjoint ...", flush=True)
             sparse_fft_gpu_full = SparseFFT(
                 plan=grog.fft_plan(image_shape=inputs.shape),
                 smaps=torch.as_tensor(inputs.smaps).to(f"cuda:{cfg.gpu_device}"),
@@ -1025,6 +1035,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 repeat=cfg.repeats,
                 gpu_device=cfg.gpu_device,
             )
+            print("[bench] GPU timing: GROG full-GPU forward ...", flush=True)
             _, grog_fwd_gpu_full_m = profile(
                 _grog_subspace_forward,
                 coeff_nufft_t_gpu,
@@ -1038,6 +1049,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 "grog_forward": _serialize_metrics(grog_fwd_gpu_full_m),
             }
 
+            print("[bench] GPU timing: GROG dual-stream adjoint ...", flush=True)
             sparse_fft_gpu_dual = SparseFFT(
                 plan=grog.fft_plan(image_shape=inputs.shape),
                 smaps=torch.as_tensor(inputs.smaps),
@@ -1054,6 +1066,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 repeat=cfg.repeats,
                 gpu_device=cfg.gpu_device,
             )
+            print("[bench] GPU timing: GROG dual-stream forward ...", flush=True)
             _, grog_fwd_gpu_dual_m = profile(
                 _grog_subspace_forward,
                 coeff_nufft_t,
@@ -1067,10 +1080,12 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 "grog_forward": _serialize_metrics(grog_fwd_gpu_dual_m),
             }
         except Exception as exc:
+            print(f"[bench] GPU GROG FAILED: {exc}", flush=True)
             gpu_results["grog_gpu_skipped"] = {"reason": str(exc)}
 
     if _cuda_available and cufinufft_ok:
         try:
+            print("[bench] GPU timing: cufinufft adjoint ...", flush=True)
             nufft_gpu = _make_nufft_operator(
                 "cufinufft", inputs.samples, inputs.shape, inputs.smaps, inputs.density
             )
@@ -1084,6 +1099,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 repeat=cfg.repeats,
                 gpu_device=cfg.gpu_device,
             )
+            print("[bench] GPU timing: cufinufft forward ...", flush=True)
             _, nufft_fwd_gpu_m = profile(
                 _nufft_subspace_forward,
                 nufft_gpu,
@@ -1098,6 +1114,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 "nufft_forward": _serialize_metrics(nufft_fwd_gpu_m),
             }
         except Exception as exc:
+            print(f"[bench] cufinufft FAILED: {exc}", flush=True)
             if cfg.require_cufinufft:
                 raise RuntimeError(
                     "CUFINUFFT benchmark is required but failed to run: " f"{exc}"
@@ -1131,6 +1148,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         }
 
     results["steps"]["runtime_gpu"] = gpu_results
+    print("[bench] GPU benchmarks done.", flush=True)
 
     # CUDA subspace comparison (only when GPU NUFFT + GROG both available)
     if _gpu_subspace is not None and _gpu_nufft is not None:

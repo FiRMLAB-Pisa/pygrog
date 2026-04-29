@@ -541,7 +541,7 @@ Display
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 15.269 seconds)
+   **Total running time of the script:** (0 minutes 11.992 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_interop.py:

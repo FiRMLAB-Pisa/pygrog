@@ -191,7 +191,7 @@ Part 1 — end-to-end SparseFFT with CG reconstruction
 
     /home/mcencini/.conda/envs/pygrog/lib/python3.13/site-packages/mrinufft/_utils.py:67: UserWarning: Samples will be rescaled to [-pi, pi), assuming they were in [-0.5, 0.5)
       warnings.warn(
-    SparseFFT  Toeplitz    5.90 ms  |  nested   17.24 ms  | speed-up x 2.92  | rel-err 3.18e-07
+    SparseFFT  Toeplitz    5.87 ms  |  nested   12.35 ms  | speed-up x 2.10  | rel-err 3.18e-07
 
 
 
@@ -266,7 +266,7 @@ CG using ``op.normal``
 
 
 .. image-sg:: /generated/autoexamples/images/sphx_glr_example_toeplitz_001.png
-   :alt: CG (Toeplitz) — 0.12 s, CG (nested A^HA) — 0.30 s, Difference
+   :alt: CG (Toeplitz) — 0.09 s, CG (nested A^HA) — 0.19 s, Difference
    :srcset: /generated/autoexamples/images/sphx_glr_example_toeplitz_001.png
    :class: sphx-glr-single-img
 
@@ -275,7 +275,7 @@ CG using ``op.normal``
 
  .. code-block:: none
 
-    CG (12 iter):  Toeplitz 0.12 s  |  nested 0.30 s  | speed-up x2.39
+    CG (12 iter):  Toeplitz 0.09 s  |  nested 0.19 s  | speed-up x2.20
 
 
 
@@ -389,8 +389,8 @@ the high-level helpers).  For each gadget we compare ``op.normal`` for
 
  .. code-block:: none
 
-    ORC (L=4)   Toeplitz    1.12 ms  |  nested    2.05 ms  | speed-up x 1.83  | rel-err 1.37e-07
-    Subspace (K=4) Toeplitz    1.27 ms  |  nested    5.98 ms  | speed-up x 4.70  | rel-err 1.87e-07
+    ORC (L=4)   Toeplitz    1.23 ms  |  nested    1.38 ms  | speed-up x 1.13  | rel-err 1.37e-07
+    Subspace (K=4) Toeplitz    0.63 ms  |  nested    3.09 ms  | speed-up x 4.93  | rel-err 1.87e-07
 
 
 
@@ -437,7 +437,7 @@ Accuracy summary
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 2.649 seconds)
+   **Total running time of the script:** (0 minutes 1.755 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_toeplitz.py:
