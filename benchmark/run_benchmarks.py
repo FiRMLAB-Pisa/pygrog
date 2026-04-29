@@ -9,6 +9,7 @@ required hardware/backend is unavailable.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import math
 import os
@@ -1035,6 +1036,8 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 repeat=cfg.repeats,
                 gpu_device=cfg.gpu_device,
             )
+            gc.collect()
+            torch.cuda.empty_cache()
             print("[bench] GPU timing: GROG full-GPU forward ...", flush=True)
             _, grog_fwd_gpu_full_m = profile(
                 _grog_subspace_forward,
@@ -1044,10 +1047,17 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 repeat=cfg.repeats,
                 gpu_device=cfg.gpu_device,
             )
+            gc.collect()
+            torch.cuda.empty_cache()
             gpu_results["grog_full_gpu"] = {
                 "grog_adjoint": _serialize_metrics(grog_adj_gpu_full_m),
                 "grog_forward": _serialize_metrics(grog_fwd_gpu_full_m),
             }
+            # Free full-GPU intermediates before building the dual-stream operator.
+            del sparse_natural_t_gpu, coeff_nufft_t_gpu
+            del sparse_fft_gpu_full
+            gc.collect()
+            torch.cuda.empty_cache()
 
             print("[bench] GPU timing: GROG dual-stream adjoint ...", flush=True)
             sparse_fft_gpu_dual = SparseFFT(
@@ -1066,6 +1076,8 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 repeat=cfg.repeats,
                 gpu_device=cfg.gpu_device,
             )
+            gc.collect()
+            torch.cuda.empty_cache()
             print("[bench] GPU timing: GROG dual-stream forward ...", flush=True)
             _, grog_fwd_gpu_dual_m = profile(
                 _grog_subspace_forward,
@@ -1075,15 +1087,34 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 repeat=cfg.repeats,
                 gpu_device=cfg.gpu_device,
             )
+            gc.collect()
+            torch.cuda.empty_cache()
             gpu_results["grog_dual_stream_gpu"] = {
                 "grog_adjoint": _serialize_metrics(grog_adj_gpu_dual_m),
                 "grog_forward": _serialize_metrics(grog_fwd_gpu_dual_m),
             }
+            # Free dual-stream intermediates before the cufinufft phase.
+            del sparse_fft_gpu_dual, subspace_gpu_dual
+            gc.collect()
+            torch.cuda.empty_cache()
         except Exception as exc:
             print(f"[bench] GPU GROG FAILED: {exc}", flush=True)
+            gc.collect()
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
             gpu_results["grog_gpu_skipped"] = {"reason": str(exc)}
 
     if _cuda_available and cufinufft_ok:
+        # Drop the GROG GPU subspace operator's smaps + plan before cufinufft
+        # allocates its own large workspace, otherwise we OOM on smaller GPUs.
+        # The GPU subspace comparison below will be skipped when we do this.
+        if _gpu_subspace is not None:
+            print("[bench] freeing GROG GPU operator before cufinufft (skips GPU subspace comparison) ...", flush=True)
+            _gpu_subspace = None
+            gc.collect()
+            torch.cuda.empty_cache()
         try:
             print("[bench] GPU timing: cufinufft adjoint ...", flush=True)
             nufft_gpu = _make_nufft_operator(
@@ -1099,6 +1130,8 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 repeat=cfg.repeats,
                 gpu_device=cfg.gpu_device,
             )
+            gc.collect()
+            torch.cuda.empty_cache()
             print("[bench] GPU timing: cufinufft forward ...", flush=True)
             _, nufft_fwd_gpu_m = profile(
                 _nufft_subspace_forward,
@@ -1109,12 +1142,19 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 repeat=cfg.repeats,
                 gpu_device=cfg.gpu_device,
             )
+            gc.collect()
+            torch.cuda.empty_cache()
             gpu_results["nufft_cufinufft_gpu"] = {
                 "nufft_adjoint": _serialize_metrics(nufft_adj_gpu_m),
                 "nufft_forward": _serialize_metrics(nufft_fwd_gpu_m),
             }
         except Exception as exc:
             print(f"[bench] cufinufft FAILED: {exc}", flush=True)
+            gc.collect()
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
             if cfg.require_cufinufft:
                 raise RuntimeError(
                     "CUFINUFFT benchmark is required but failed to run: " f"{exc}"
