@@ -18,7 +18,8 @@
     ],
     "no_gpu": false,
     "accel_k1": 1,
-    "skip_scaling": true
+    "skip_scaling": true,
+    "thread_cap": 16
   },
   "data_source": "real",
   "input": {
@@ -48,19 +49,21 @@
     "torch_cuda_available": true,
     "torch_cuda_device_count": 1,
     "gpu_name": "NVIDIA A40",
-    "cpu_count": 96
+    "cpu_count": 96,
+    "thread_cap": 16,
+    "torch_num_threads": 16
   },
   "steps": {
     "grog_plan_creation": {
       "repeat": 1,
       "warmup": 0,
       "runtimes_sec": [
-        21.59453752695117
+        21.73776737600565
       ],
-      "runtime_mean_sec": 21.59453752695117,
+      "runtime_mean_sec": 21.73776737600565,
       "runtime_std_sec": 0.0,
-      "peak_cpu_percent": 4947.4,
-      "peak_ram_gb": 25.3023681640625,
+      "peak_cpu_percent": 1679.4,
+      "peak_ram_gb": 25.215194702148438,
       "peak_gpu_mem_gb_nvml": 0.83026123046875,
       "peak_gpu_mem_gb_torch": 0.0,
       "peak_gpu_mem_gb_cupy": 0.0,
@@ -83,35 +86,31 @@
       "repeat": 1,
       "warmup": 0,
       "runtimes_sec": [
-        3.3385098020080477
+        3.7649545539170504
       ],
-      "runtime_mean_sec": 3.3385098020080477,
+      "runtime_mean_sec": 3.7649545539170504,
       "runtime_std_sec": 0.0,
-      "peak_cpu_percent": 4961.5,
-      "peak_ram_gb": 46.839019775390625,
+      "peak_cpu_percent": 1672.9,
+      "peak_ram_gb": 46.75099182128906,
       "peak_gpu_mem_gb_nvml": null,
       "peak_gpu_mem_gb_torch": 0.0,
       "peak_gpu_mem_gb_cupy": 0.0
     },
     "subspace_comparison": {
-      "rel_l2_error": 0.8862318992614746,
-      "abs_corrcoef": 0.9445097426776178,
-      "cuda": {
-        "rel_l2_error": 0.8862354159355164,
-        "abs_corrcoef": 0.9445105218306884
-      }
+      "rel_l2_error": 0.8862319588661194,
+      "abs_corrcoef": 0.9445097053075651
     },
     "runtime_cpu": {
       "nufft_finufft_adjoint": {
         "repeat": 1,
         "warmup": 0,
         "runtimes_sec": [
-          39.211022945004515
+          46.43814209091943
         ],
-        "runtime_mean_sec": 39.211022945004515,
+        "runtime_mean_sec": 46.43814209091943,
         "runtime_std_sec": 0.0,
-        "peak_cpu_percent": 4975.2,
-        "peak_ram_gb": 42.136695861816406,
+        "peak_cpu_percent": 1670.2,
+        "peak_ram_gb": 40.479183197021484,
         "peak_gpu_mem_gb_nvml": null,
         "peak_gpu_mem_gb_torch": 0.0,
         "peak_gpu_mem_gb_cupy": 0.0
@@ -120,12 +119,12 @@
         "repeat": 1,
         "warmup": 0,
         "runtimes_sec": [
-          33.85918822395615
+          41.8138161720708
         ],
-        "runtime_mean_sec": 33.85918822395615,
+        "runtime_mean_sec": 41.8138161720708,
         "runtime_std_sec": 0.0,
-        "peak_cpu_percent": 5023.4,
-        "peak_ram_gb": 35.17375183105469,
+        "peak_cpu_percent": 1785.3,
+        "peak_ram_gb": 33.544837951660156,
         "peak_gpu_mem_gb_nvml": null,
         "peak_gpu_mem_gb_torch": 0.0,
         "peak_gpu_mem_gb_cupy": 0.0
@@ -134,12 +133,12 @@
         "repeat": 1,
         "warmup": 0,
         "runtimes_sec": [
-          57.47871995600872
+          39.02571693295613
         ],
-        "runtime_mean_sec": 57.47871995600872,
+        "runtime_mean_sec": 39.02571693295613,
         "runtime_std_sec": 0.0,
-        "peak_cpu_percent": 4985.0,
-        "peak_ram_gb": 48.114013671875,
+        "peak_cpu_percent": 1672.4,
+        "peak_ram_gb": 46.48855972290039,
         "peak_gpu_mem_gb_nvml": null,
         "peak_gpu_mem_gb_torch": 0.0,
         "peak_gpu_mem_gb_cupy": 0.0
@@ -148,107 +147,23 @@
         "repeat": 1,
         "warmup": 0,
         "runtimes_sec": [
-          29.217024032957852
+          27.821769602014683
         ],
-        "runtime_mean_sec": 29.217024032957852,
+        "runtime_mean_sec": 27.821769602014683,
         "runtime_std_sec": 0.0,
-        "peak_cpu_percent": 4982.7,
-        "peak_ram_gb": 55.488216400146484,
+        "peak_cpu_percent": 1673.0,
+        "peak_ram_gb": 53.77615737915039,
         "peak_gpu_mem_gb_nvml": null,
         "peak_gpu_mem_gb_torch": 0.0,
         "peak_gpu_mem_gb_cupy": 0.0
       }
     },
     "runtime_gpu": {
-      "grog_full_gpu": {
-        "grog_adjoint": {
-          "repeat": 1,
-          "warmup": 0,
-          "runtimes_sec": [
-            66.04262913996354
-          ],
-          "runtime_mean_sec": 66.04262913996354,
-          "runtime_std_sec": 0.0,
-          "peak_cpu_percent": 4956.0,
-          "peak_ram_gb": 49.74785614013672,
-          "peak_gpu_mem_gb_nvml": 17.66619873046875,
-          "peak_gpu_mem_gb_torch": 15.5697660446167,
-          "peak_gpu_mem_gb_cupy": 0.0
-        },
-        "grog_forward": {
-          "repeat": 1,
-          "warmup": 0,
-          "runtimes_sec": [
-            31.474164961022325
-          ],
-          "runtime_mean_sec": 31.474164961022325,
-          "runtime_std_sec": 0.0,
-          "peak_cpu_percent": 4959.1,
-          "peak_ram_gb": 49.81502914428711,
-          "peak_gpu_mem_gb_nvml": 23.70330810546875,
-          "peak_gpu_mem_gb_torch": 17.51557207107544,
-          "peak_gpu_mem_gb_cupy": 0.0
-        }
+      "grog_gpu_skipped": {
+        "reason": "CUDA out of memory. Tried to allocate 6.04 GiB. GPU 0 has a total capacity of 44.42 GiB of which 2.03 GiB is free. Including non-PyTorch memory, this process has 42.38 GiB memory in use. Of the allocated memory 35.21 GiB is allocated by PyTorch, and 6.86 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)"
       },
-      "grog_dual_stream_gpu": {
-        "grog_adjoint": {
-          "repeat": 1,
-          "warmup": 0,
-          "runtimes_sec": [
-            67.40407675306778
-          ],
-          "runtime_mean_sec": 67.40407675306778,
-          "runtime_std_sec": 0.0,
-          "peak_cpu_percent": 4964.4,
-          "peak_ram_gb": 49.22491455078125,
-          "peak_gpu_mem_gb_nvml": 23.70330810546875,
-          "peak_gpu_mem_gb_torch": 15.570371627807617,
-          "peak_gpu_mem_gb_cupy": 0.0
-        },
-        "grog_forward": {
-          "repeat": 1,
-          "warmup": 0,
-          "runtimes_sec": [
-            30.628266938962042
-          ],
-          "runtime_mean_sec": 30.628266938962042,
-          "runtime_std_sec": 0.0,
-          "peak_cpu_percent": 4971.7,
-          "peak_ram_gb": 49.33892059326172,
-          "peak_gpu_mem_gb_nvml": 23.70330810546875,
-          "peak_gpu_mem_gb_torch": 17.516177654266357,
-          "peak_gpu_mem_gb_cupy": 0.0
-        }
-      },
-      "nufft_cufinufft_gpu": {
-        "nufft_adjoint": {
-          "repeat": 1,
-          "warmup": 0,
-          "runtimes_sec": [
-            24.914753005024977
-          ],
-          "runtime_mean_sec": 24.914753005024977,
-          "runtime_std_sec": 0.0,
-          "peak_cpu_percent": 119.3,
-          "peak_ram_gb": 42.46885299682617,
-          "peak_gpu_mem_gb_nvml": 27.21502685546875,
-          "peak_gpu_mem_gb_torch": 0.47777366638183594,
-          "peak_gpu_mem_gb_cupy": 0.6830096244812012
-        },
-        "nufft_forward": {
-          "repeat": 1,
-          "warmup": 0,
-          "runtimes_sec": [
-            19.10592116601765
-          ],
-          "runtime_mean_sec": 19.10592116601765,
-          "runtime_std_sec": 0.0,
-          "peak_cpu_percent": 119.0,
-          "peak_ram_gb": 35.50876235961914,
-          "peak_gpu_mem_gb_nvml": 27.21502685546875,
-          "peak_gpu_mem_gb_torch": 0.47777366638183594,
-          "peak_gpu_mem_gb_cupy": 0.6830096244812012
-        }
+      "nufft_cufinufft_gpu_skipped": {
+        "reason": "Error creating plan."
       }
     }
   },
