@@ -870,9 +870,12 @@ def plot_runtime(results: dict, out: Path) -> None:
         "Memory footprint  (RAM + VRAM)" if any_vram else "Memory footprint  (peak RAM)"
     )
     ax_mem.set_title(title_mem)
-    ax_mem.legend(fontsize=8, loc="upper right")
+    legend_handles = list(ax_mem.get_legend_handles_labels()[0])
+    legend_labels  = list(ax_mem.get_legend_handles_labels()[1])
     if any_vram:
-        ax_mem.add_patch(Patch(facecolor="#888888", hatch="///", label="VRAM (on top)"))
+        legend_handles.append(Patch(facecolor="#888888", hatch="///"))
+        legend_labels.append("VRAM (on top)")
+    ax_mem.legend(legend_handles, legend_labels, fontsize=8, loc="upper right")
     _finalize(ax_mem, bar_ann_mem, _format_memory)
 
     # ── (1,1) GROG preprocessing ─────────────────────────────────────────

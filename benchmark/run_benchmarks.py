@@ -888,10 +888,12 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         gpu_device=None,
     )
     sparse_natural_cpu = np.asarray(sparse_natural_cpu)  # (1, C, T, k1, k0, kw)
+    # Squeeze the leading batch-of-1 so SubspaceSparseFFT receives (C, *natural).
+    sparse_natural_cpu = sparse_natural_cpu.squeeze(0)   # (C, T, k1, k0, kw)
     results["steps"]["grog_interpolation"] = _serialize_metrics(interp_cpu_m)
 
     # Build the subspace gadget on top of the CPU SparseFFT.  encoding_axis=-4
-    # matches (1, C, T, k1, k0, kw) where T is the 4th-from-last axis.
+    # matches (C, T, k1, k0, kw) where T is the 4th-from-last axis.
     subspace_cpu = SubspaceSparseFFT(sparse_fft_cpu, basis_kt, encoding_axis=-4)
     sparse_natural_t = torch.as_tensor(sparse_natural_cpu, dtype=torch.complex64)
 
