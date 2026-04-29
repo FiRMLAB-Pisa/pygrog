@@ -63,21 +63,40 @@ def main() -> None:
     cal_width = args.cal_width
 
     print(f"Loading benchmark data from {data_dir} ...")
-    kspace = np.load(data_dir / "kspace.npy")  # (T, C, spokes, readout)
-    trajectory = np.load(data_dir / "trajectory.npy")  # (T, spokes, readout, ndim)
-    dcf = np.load(data_dir / "dcf.npy")  # (T, spokes, readout)
+    kspace = np.load(data_dir / "kspace.npy")
+    trajectory = np.load(data_dir / "trajectory.npy")
+    dcf = np.load(data_dir / "dcf.npy")
 
-    n_frames, n_coils, n_spokes, n_readout = kspace.shape
-    ndim = trajectory.shape[-1]
-    print(
-        f"  kspace:     {kspace.shape}  (T={n_frames}, C={n_coils}, spokes={n_spokes}, readout={n_readout})"
-    )
+    print(f"  kspace (raw):     {kspace.shape}")
+    print(f"  trajectory (raw): {trajectory.shape}")
+    print(f"  dcf (raw):        {dcf.shape}")
+
+    # Some datasets store dynamic acquisitions as (T, C, k2, k1, k0) with a
+    # singleton k2 (i.e. (T, C, 1, k1, k0)).  We want the frame index to act
+    # as the k2 phase-encode dimension so that all frames are stacked into
+    # one 3D non-Cartesian acquisition.  A simple axis swap (T ↔ k2) gives
+    # the canonical (1, C, T, k1, k0) layout — and analogously for trajectory
+    # and dcf — without any reshape gymnastics.
+    if kspace.ndim == 5:
+        kspace = kspace.swapaxes(0, 2)        # (T, C, 1, k1, k0) → (1, C, T, k1, k0)
+    if trajectory.ndim == 6:
+        trajectory = trajectory.swapaxes(0, 2)  # (T, 1, 1, k1, k0, ndim) → (1, 1, T, k1, k0, ndim)
+    if dcf.ndim == 5:
+        dcf = dcf.swapaxes(0, 2)              # (T, 1, 1, k1, k0) → (1, 1, T, k1, k0)
+
+    print(f"  kspace:     {kspace.shape}")
     print(f"  trajectory: {trajectory.shape}")
     print(f"  dcf:        {dcf.shape}")
 
-    # Flatten all frames into a single non-Cartesian samples dimension.
-    # nlinv_calib internally selects the low-res calibration region from coords.
-    y = kspace.swapaxes(0, 1).reshape(n_coils, -1).astype(np.complex64)
+    n_coils = kspace.shape[-4]
+    ndim = trajectory.shape[-1]
+
+    # Flatten all non-coil samples into a single non-Cartesian samples
+    # dimension.  nlinv_calib internally selects the low-res calibration
+    # region from coords.  The coil axis is at -4 by contract; everything
+    # before it is squeezed (leading singletons) and everything after is
+    # flattened into the trailing samples axis.
+    y = np.moveaxis(kspace, -4, 0).reshape(n_coils, -1).astype(np.complex64)
     coords = trajectory.reshape(-1, ndim).astype(np.float32)
     weights = dcf.reshape(-1).astype(np.float32)
 

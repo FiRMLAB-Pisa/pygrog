@@ -287,7 +287,11 @@ def _grog_interpolate_natural(
         and ``sqrt_weights`` internally per coil.
     """
     data = torch.as_tensor(kspace_tcns, dtype=torch.complex64)
-    sparse = grog.interpolate(data)
+    sparse = grog.interpolate(data)  # (*batch, C, n_flat)
+    # Reshape flat n_samples → natural_shape so SubspaceSparseFFT.adjoint
+    # receives (*batch, C, T, k1, k0, kw).
+    nat = tuple(grog.plan.natural_shape)
+    sparse = sparse.reshape(*sparse.shape[:-1], *nat)
     return sparse.cpu().numpy()
 
 
