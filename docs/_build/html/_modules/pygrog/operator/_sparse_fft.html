@@ -642,6 +642,15 @@
         <span class="c1"># GPU binning — computed lazily on first use</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_bin_starts</span> <span class="o">=</span> <span class="kc">None</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="c1"># Hot-cell scatter acceleration (CUDA). The k-space sampling</span>
+        <span class="c1"># frequently has a few cells (e.g. DC for radial trajectories)</span>
+        <span class="c1"># that absorb most samples; doing those via a sum-reduction avoids</span>
+        <span class="c1"># severe atomicAdd contention.  Computed lazily.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_hot_uidx</span> <span class="o">=</span> <span class="kc">None</span>         <span class="c1"># (n_hot,) int64 grid indices</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_hot_starts</span> <span class="o">=</span> <span class="kc">None</span>       <span class="c1"># list[int] starts in sorted sample order</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_hot_ends</span> <span class="o">=</span> <span class="kc">None</span>         <span class="c1"># list[int] ends   in sorted sample order</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cold_seg_starts</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># list[int] cold range starts</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cold_seg_ends</span> <span class="o">=</span> <span class="kc">None</span>    <span class="c1"># list[int] cold range ends</span>
 
         <span class="c1"># Packed-stack arrays — built lazily on first stacked op (see</span>
         <span class="c1"># ``_packed_arrays``).  Cached per compute device.</span>
@@ -678,7 +687,18 @@
 <div class="viewcode-block" id="SparseFFT._ensure_bins">
 <a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._ensure_bins">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_ensure_bins</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">device</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute GPU bins on first use for the given device.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute CUDA scatter acceleration metadata on first use.</span>
+
+<span class="sd">        Two strategies are prepared:</span>
+
+<span class="sd">        * Hot-cell handling — identifies grid cells that receive a large</span>
+<span class="sd">          number of samples (typically DC for radial / MRF trajectories,</span>
+<span class="sd">          where &gt;65% of samples can map to a single voxel).  These cells</span>
+<span class="sd">          would otherwise serialize ``atomicAdd`` and dominate the scatter</span>
+<span class="sd">          runtime.  We instead reduce them via per-segment sums.</span>
+<span class="sd">        * Bin layout for the binned-shmem kernel (legacy fallback; only</span>
+<span class="sd">          used when no hot cells are detected).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
         <span class="k">if</span> <span class="n">device</span><span class="o">.</span><span class="n">type</span> <span class="o">!=</span> <span class="s2">&quot;cuda&quot;</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bin_starts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
             <span class="k">return</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">stack_shape</span><span class="p">:</span>
@@ -686,25 +706,101 @@
             <span class="c1"># rebuilding inside the forward loop).  This only affects CUDA</span>
             <span class="c1"># micro-optimisation; correctness is unchanged.</span>
             <span class="k">return</span>
+
+        <span class="n">sorted_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">indices</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+
+        <span class="c1"># --- hot-cell detection -------------------------------------------</span>
+        <span class="n">unique_idx</span><span class="p">,</span> <span class="n">counts</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">unique_consecutive</span><span class="p">(</span>
+            <span class="n">sorted_idx</span><span class="p">,</span> <span class="n">return_counts</span><span class="o">=</span><span class="kc">True</span>
+        <span class="p">)</span>
+        <span class="n">ends</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cumsum</span><span class="p">(</span><span class="n">counts</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">starts</span> <span class="o">=</span> <span class="n">ends</span> <span class="o">-</span> <span class="n">counts</span>
+        <span class="c1"># Threshold: cells with &gt; sqrt(n_samples) entries are &quot;hot&quot;.</span>
+        <span class="c1"># In practice this catches the DC peak and a handful of high-density</span>
+        <span class="c1"># cells that would otherwise serialise atomicAdd.</span>
+        <span class="n">threshold</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1024</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span> <span class="o">**</span> <span class="mf">0.5</span><span class="p">))</span>
+        <span class="n">hot_mask</span> <span class="o">=</span> <span class="n">counts</span> <span class="o">&gt;</span> <span class="n">threshold</span>
+        <span class="n">n_hot</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">hot_mask</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">())</span>
+        <span class="k">if</span> <span class="n">n_hot</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">hot_starts</span> <span class="o">=</span> <span class="n">starts</span><span class="p">[</span><span class="n">hot_mask</span><span class="p">]</span>
+            <span class="n">hot_ends</span> <span class="o">=</span> <span class="n">ends</span><span class="p">[</span><span class="n">hot_mask</span><span class="p">]</span>
+            <span class="n">hot_uidx</span> <span class="o">=</span> <span class="n">unique_idx</span><span class="p">[</span><span class="n">hot_mask</span><span class="p">]</span>
+            <span class="c1"># Sort hot ranges by start so the cold segments between them</span>
+            <span class="c1"># are well-defined contiguous slices.</span>
+            <span class="n">order</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">hot_starts</span><span class="p">)</span>
+            <span class="n">hot_starts</span> <span class="o">=</span> <span class="n">hot_starts</span><span class="p">[</span><span class="n">order</span><span class="p">]</span>
+            <span class="n">hot_ends</span> <span class="o">=</span> <span class="n">hot_ends</span><span class="p">[</span><span class="n">order</span><span class="p">]</span>
+            <span class="n">hot_uidx</span> <span class="o">=</span> <span class="n">hot_uidx</span><span class="p">[</span><span class="n">order</span><span class="p">]</span><span class="o">.</span><span class="n">contiguous</span><span class="p">()</span>
+            <span class="n">hs</span> <span class="o">=</span> <span class="n">hot_starts</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+            <span class="n">he</span> <span class="o">=</span> <span class="n">hot_ends</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+            <span class="n">cold_s</span><span class="p">,</span> <span class="n">cold_e</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+            <span class="n">prev</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">e</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">hs</span><span class="p">,</span> <span class="n">he</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">s</span> <span class="o">&gt;</span> <span class="n">prev</span><span class="p">:</span>
+                    <span class="n">cold_s</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">prev</span><span class="p">)</span>
+                    <span class="n">cold_e</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+                <span class="n">prev</span> <span class="o">=</span> <span class="n">e</span>
+            <span class="k">if</span> <span class="n">prev</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">:</span>
+                <span class="n">cold_s</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">prev</span><span class="p">)</span>
+                <span class="n">cold_e</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_hot_uidx</span> <span class="o">=</span> <span class="n">hot_uidx</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_hot_starts</span> <span class="o">=</span> <span class="n">hs</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_hot_ends</span> <span class="o">=</span> <span class="n">he</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cold_seg_starts</span> <span class="o">=</span> <span class="n">cold_s</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cold_seg_ends</span> <span class="o">=</span> <span class="n">cold_e</span>
+            <span class="c1"># Sentinel: mark scatter setup as done (keeps the</span>
+            <span class="c1"># ``self._bin_starts is not None`` early-out working).</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_bin_starts</span> <span class="o">=</span> <span class="n">hot_uidx</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>  <span class="c1"># negative =&gt; hot-cell path active</span>
+            <span class="k">return</span>
+
+        <span class="c1"># --- legacy binned shared-memory path (no hot cells) --------------</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span> <span class="o">=</span> <span class="mi">256</span>
         <span class="n">n_bins</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">grid_size</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">//</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span>
         <span class="n">bin_edges</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">n_bins</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span>
         <span class="n">bin_edges</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">grid_size</span>
-        <span class="n">sorted_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">indices</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_bin_starts</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">searchsorted</span><span class="p">(</span><span class="n">sorted_idx</span><span class="p">,</span> <span class="n">bin_edges</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">))</span></div>
 
 
 <div class="viewcode-block" id="SparseFFT._scatter">
 <a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._scatter">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_scatter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">grid</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Weighted scatter-add using binned kernel when available.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Weighted scatter-add ``grid[idx[i]] += sqrt_w[i] * data[i]``.</span>
+
+<span class="sd">        Routes to:</span>
+<span class="sd">          * hot-cell + atomic path (CUDA, when hot cells were detected and</span>
+<span class="sd">            the caller is using the cached sorted plan ``self.indices``);</span>
+<span class="sd">          * binned shared-memory kernel (CUDA, no hot cells);</span>
+<span class="sd">          * plain atomic scatter (CPU and stacked / per-stack callers).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">ext</span> <span class="o">=</span> <span class="n">_get_torch_ext</span><span class="p">()</span>
+        <span class="c1"># Fast path: hot-cell handling.  Only valid when called with the</span>
+        <span class="c1"># cached sorted plan indices (true for all non-stacked uses; stacked</span>
+        <span class="c1"># plans skip ``_ensure_bins`` and therefore have ``_hot_uidx is None``).</span>
+        <span class="k">if</span> <span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_hot_uidx</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+            <span class="ow">and</span> <span class="n">indices</span><span class="o">.</span><span class="n">device</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hot_uidx</span><span class="o">.</span><span class="n">device</span>
+            <span class="ow">and</span> <span class="n">indices</span><span class="o">.</span><span class="n">numel</span><span class="p">()</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span>
+        <span class="p">):</span>
+            <span class="c1"># Cold segments — contiguous slices, low-contention atomic.</span>
+            <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">e</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cold_seg_starts</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cold_seg_ends</span><span class="p">):</span>
+                <span class="n">ext</span><span class="o">.</span><span class="n">scatter_add</span><span class="p">(</span><span class="n">grid</span><span class="p">,</span> <span class="n">data</span><span class="p">[</span><span class="n">s</span><span class="p">:</span><span class="n">e</span><span class="p">],</span> <span class="n">indices</span><span class="p">[</span><span class="n">s</span><span class="p">:</span><span class="n">e</span><span class="p">],</span> <span class="n">sqrt_w</span><span class="p">[</span><span class="n">s</span><span class="p">:</span><span class="n">e</span><span class="p">])</span>
+            <span class="c1"># Hot segments — sum-reduce each, then a single index_add.</span>
+            <span class="n">hot_sums</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span>
+                <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_hot_starts</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">device</span>
+            <span class="p">)</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">e</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_hot_starts</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hot_ends</span><span class="p">)):</span>
+                <span class="n">hot_sums</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="n">s</span><span class="p">:</span><span class="n">e</span><span class="p">]</span> <span class="o">*</span> <span class="n">sqrt_w</span><span class="p">[</span><span class="n">s</span><span class="p">:</span><span class="n">e</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+            <span class="n">grid</span><span class="o">.</span><span class="n">index_add_</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hot_uidx</span><span class="p">,</span> <span class="n">hot_sums</span><span class="p">)</span>
+            <span class="k">return</span>
+
         <span class="n">_scatter_add</span><span class="p">(</span>
             <span class="n">grid</span><span class="p">,</span>
             <span class="n">data</span><span class="p">,</span>
             <span class="n">indices</span><span class="p">,</span>
             <span class="n">sqrt_w</span><span class="p">,</span>
-            <span class="n">bin_starts</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_bin_starts</span><span class="p">,</span>
-            <span class="n">bin_size</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span><span class="p">,</span>
+            <span class="n">bin_starts</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_bin_starts</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="n">bin_size</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span><span class="p">,</span>
         <span class="p">)</span></div>
 
 

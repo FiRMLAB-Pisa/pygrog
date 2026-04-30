@@ -516,13 +516,32 @@ disabled on CUDA (matches <code class="xref py py-func docutils literal notransl
 <dl class="py method">
 <dt class="sig sig-object py" id="pygrog.operator.SparseFFT._ensure_bins">
 <span class="sig-name descname"><span class="pre">_ensure_bins</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">device</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/operator/_sparse_fft.html#SparseFFT._ensure_bins"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.operator.SparseFFT._ensure_bins" title="Link to this definition">#</a></dt>
-<dd><p>Compute GPU bins on first use for the given device.</p>
+<dd><p>Compute CUDA scatter acceleration metadata on first use.</p>
+<p>Two strategies are prepared:</p>
+<ul class="simple">
+<li><p>Hot-cell handling — identifies grid cells that receive a large
+number of samples (typically DC for radial / MRF trajectories,
+where &gt;65% of samples can map to a single voxel).  These cells
+would otherwise serialize <code class="docutils literal notranslate"><span class="pre">atomicAdd</span></code> and dominate the scatter
+runtime.  We instead reduce them via per-segment sums.</p></li>
+<li><p>Bin layout for the binned-shmem kernel (legacy fallback; only
+used when no hot cells are detected).</p></li>
+</ul>
 </dd></dl>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="pygrog.operator.SparseFFT._scatter">
 <span class="sig-name descname"><span class="pre">_scatter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">grid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">indices</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sqrt_w</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/operator/_sparse_fft.html#SparseFFT._scatter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.operator.SparseFFT._scatter" title="Link to this definition">#</a></dt>
-<dd><p>Weighted scatter-add using binned kernel when available.</p>
+<dd><p>Weighted scatter-add <code class="docutils literal notranslate"><span class="pre">grid[idx[i]]</span> <span class="pre">+=</span> <span class="pre">sqrt_w[i]</span> <span class="pre">*</span> <span class="pre">data[i]</span></code>.</p>
+<dl class="simple">
+<dt>Routes to:</dt><dd><ul class="simple">
+<li><p>hot-cell + atomic path (CUDA, when hot cells were detected and
+the caller is using the cached sorted plan <code class="docutils literal notranslate"><span class="pre">self.indices</span></code>);</p></li>
+<li><p>binned shared-memory kernel (CUDA, no hot cells);</p></li>
+<li><p>plain atomic scatter (CPU and stacked / per-stack callers).</p></li>
+</ul>
+</dd>
+</dl>
 </dd></dl>
 
 <dl class="py method">

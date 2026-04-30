@@ -426,6 +426,7 @@
             <nav aria-label="Page">
                 <ul class="visible nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._get_t_idx_sorted"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._get_t_idx_sorted()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT.adjoint"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT.adjoint()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._adjoint_impl"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._adjoint_impl()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._adjoint_single"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._adjoint_single()</span></code></a></li>
@@ -452,27 +453,28 @@
 <h1>SubspaceSparseFFT<a class="headerlink" href="#subspacesparsefft" title="Link to this heading">#</a></h1>
 <dl class="py class">
 <dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT">
-<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">pygrog.gadgets.</span></span><span class="sig-name descname"><span class="pre">SubspaceSparseFFT</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">base_op</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subspace_basis</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">encoding_axis</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">-4</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">toeplitz</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT" title="Link to this definition">#</a></dt>
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">pygrog.gadgets.</span></span><span class="sig-name descname"><span class="pre">SubspaceSparseFFT</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">base_op</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subspace_basis</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">encoding_axis</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">-4</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">toeplitz</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">k_chunk</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT" title="Link to this definition">#</a></dt>
 <dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">SolveMixin</span></code></p>
-<p>SparseFFT with low-rank subspace projection (loop-fused).</p>
+<p>SparseFFT with low-rank subspace projection.</p>
 <dl class="simple">
-<dt>Adjoint (sparse → image), per coil:</dt><dd><ol class="arabic simple">
+<dt>Adjoint (sparse → image), per coil, per <code class="docutils literal notranslate"><span class="pre">k</span></code> (default <code class="docutils literal notranslate"><span class="pre">k_chunk=1</span></code>):</dt><dd><ol class="arabic simple">
 <li><p>weight by <code class="docutils literal notranslate"><span class="pre">sqrt_w</span></code> once on the input;</p></li>
-<li><p>for each <code class="docutils literal notranslate"><span class="pre">k</span></code>: multiply by <code class="docutils literal notranslate"><span class="pre">basis[k]</span></code> along the T axis,
-scatter into the per-K oversampled grid;</p></li>
-<li><p>ONE batched K-IFFT + center-crop;</p></li>
-<li><p>fused FMA with <code class="docutils literal notranslate"><span class="pre">smaps[c].conj()</span></code> into the <code class="docutils literal notranslate"><span class="pre">(K,</span> <span class="pre">*image)</span></code> accumulator.</p></li>
+<li><p>multiply by <code class="docutils literal notranslate"><span class="pre">basis[k]</span></code> along the T axis;</p></li>
+<li><p>scatter into a single reused oversampled grid, IFFT, center-crop;</p></li>
+<li><p>fused FMA with <code class="docutils literal notranslate"><span class="pre">smaps[c].conj()</span></code> into <code class="docutils literal notranslate"><span class="pre">output[k]</span></code>.</p></li>
 </ol>
 </dd>
-<dt>Forward (image → sparse), per coil:</dt><dd><ol class="arabic simple">
-<li><p>multiply <code class="docutils literal notranslate"><span class="pre">coeffs</span></code> by <code class="docutils literal notranslate"><span class="pre">smaps[c]</span></code>;</p></li>
-<li><p>ONE batched K-FFT + center-pad;</p></li>
-<li><p>for each <code class="docutils literal notranslate"><span class="pre">k</span></code>: gather; accumulate <code class="docutils literal notranslate"><span class="pre">basis.conj()[k]</span> <span class="pre">*</span> <span class="pre">gathered</span></code>
-into the per-coil <code class="docutils literal notranslate"><span class="pre">(*natural)</span></code> accumulator;</p></li>
-<li><p>write into the output coil slot.</p></li>
+<dt>Forward (image → sparse), per coil, per <code class="docutils literal notranslate"><span class="pre">k</span></code>:</dt><dd><ol class="arabic simple">
+<li><p>multiply <code class="docutils literal notranslate"><span class="pre">coeffs[k]</span></code> by <code class="docutils literal notranslate"><span class="pre">smaps[c]</span></code>;</p></li>
+<li><p>zero-pad into a single reused oversampled buffer, FFT, gather;</p></li>
+<li><p>accumulate <code class="docutils literal notranslate"><span class="pre">basis.conj()[k]</span> <span class="pre">*</span> <span class="pre">gathered</span></code> into <code class="docutils literal notranslate"><span class="pre">ksp_c</span></code>;</p></li>
+<li><p>write <code class="docutils literal notranslate"><span class="pre">ksp_c</span> <span class="pre">*</span> <span class="pre">sqrt_w</span></code> into the output coil slot.</p></li>
 </ol>
 </dd>
 </dl>
+<p>Setting <code class="docutils literal notranslate"><span class="pre">k_chunk</span> <span class="pre">&gt;</span> <span class="pre">1</span></code> routes the inner loop through batched
+<code class="docutils literal notranslate"><span class="pre">_scatter_ifft_crop_batch</span></code> / <code class="docutils literal notranslate"><span class="pre">_fft_pad_gather_batch</span></code> helpers (one
+FFT call over <code class="docutils literal notranslate"><span class="pre">k_chunk</span></code> planes), trading VRAM for FFT throughput.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
@@ -481,6 +483,9 @@ into the per-coil <code class="docutils literal notranslate"><span class="pre">(
 <li><p><strong>subspace_basis</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>torch.Tensor</em></a>) – <code class="docutils literal notranslate"><span class="pre">(K,</span> <span class="pre">T)</span></code> complex basis.</p></li>
 <li><p><strong>encoding_axis</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Axis (in full sparse layout) of the temporal dimension <code class="docutils literal notranslate"><span class="pre">T</span></code>.
 Default <code class="docutils literal notranslate"><span class="pre">-4</span></code> (last four axes are natural <code class="docutils literal notranslate"><span class="pre">(T,</span> <span class="pre">k1,</span> <span class="pre">k0,</span> <span class="pre">kw)</span></code>).</p></li>
+<li><p><strong>k_chunk</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a><em>, </em><em>optional</em>) – Number of subspace components processed per batched FFT.  Default
+<code class="docutils literal notranslate"><span class="pre">1</span></code> (lowest VRAM, one grid/padded buffer reused across all
+<code class="docutils literal notranslate"><span class="pre">(coil,</span> <span class="pre">k)</span></code> pairs).</p></li>
 </ul>
 </dd>
 </dl>
@@ -505,6 +510,20 @@ Default <code class="docutils literal notranslate"><span class="pre">-4</span></
 </tbody>
 </table>
 </div>
+<dl class="py method">
+<dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT._get_t_idx_sorted">
+<span class="sig-name descname"><span class="pre">_get_t_idx_sorted</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sort_perm</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">s_flat_idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT._get_t_idx_sorted"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT._get_t_idx_sorted" title="Link to this definition">#</a></dt>
+<dd><p>Return cached sorted T-index for the current stack &amp; device.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>sort_perm</strong> (<a class="reference external" href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="(in PyTorch v2.11)"><em>Tensor</em></a>)</p></li>
+<li><p><strong>s_flat_idx</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
 <dl class="py method">
 <dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT.adjoint">
 <span class="sig-name descname"><span class="pre">adjoint</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sparse_kspace</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT.adjoint"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT.adjoint" title="Link to this definition">#</a></dt>
@@ -620,7 +639,7 @@ stream overlap pays off.</p>
 <dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT._adjoint_single_dual">
 <span class="sig-name descname"><span class="pre">_adjoint_single_dual</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sparse_kspace</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">s_flat_idx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT._adjoint_single_dual"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT._adjoint_single_dual" title="Link to this definition">#</a></dt>
 <dd><p>Coil-pipelined adjoint: H2D of next coil overlapped with the
-K-batched scatter+IFFT+FMA of the current coil.</p>
+per-K scatter+IFFT+FMA of the current coil.</p>
 <p>Input: <code class="docutils literal notranslate"><span class="pre">(C,</span> <span class="pre">*natural)</span></code> on CPU.  Output: <code class="docutils literal notranslate"><span class="pre">(K,</span> <span class="pre">*image_shape)</span></code> on CPU
 (mirrors the synchronous fast-path return device).</p>
 <dl class="field-list simple">
@@ -639,7 +658,7 @@ K-batched scatter+IFFT+FMA of the current coil.</p>
 <dl class="py method">
 <dt class="sig sig-object py" id="pygrog.gadgets.SubspaceSparseFFT._forward_single_dual">
 <span class="sig-name descname"><span class="pre">_forward_single_dual</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">coeffs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">s_flat_idx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/pygrog/gadgets/_subspace.html#SubspaceSparseFFT._forward_single_dual"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#pygrog.gadgets.SubspaceSparseFFT._forward_single_dual" title="Link to this definition">#</a></dt>
-<dd><p>Coil-pipelined forward: per-coil K-batched FFT+gather on the
+<dd><p>Coil-pipelined forward: per-coil per-K FFT+gather on the
 compute stream, async D2H of the result on the data stream.</p>
 <p>Input: <code class="docutils literal notranslate"><span class="pre">(K,</span> <span class="pre">*image_shape)</span></code> on CPU.  Output: <code class="docutils literal notranslate"><span class="pre">(C,</span> <span class="pre">*natural)</span></code> on CPU.</p>
 <dl class="field-list simple">
@@ -713,6 +732,7 @@ compute stream, async D2H of the result on the data stream.</p>
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._get_t_idx_sorted"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._get_t_idx_sorted()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT.adjoint"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT.adjoint()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._adjoint_impl"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._adjoint_impl()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog.gadgets.SubspaceSparseFFT._adjoint_single"><code class="docutils literal notranslate"><span class="pre">SubspaceSparseFFT._adjoint_single()</span></code></a></li>

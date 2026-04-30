@@ -279,8 +279,8 @@ iteration count.
 
  .. code-block:: none
 
-    Preconditioner spectrum estimate: (0.0, 1.0307180374860765)
-    Polynomial coefficients: [11.642369264539411, -39.53388894343152, 51.14090372689316, -22.32754821411072]
+    Preconditioner spectrum estimate: (0.0, 1.031614002585411)
+    Polynomial coefficients: [11.632257772694174, -39.46524775970829, 51.00777055603248, -22.25008258194248]
 
 
 
@@ -390,7 +390,7 @@ The same `solve()` API works on the sparse path
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 10.087 seconds)
+   **Total running time of the script:** (0 minutes 13.105 seconds)
 
 
 .. _sphx_glr_download_generated_autoexamples_example_solve.py:

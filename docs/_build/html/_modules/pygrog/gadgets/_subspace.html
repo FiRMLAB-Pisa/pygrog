@@ -491,21 +491,23 @@
 <div class="viewcode-block" id="SubspaceSparseFFT">
 <a class="viewcode-back" href="../../../generated/pygrog.gadgets.SubspaceSparseFFT.html#pygrog.gadgets.SubspaceSparseFFT">[docs]</a>
 <span class="k">class</span><span class="w"> </span><span class="nc">SubspaceSparseFFT</span><span class="p">(</span><span class="n">SolveMixin</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;SparseFFT with low-rank subspace projection (loop-fused).</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;SparseFFT with low-rank subspace projection.</span>
 
-<span class="sd">    Adjoint (sparse → image), per coil:</span>
+<span class="sd">    Adjoint (sparse → image), per coil, per ``k`` (default ``k_chunk=1``):</span>
 <span class="sd">        1. weight by ``sqrt_w`` once on the input;</span>
-<span class="sd">        2. for each ``k``: multiply by ``basis[k]`` along the T axis,</span>
-<span class="sd">           scatter into the per-K oversampled grid;</span>
-<span class="sd">        3. ONE batched K-IFFT + center-crop;</span>
-<span class="sd">        4. fused FMA with ``smaps[c].conj()`` into the ``(K, *image)`` accumulator.</span>
+<span class="sd">        2. multiply by ``basis[k]`` along the T axis;</span>
+<span class="sd">        3. scatter into a single reused oversampled grid, IFFT, center-crop;</span>
+<span class="sd">        4. fused FMA with ``smaps[c].conj()`` into ``output[k]``.</span>
 
-<span class="sd">    Forward (image → sparse), per coil:</span>
-<span class="sd">        1. multiply ``coeffs`` by ``smaps[c]``;</span>
-<span class="sd">        2. ONE batched K-FFT + center-pad;</span>
-<span class="sd">        3. for each ``k``: gather; accumulate ``basis.conj()[k] * gathered``</span>
-<span class="sd">           into the per-coil ``(*natural)`` accumulator;</span>
-<span class="sd">        4. write into the output coil slot.</span>
+<span class="sd">    Forward (image → sparse), per coil, per ``k``:</span>
+<span class="sd">        1. multiply ``coeffs[k]`` by ``smaps[c]``;</span>
+<span class="sd">        2. zero-pad into a single reused oversampled buffer, FFT, gather;</span>
+<span class="sd">        3. accumulate ``basis.conj()[k] * gathered`` into ``ksp_c``;</span>
+<span class="sd">        4. write ``ksp_c * sqrt_w`` into the output coil slot.</span>
+
+<span class="sd">    Setting ``k_chunk &gt; 1`` routes the inner loop through batched</span>
+<span class="sd">    ``_scatter_ifft_crop_batch`` / ``_fft_pad_gather_batch`` helpers (one</span>
+<span class="sd">    FFT call over ``k_chunk`` planes), trading VRAM for FFT throughput.</span>
 
 <span class="sd">    Parameters</span>
 <span class="sd">    ----------</span>
@@ -517,15 +519,31 @@
 <span class="sd">    encoding_axis : int</span>
 <span class="sd">        Axis (in full sparse layout) of the temporal dimension ``T``.</span>
 <span class="sd">        Default ``-4`` (last four axes are natural ``(T, k1, k0, kw)``).</span>
+<span class="sd">    k_chunk : int, optional</span>
+<span class="sd">        Number of subspace components processed per batched FFT.  Default</span>
+<span class="sd">        ``1`` (lowest VRAM, one grid/padded buffer reused across all</span>
+<span class="sd">        ``(coil, k)`` pairs).</span>
 <span class="sd">    &quot;&quot;&quot;</span>
 
     <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
-        <span class="bp">self</span><span class="p">,</span> <span class="n">base_op</span><span class="p">,</span> <span class="n">subspace_basis</span><span class="p">,</span> <span class="n">encoding_axis</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="o">-</span><span class="mi">4</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">toeplitz</span><span class="o">=</span><span class="kc">None</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">base_op</span><span class="p">,</span>
+        <span class="n">subspace_basis</span><span class="p">,</span>
+        <span class="n">encoding_axis</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="o">-</span><span class="mi">4</span><span class="p">,</span>
+        <span class="o">*</span><span class="p">,</span>
+        <span class="n">toeplitz</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">k_chunk</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
     <span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_base</span> <span class="o">=</span> <span class="n">base_op</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">basis</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">subspace_basis</span><span class="p">)</span>  <span class="c1"># (K, T)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">K</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">T</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">basis</span><span class="o">.</span><span class="n">shape</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">encoding_axis</span> <span class="o">=</span> <span class="n">encoding_axis</span>
+        <span class="c1"># K-batching factor for the inner (FFT, scatter/gather) loop.</span>
+        <span class="c1"># Default 1 = one grid/padded buffer reused across the K subspace</span>
+        <span class="c1"># components (lowest VRAM, restores pre-regression behaviour).</span>
+        <span class="c1"># Larger values trade memory for batched FFT throughput by routing</span>
+        <span class="c1"># through `_scatter_ifft_crop_batch` / `_fft_pad_gather_batch`.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">k_chunk</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">k_chunk</span><span class="p">))</span>
 
         <span class="bp">self</span><span class="o">.</span><span class="n">grid_shape</span> <span class="o">=</span> <span class="n">base_op</span><span class="o">.</span><span class="n">grid_shape</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span> <span class="o">=</span> <span class="n">base_op</span><span class="o">.</span><span class="n">image_shape</span>
@@ -555,6 +573,44 @@
             <span class="n">toeplitz</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">base_op</span><span class="p">,</span> <span class="s2">&quot;toeplitz&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">))</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">toeplitz</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">toeplitz</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_toep_op</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># lazily built</span>
+
+        <span class="c1"># Cache for sort-hoisted T-index lookup (per stack element + device).</span>
+        <span class="c1"># ``t_idx[i] = T-coordinate of natural sample i``;</span>
+        <span class="c1"># ``t_idx_sorted = t_idx[sort_perm]`` indexes basis rows in the</span>
+        <span class="c1"># sorted sample order used by the scatter kernel.  Avoids a</span>
+        <span class="c1"># 1.3 GB random-access gather per (coil, k) iteration.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_t_idx_cache</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{}</span>
+
+<div class="viewcode-block" id="SubspaceSparseFFT._get_t_idx_sorted">
+<a class="viewcode-back" href="../../../generated/pygrog.gadgets.SubspaceSparseFFT.html#pygrog.gadgets.SubspaceSparseFFT._get_t_idx_sorted">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_t_idx_sorted</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sort_perm</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return cached sorted T-index for the current stack &amp; device.&quot;&quot;&quot;</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="p">(</span><span class="n">s_flat_idx</span><span class="p">,</span> <span class="n">sort_perm</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">sort_perm</span><span class="o">.</span><span class="n">numel</span><span class="p">()))</span>
+        <span class="n">cached</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_t_idx_cache</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cached</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">cached</span>
+        <span class="n">nat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_base</span><span class="o">.</span><span class="n">natural_shape</span>
+        <span class="n">nat_ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">nat</span><span class="p">)</span>
+        <span class="n">T</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">T</span>
+        <span class="c1"># PyTorch indexing requires long/int32 (no int16) → pick int32 when</span>
+        <span class="c1"># T fits, else int64.</span>
+        <span class="k">if</span> <span class="n">T</span> <span class="o">&lt;=</span> <span class="mi">2_147_483_647</span><span class="p">:</span>
+            <span class="n">idx_dtype</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">int32</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">idx_dtype</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">int64</span>
+        <span class="n">view_shape</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="n">nat_ndim</span>
+        <span class="n">view_shape</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_t_axis_in_nat</span><span class="p">]</span> <span class="o">=</span> <span class="n">T</span>
+        <span class="n">t_axis</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">T</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">idx_dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">sort_perm</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+            <span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">view_shape</span><span class="p">)</span>
+            <span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">nat</span><span class="p">)</span>
+            <span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="c1"># Materialise then permute (small one-shot cost; cached afterwards).</span>
+        <span class="n">t_idx_sorted</span> <span class="o">=</span> <span class="n">t_axis</span><span class="p">[</span><span class="n">sort_perm</span><span class="p">]</span><span class="o">.</span><span class="n">contiguous</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_t_idx_cache</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">t_idx_sorted</span>
+        <span class="k">return</span> <span class="n">t_idx_sorted</span></div>
+
 
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># adjoint: sparse k-space → subspace coefficient images  (A^H)</span>
@@ -640,7 +696,7 @@
 
         <span class="c1"># Dispatch to dual-stream pipeline when input lives on CPU but the</span>
         <span class="c1"># base operator computes on CUDA.  Overlaps per-coil H2D with the</span>
-        <span class="c1"># K-batched scatter+IFFT compute.</span>
+        <span class="c1"># per-K scatter+IFFT compute.</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_use_dual_stream</span><span class="p">(</span><span class="n">sparse_kspace</span><span class="p">):</span>
             <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_adjoint_single_dual</span><span class="p">(</span><span class="n">sparse_kspace</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="p">)</span>
 
@@ -663,16 +719,51 @@
 
         <span class="n">output</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="o">*</span><span class="n">base</span><span class="o">.</span><span class="n">image_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
 
-        <span class="c1"># Per-stack pre-weights via the operator&#39;s _stack_arrays.</span>
-        <span class="n">_idx_s</span><span class="p">,</span> <span class="n">sqw_s</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">ip_s</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_stack_arrays</span><span class="p">(</span><span class="n">s_flat_idx</span><span class="p">)</span>
+        <span class="c1"># Per-stack arrays + natural-order pre-weights.</span>
+        <span class="n">idx_s</span><span class="p">,</span> <span class="n">sqw_s</span><span class="p">,</span> <span class="n">sp_s</span><span class="p">,</span> <span class="n">ip_s</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_stack_arrays</span><span class="p">(</span><span class="n">s_flat_idx</span><span class="p">)</span>
+        <span class="n">indices</span> <span class="o">=</span> <span class="n">idx_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">sqrt_w</span> <span class="o">=</span> <span class="n">sqw_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">sort_perm</span> <span class="o">=</span> <span class="n">sp_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
         <span class="n">pre_w</span> <span class="o">=</span> <span class="n">sqw_s</span><span class="p">[</span><span class="n">ip_s</span><span class="p">]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">*</span><span class="n">nat</span><span class="p">)</span>
+        <span class="n">base</span><span class="o">.</span><span class="n">_ensure_bins</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
 
-        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_coils</span><span class="p">):</span>
-            <span class="n">sw_c</span> <span class="o">=</span> <span class="n">sparse_kspace</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">*</span> <span class="n">pre_w</span>  <span class="c1"># (*nat) pre-weighted</span>
-            <span class="n">weighted</span> <span class="o">=</span> <span class="n">basis</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="o">*</span><span class="n">phi_shape</span><span class="p">)</span> <span class="o">*</span> <span class="n">sw_c</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
-            <span class="n">weighted_flat</span> <span class="o">=</span> <span class="n">weighted</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># (K, n_samples)</span>
-            <span class="n">imgs</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_scatter_ifft_crop_batch</span><span class="p">(</span><span class="n">weighted_flat</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="o">=</span><span class="n">s_flat_idx</span><span class="p">)</span>
-            <span class="n">output</span><span class="o">.</span><span class="n">addcmul_</span><span class="p">(</span><span class="n">imgs</span><span class="p">,</span> <span class="n">smaps</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">conj</span><span class="p">()</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+        <span class="n">k_chunk</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">k_chunk</span>
+        <span class="k">if</span> <span class="n">k_chunk</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="c1"># Lowest-VRAM path: one reused grid buffer across all (c, k).</span>
+            <span class="c1"># Sort hoisting: the heavy ``flat[sort_perm]`` (1.3 GB random</span>
+            <span class="c1"># gather) is done ONCE per coil; per-k work is a small T-indexed</span>
+            <span class="c1"># basis lookup + element-wise multiply on the already-sorted</span>
+            <span class="c1"># data.  Brings adjoint cost in line with forward.</span>
+            <span class="n">grid</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">base</span><span class="o">.</span><span class="n">grid_size</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+            <span class="n">t_idx_sorted</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_t_idx_sorted</span><span class="p">(</span><span class="n">sort_perm</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_coils</span><span class="p">):</span>
+                <span class="c1"># ``sw_c_sorted`` is in scatter-sorted order (no per-k gather).</span>
+                <span class="n">sw_c_sorted</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="p">(</span><span class="n">sparse_kspace</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">*</span> <span class="n">pre_w</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)[</span><span class="n">sort_perm</span><span class="p">]</span>
+                <span class="p">)</span>
+                <span class="n">smap_conj_c</span> <span class="o">=</span> <span class="n">smaps</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">conj</span><span class="p">()</span>
+                <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">K</span><span class="p">):</span>
+                    <span class="c1"># T-indexed lookup → (n_samples,) basis values, then</span>
+                    <span class="c1"># element-wise multiply with the sorted weighted samples.</span>
+                    <span class="n">weighted_sorted</span> <span class="o">=</span> <span class="n">basis</span><span class="p">[</span><span class="n">k</span><span class="p">][</span><span class="n">t_idx_sorted</span><span class="p">]</span> <span class="o">*</span> <span class="n">sw_c_sorted</span>
+                    <span class="n">img_k</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_scatter_ifft_crop</span><span class="p">(</span>
+                        <span class="n">weighted_sorted</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">,</span> <span class="n">grid</span><span class="p">,</span> <span class="n">dtype</span>
+                    <span class="p">)</span>
+                    <span class="n">output</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="o">.</span><span class="n">addcmul_</span><span class="p">(</span><span class="n">img_k</span><span class="p">,</span> <span class="n">smap_conj_c</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># K-batched path (high VRAM, batched FFT): chunk over k.</span>
+            <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_coils</span><span class="p">):</span>
+                <span class="n">sw_c</span> <span class="o">=</span> <span class="n">sparse_kspace</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">*</span> <span class="n">pre_w</span>
+                <span class="n">smap_conj_c</span> <span class="o">=</span> <span class="n">smaps</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">conj</span><span class="p">()</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">k0</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span> <span class="n">k_chunk</span><span class="p">):</span>
+                    <span class="n">k1</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">k0</span> <span class="o">+</span> <span class="n">k_chunk</span><span class="p">,</span> <span class="n">K</span><span class="p">)</span>
+                    <span class="n">kb</span> <span class="o">=</span> <span class="n">k1</span> <span class="o">-</span> <span class="n">k0</span>
+                    <span class="n">weighted</span> <span class="o">=</span> <span class="n">basis</span><span class="p">[</span><span class="n">k0</span><span class="p">:</span><span class="n">k1</span><span class="p">]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">kb</span><span class="p">,</span> <span class="o">*</span><span class="n">phi_shape</span><span class="p">)</span> <span class="o">*</span> <span class="n">sw_c</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                    <span class="n">weighted_flat</span> <span class="o">=</span> <span class="n">weighted</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">kb</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+                    <span class="n">imgs</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_scatter_ifft_crop_batch</span><span class="p">(</span>
+                        <span class="n">weighted_flat</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="o">=</span><span class="n">s_flat_idx</span>
+                    <span class="p">)</span>
+                    <span class="n">output</span><span class="p">[</span><span class="n">k0</span><span class="p">:</span><span class="n">k1</span><span class="p">]</span><span class="o">.</span><span class="n">addcmul_</span><span class="p">(</span><span class="n">imgs</span><span class="p">,</span> <span class="n">smap_conj_c</span><span class="p">)</span>
 
         <span class="k">return</span> <span class="n">output</span></div>
 
@@ -762,15 +853,47 @@
 
         <span class="n">output</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">n_coils</span><span class="p">,</span> <span class="o">*</span><span class="n">nat</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
 
-        <span class="n">_idx_s</span><span class="p">,</span> <span class="n">sqw_s</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">ip_s</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_stack_arrays</span><span class="p">(</span><span class="n">s_flat_idx</span><span class="p">)</span>
+        <span class="n">idx_s</span><span class="p">,</span> <span class="n">sqw_s</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">ip_s</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_stack_arrays</span><span class="p">(</span><span class="n">s_flat_idx</span><span class="p">)</span>
+        <span class="n">indices</span> <span class="o">=</span> <span class="n">idx_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">sqrt_w</span> <span class="o">=</span> <span class="n">sqw_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">inv_perm</span> <span class="o">=</span> <span class="n">ip_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
         <span class="n">pre_w</span> <span class="o">=</span> <span class="n">sqw_s</span><span class="p">[</span><span class="n">ip_s</span><span class="p">]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">*</span><span class="n">nat</span><span class="p">)</span>
 
-        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_coils</span><span class="p">):</span>
-            <span class="n">coil_imgs</span> <span class="o">=</span> <span class="n">coeffs</span> <span class="o">*</span> <span class="n">smaps</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>  <span class="c1"># (K, *image)</span>
-            <span class="n">gathered</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_fft_pad_gather_batch</span><span class="p">(</span><span class="n">coil_imgs</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="o">=</span><span class="n">s_flat_idx</span><span class="p">)</span>
-            <span class="n">gathered_nat</span> <span class="o">=</span> <span class="n">gathered</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="o">*</span><span class="n">nat</span><span class="p">)</span>
-            <span class="n">ksp_c</span> <span class="o">=</span> <span class="p">(</span><span class="n">basis_conj</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="o">*</span><span class="n">phi_shape</span><span class="p">)</span> <span class="o">*</span> <span class="n">gathered_nat</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-            <span class="n">output</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">ksp_c</span> <span class="o">*</span> <span class="n">pre_w</span>
+        <span class="n">k_chunk</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">k_chunk</span>
+        <span class="k">if</span> <span class="n">k_chunk</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="c1"># Lowest-VRAM path: one reused padded buffer across all (c, k).</span>
+            <span class="n">padded</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="o">*</span><span class="n">base</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_coils</span><span class="p">):</span>
+                <span class="n">smap_c</span> <span class="o">=</span> <span class="n">smaps</span><span class="p">[</span><span class="n">c</span><span class="p">]</span>
+                <span class="n">ksp_c</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="o">*</span><span class="n">nat</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">K</span><span class="p">):</span>
+                    <span class="n">coil_img_k</span> <span class="o">=</span> <span class="n">coeffs</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">*</span> <span class="n">smap_c</span>  <span class="c1"># (*image)</span>
+                    <span class="n">gathered_k</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_fft_pad_gather</span><span class="p">(</span>
+                        <span class="n">coil_img_k</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">,</span> <span class="n">inv_perm</span><span class="p">,</span> <span class="n">padded</span><span class="p">,</span> <span class="n">dtype</span>
+                    <span class="p">)</span>
+                    <span class="n">ksp_c</span><span class="o">.</span><span class="n">add_</span><span class="p">(</span>
+                        <span class="n">basis_conj</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">*</span><span class="n">phi_shape</span><span class="p">)</span> <span class="o">*</span> <span class="n">gathered_k</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">nat</span><span class="p">)</span>
+                    <span class="p">)</span>
+                <span class="n">output</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">ksp_c</span> <span class="o">*</span> <span class="n">pre_w</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># K-batched path (high VRAM, batched FFT): chunk over k.</span>
+            <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_coils</span><span class="p">):</span>
+                <span class="n">smap_c</span> <span class="o">=</span> <span class="n">smaps</span><span class="p">[</span><span class="n">c</span><span class="p">]</span>
+                <span class="n">ksp_c</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="o">*</span><span class="n">nat</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">k0</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span> <span class="n">k_chunk</span><span class="p">):</span>
+                    <span class="n">k1</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">k0</span> <span class="o">+</span> <span class="n">k_chunk</span><span class="p">,</span> <span class="n">K</span><span class="p">)</span>
+                    <span class="n">kb</span> <span class="o">=</span> <span class="n">k1</span> <span class="o">-</span> <span class="n">k0</span>
+                    <span class="n">coil_imgs</span> <span class="o">=</span> <span class="n">coeffs</span><span class="p">[</span><span class="n">k0</span><span class="p">:</span><span class="n">k1</span><span class="p">]</span> <span class="o">*</span> <span class="n">smap_c</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                    <span class="n">gathered</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_fft_pad_gather_batch</span><span class="p">(</span>
+                        <span class="n">coil_imgs</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="o">=</span><span class="n">s_flat_idx</span>
+                    <span class="p">)</span>
+                    <span class="n">gathered_nat</span> <span class="o">=</span> <span class="n">gathered</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">kb</span><span class="p">,</span> <span class="o">*</span><span class="n">nat</span><span class="p">)</span>
+                    <span class="n">ksp_c</span><span class="o">.</span><span class="n">add_</span><span class="p">(</span>
+                        <span class="p">(</span><span class="n">basis_conj</span><span class="p">[</span><span class="n">k0</span><span class="p">:</span><span class="n">k1</span><span class="p">]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">kb</span><span class="p">,</span> <span class="o">*</span><span class="n">phi_shape</span><span class="p">)</span> <span class="o">*</span> <span class="n">gathered_nat</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span>
+                            <span class="n">dim</span><span class="o">=</span><span class="mi">0</span>
+                        <span class="p">)</span>
+                    <span class="p">)</span>
+                <span class="n">output</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">ksp_c</span> <span class="o">*</span> <span class="n">pre_w</span>
 
         <span class="k">return</span> <span class="n">output</span></div>
 
@@ -800,7 +923,7 @@
         <span class="bp">self</span><span class="p">,</span> <span class="n">sparse_kspace</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Coil-pipelined adjoint: H2D of next coil overlapped with the</span>
-<span class="sd">        K-batched scatter+IFFT+FMA of the current coil.</span>
+<span class="sd">        per-K scatter+IFFT+FMA of the current coil.</span>
 
 <span class="sd">        Input: ``(C, *natural)`` on CPU.  Output: ``(K, *image_shape)`` on CPU</span>
 <span class="sd">        (mirrors the synchronous fast-path return device).&quot;&quot;&quot;</span>
@@ -820,10 +943,14 @@
 
         <span class="c1"># Pre-stage constants once on the compute device.</span>
         <span class="n">basis_gpu</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">basis</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>  <span class="c1"># (K, T)</span>
-        <span class="n">_idx_s</span><span class="p">,</span> <span class="n">sqw_s</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">ip_s</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_stack_arrays</span><span class="p">(</span><span class="n">s_flat_idx</span><span class="p">)</span>
+        <span class="n">idx_s</span><span class="p">,</span> <span class="n">sqw_s</span><span class="p">,</span> <span class="n">sp_s</span><span class="p">,</span> <span class="n">ip_s</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_stack_arrays</span><span class="p">(</span><span class="n">s_flat_idx</span><span class="p">)</span>
+        <span class="n">indices</span> <span class="o">=</span> <span class="n">idx_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">sqrt_w</span> <span class="o">=</span> <span class="n">sqw_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">sort_perm</span> <span class="o">=</span> <span class="n">sp_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
         <span class="n">pre_w_gpu</span> <span class="o">=</span> <span class="p">(</span>
             <span class="n">sqw_s</span><span class="p">[</span><span class="n">ip_s</span><span class="p">]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">*</span><span class="n">nat</span><span class="p">)</span>
         <span class="p">)</span>  <span class="c1"># (*nat)</span>
+        <span class="n">base</span><span class="o">.</span><span class="n">_ensure_bins</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
 
         <span class="n">smaps_cpu</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">smaps</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="n">smaps_cpu</span><span class="o">.</span><span class="n">is_pinned</span><span class="p">()</span> <span class="ow">and</span> <span class="n">smaps_cpu</span><span class="o">.</span><span class="n">device</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="s2">&quot;cpu&quot;</span><span class="p">:</span>
@@ -847,6 +974,13 @@
 
         <span class="n">s_data</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">Stream</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">)</span>
         <span class="n">s_comp</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">Stream</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">)</span>
+
+        <span class="c1"># Single grid buffer reused across all (c, k) on the compute stream.</span>
+        <span class="n">k_chunk</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">k_chunk</span>
+        <span class="k">if</span> <span class="n">k_chunk</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">grid</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">base</span><span class="o">.</span><span class="n">grid_size</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">grid</span> <span class="o">=</span> <span class="kc">None</span>
 
         <span class="c1"># Double-buffer the per-coil sparse + smaps slabs on the data stream.</span>
         <span class="n">buf_sparse</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span>
@@ -875,15 +1009,38 @@
             <span class="c1"># Compute on s_comp; ensure cur transfer is visible there.</span>
             <span class="n">s_comp</span><span class="o">.</span><span class="n">wait_stream</span><span class="p">(</span><span class="n">s_data</span><span class="p">)</span>
             <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">stream</span><span class="p">(</span><span class="n">s_comp</span><span class="p">):</span>
-                <span class="n">sw_c</span> <span class="o">=</span> <span class="n">buf_sparse</span><span class="p">[</span><span class="n">cur</span><span class="p">]</span> <span class="o">*</span> <span class="n">pre_w_gpu</span>  <span class="c1"># (*nat)</span>
-                <span class="n">weighted</span> <span class="o">=</span> <span class="n">basis_gpu</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="o">*</span><span class="n">phi_shape</span><span class="p">)</span> <span class="o">*</span> <span class="n">sw_c</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
-                <span class="n">weighted_flat</span> <span class="o">=</span> <span class="n">weighted</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
-                <span class="c1"># Input is already on comp_device, so the helper&#39;s .to(...)</span>
-                <span class="c1"># is a no-op and the IFFT executes on s_comp.</span>
-                <span class="n">imgs</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_scatter_ifft_crop_batch</span><span class="p">(</span>
-                    <span class="n">weighted_flat</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="o">=</span><span class="n">s_flat_idx</span>
-                <span class="p">)</span>
-                <span class="n">output_gpu</span><span class="o">.</span><span class="n">addcmul_</span><span class="p">(</span><span class="n">imgs</span><span class="p">,</span> <span class="n">buf_smaps</span><span class="p">[</span><span class="n">cur</span><span class="p">]</span><span class="o">.</span><span class="n">conj</span><span class="p">()</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+                <span class="n">smap_conj_c</span> <span class="o">=</span> <span class="n">buf_smaps</span><span class="p">[</span><span class="n">cur</span><span class="p">]</span><span class="o">.</span><span class="n">conj</span><span class="p">()</span>
+                <span class="k">if</span> <span class="n">k_chunk</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="c1"># Sort hoisting: one big gather per coil; per-k is a</span>
+                    <span class="c1"># T-indexed basis lookup + element-wise multiply.</span>
+                    <span class="n">t_idx_sorted</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_t_idx_sorted</span><span class="p">(</span>
+                        <span class="n">sort_perm</span><span class="p">,</span> <span class="n">s_flat_idx</span>
+                    <span class="p">)</span>
+                    <span class="n">sw_c_sorted</span> <span class="o">=</span> <span class="p">(</span>
+                        <span class="p">(</span><span class="n">buf_sparse</span><span class="p">[</span><span class="n">cur</span><span class="p">]</span> <span class="o">*</span> <span class="n">pre_w_gpu</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)[</span><span class="n">sort_perm</span><span class="p">]</span>
+                    <span class="p">)</span>
+                    <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">K</span><span class="p">):</span>
+                        <span class="n">weighted_sorted</span> <span class="o">=</span> <span class="p">(</span>
+                            <span class="n">basis_gpu</span><span class="p">[</span><span class="n">k</span><span class="p">][</span><span class="n">t_idx_sorted</span><span class="p">]</span> <span class="o">*</span> <span class="n">sw_c_sorted</span>
+                        <span class="p">)</span>
+                        <span class="n">img_k</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_scatter_ifft_crop</span><span class="p">(</span>
+                            <span class="n">weighted_sorted</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">,</span> <span class="n">grid</span><span class="p">,</span> <span class="n">dtype</span>
+                        <span class="p">)</span>
+                        <span class="n">output_gpu</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="o">.</span><span class="n">addcmul_</span><span class="p">(</span><span class="n">img_k</span><span class="p">,</span> <span class="n">smap_conj_c</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">sw_c</span> <span class="o">=</span> <span class="n">buf_sparse</span><span class="p">[</span><span class="n">cur</span><span class="p">]</span> <span class="o">*</span> <span class="n">pre_w_gpu</span>  <span class="c1"># (*nat)</span>
+                    <span class="n">smap_conj_b</span> <span class="o">=</span> <span class="n">smap_conj_c</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                    <span class="k">for</span> <span class="n">k0</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span> <span class="n">k_chunk</span><span class="p">):</span>
+                        <span class="n">k1</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">k0</span> <span class="o">+</span> <span class="n">k_chunk</span><span class="p">,</span> <span class="n">K</span><span class="p">)</span>
+                        <span class="n">kb</span> <span class="o">=</span> <span class="n">k1</span> <span class="o">-</span> <span class="n">k0</span>
+                        <span class="n">weighted</span> <span class="o">=</span> <span class="n">basis_gpu</span><span class="p">[</span><span class="n">k0</span><span class="p">:</span><span class="n">k1</span><span class="p">]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span>
+                            <span class="n">kb</span><span class="p">,</span> <span class="o">*</span><span class="n">phi_shape</span>
+                        <span class="p">)</span> <span class="o">*</span> <span class="n">sw_c</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                        <span class="n">weighted_flat</span> <span class="o">=</span> <span class="n">weighted</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">kb</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+                        <span class="n">imgs</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_scatter_ifft_crop_batch</span><span class="p">(</span>
+                            <span class="n">weighted_flat</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="o">=</span><span class="n">s_flat_idx</span>
+                        <span class="p">)</span>
+                        <span class="n">output_gpu</span><span class="p">[</span><span class="n">k0</span><span class="p">:</span><span class="n">k1</span><span class="p">]</span><span class="o">.</span><span class="n">addcmul_</span><span class="p">(</span><span class="n">imgs</span><span class="p">,</span> <span class="n">smap_conj_b</span><span class="p">)</span>
 
         <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">synchronize</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">output_gpu</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">sparse_kspace</span><span class="o">.</span><span class="n">device</span><span class="p">)</span></div>
@@ -894,7 +1051,7 @@
     <span class="k">def</span><span class="w"> </span><span class="nf">_forward_single_dual</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">coeffs</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Coil-pipelined forward: per-coil K-batched FFT+gather on the</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Coil-pipelined forward: per-coil per-K FFT+gather on the</span>
 <span class="sd">        compute stream, async D2H of the result on the data stream.</span>
 
 <span class="sd">        Input: ``(K, *image_shape)`` on CPU.  Output: ``(C, *natural)`` on CPU.&quot;&quot;&quot;</span>
@@ -912,7 +1069,10 @@
         <span class="n">phi_shape</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_t_axis_in_nat</span><span class="p">]</span> <span class="o">=</span> <span class="n">T</span>
 
         <span class="n">basis_conj_gpu</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">basis</span><span class="o">.</span><span class="n">conj</span><span class="p">()</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
-        <span class="n">_idx_s</span><span class="p">,</span> <span class="n">sqw_s</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">ip_s</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_stack_arrays</span><span class="p">(</span><span class="n">s_flat_idx</span><span class="p">)</span>
+        <span class="n">idx_s</span><span class="p">,</span> <span class="n">sqw_s</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">ip_s</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_stack_arrays</span><span class="p">(</span><span class="n">s_flat_idx</span><span class="p">)</span>
+        <span class="n">indices</span> <span class="o">=</span> <span class="n">idx_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">sqrt_w</span> <span class="o">=</span> <span class="n">sqw_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
+        <span class="n">inv_perm</span> <span class="o">=</span> <span class="n">ip_s</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">comp_device</span><span class="p">)</span>
         <span class="n">pre_w_gpu</span> <span class="o">=</span> <span class="n">sqw_s</span><span class="p">[</span><span class="n">ip_s</span><span class="p">]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">*</span><span class="n">nat</span><span class="p">)</span>
 
         <span class="c1"># Coeffs are constant across coils — stage once.</span>
@@ -937,6 +1097,15 @@
         <span class="n">s_data</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">Stream</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">)</span>
         <span class="n">s_comp</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">Stream</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">)</span>
 
+        <span class="c1"># Single padded buffer reused across all (c, k) on the compute stream.</span>
+        <span class="n">k_chunk</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">k_chunk</span>
+        <span class="k">if</span> <span class="n">k_chunk</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">padded</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span>
+                <span class="o">*</span><span class="n">base</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">comp_device</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">padded</span> <span class="o">=</span> <span class="kc">None</span>
+
         <span class="n">buf_smaps</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span>
         <span class="n">ksp_buf</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span>
 
@@ -956,15 +1125,34 @@
 
             <span class="n">s_comp</span><span class="o">.</span><span class="n">wait_stream</span><span class="p">(</span><span class="n">s_data</span><span class="p">)</span>
             <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">stream</span><span class="p">(</span><span class="n">s_comp</span><span class="p">):</span>
-                <span class="n">coil_imgs</span> <span class="o">=</span> <span class="n">coeffs_gpu</span> <span class="o">*</span> <span class="n">buf_smaps</span><span class="p">[</span><span class="n">cur</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
-                <span class="n">gathered</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_fft_pad_gather_batch</span><span class="p">(</span>
-                    <span class="n">coil_imgs</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="o">=</span><span class="n">s_flat_idx</span>
-                <span class="p">)</span>
-                <span class="n">gathered_nat</span> <span class="o">=</span> <span class="n">gathered</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="o">*</span><span class="n">nat</span><span class="p">)</span>
-                <span class="n">ksp_c</span> <span class="o">=</span> <span class="p">(</span>
-                    <span class="n">basis_conj_gpu</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="o">*</span><span class="n">phi_shape</span><span class="p">)</span> <span class="o">*</span> <span class="n">gathered_nat</span>
-                <span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span> <span class="o">*</span> <span class="n">pre_w_gpu</span>
-                <span class="n">ksp_buf</span><span class="p">[</span><span class="n">cur</span><span class="p">]</span> <span class="o">=</span> <span class="n">ksp_c</span>
+                <span class="n">smap_c</span> <span class="o">=</span> <span class="n">buf_smaps</span><span class="p">[</span><span class="n">cur</span><span class="p">]</span>
+                <span class="n">ksp_c</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="o">*</span><span class="n">nat</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">comp_device</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">k_chunk</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">K</span><span class="p">):</span>
+                        <span class="n">coil_img_k</span> <span class="o">=</span> <span class="n">coeffs_gpu</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">*</span> <span class="n">smap_c</span>
+                        <span class="n">gathered_k</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_fft_pad_gather</span><span class="p">(</span>
+                            <span class="n">coil_img_k</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">,</span> <span class="n">inv_perm</span><span class="p">,</span> <span class="n">padded</span><span class="p">,</span> <span class="n">dtype</span>
+                        <span class="p">)</span>
+                        <span class="n">ksp_c</span><span class="o">.</span><span class="n">add_</span><span class="p">(</span>
+                            <span class="n">basis_conj_gpu</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">*</span><span class="n">phi_shape</span><span class="p">)</span>
+                            <span class="o">*</span> <span class="n">gathered_k</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">nat</span><span class="p">)</span>
+                        <span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">for</span> <span class="n">k0</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span> <span class="n">k_chunk</span><span class="p">):</span>
+                        <span class="n">k1</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">k0</span> <span class="o">+</span> <span class="n">k_chunk</span><span class="p">,</span> <span class="n">K</span><span class="p">)</span>
+                        <span class="n">kb</span> <span class="o">=</span> <span class="n">k1</span> <span class="o">-</span> <span class="n">k0</span>
+                        <span class="n">coil_imgs</span> <span class="o">=</span> <span class="n">coeffs_gpu</span><span class="p">[</span><span class="n">k0</span><span class="p">:</span><span class="n">k1</span><span class="p">]</span> <span class="o">*</span> <span class="n">smap_c</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                        <span class="n">gathered</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">_fft_pad_gather_batch</span><span class="p">(</span>
+                            <span class="n">coil_imgs</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="o">=</span><span class="n">s_flat_idx</span>
+                        <span class="p">)</span>
+                        <span class="n">gathered_nat</span> <span class="o">=</span> <span class="n">gathered</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">kb</span><span class="p">,</span> <span class="o">*</span><span class="n">nat</span><span class="p">)</span>
+                        <span class="n">ksp_c</span><span class="o">.</span><span class="n">add_</span><span class="p">(</span>
+                            <span class="p">(</span>
+                                <span class="n">basis_conj_gpu</span><span class="p">[</span><span class="n">k0</span><span class="p">:</span><span class="n">k1</span><span class="p">]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">kb</span><span class="p">,</span> <span class="o">*</span><span class="n">phi_shape</span><span class="p">)</span>
+                                <span class="o">*</span> <span class="n">gathered_nat</span>
+                            <span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                        <span class="p">)</span>
+                <span class="n">ksp_buf</span><span class="p">[</span><span class="n">cur</span><span class="p">]</span> <span class="o">=</span> <span class="n">ksp_c</span> <span class="o">*</span> <span class="n">pre_w_gpu</span>
 
             <span class="c1"># Async D2H on the data stream while the next coil computes.</span>
             <span class="n">s_data</span><span class="o">.</span><span class="n">wait_stream</span><span class="p">(</span><span class="n">s_comp</span><span class="p">)</span>

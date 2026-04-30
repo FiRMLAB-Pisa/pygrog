@@ -577,7 +577,7 @@ match the nested baseline to numerical noise.</p></li>
 </div>
 <div class="sphx-glr-script-out highlight-none notranslate"><div class="highlight"><pre><span></span>/home/mcencini/.conda/envs/pygrog/lib/python3.13/site-packages/mrinufft/_utils.py:67: UserWarning: Samples will be rescaled to [-pi, pi), assuming they were in [-0.5, 0.5)
   warnings.warn(
-SparseFFT  Toeplitz    5.87 ms  |  nested   12.35 ms  | speed-up x 2.10  | rel-err 3.18e-07
+SparseFFT  Toeplitz    5.58 ms  |  nested   16.61 ms  | speed-up x 2.98  | rel-err 3.18e-07
 </pre></div>
 </div>
 <section id="cg-using-op-normal">
@@ -639,7 +639,7 @@ SparseFFT  Toeplitz    5.87 ms  |  nested   12.35 ms  | speed-up x 2.10  | rel-e
 <a href="https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.show.html#matplotlib.pyplot.show" title="matplotlib.pyplot.show" class="sphx-glr-backref-module-matplotlib-pyplot sphx-glr-backref-type-py-function"><span class="n">plt</span><span class="o">.</span><span class="n">show</span></a><span class="p">()</span>
 </pre></div>
 </div>
-<img src="../../_images/sphx_glr_example_toeplitz_001.png" srcset="../../_images/sphx_glr_example_toeplitz_001.png" alt="CG (Toeplitz) — 0.09 s, CG (nested A^HA) — 0.19 s, Difference" class = "sphx-glr-single-img"/><div class="sphx-glr-script-out highlight-none notranslate"><div class="highlight"><pre><span></span>CG (12 iter):  Toeplitz 0.09 s  |  nested 0.19 s  | speed-up x2.20
+<img src="../../_images/sphx_glr_example_toeplitz_001.png" srcset="../../_images/sphx_glr_example_toeplitz_001.png" alt="CG (Toeplitz) — 0.16 s, CG (nested A^HA) — 0.19 s, Difference" class = "sphx-glr-single-img"/><div class="sphx-glr-script-out highlight-none notranslate"><div class="highlight"><pre><span></span>CG (12 iter):  Toeplitz 0.16 s  |  nested 0.19 s  | speed-up x1.19
 </pre></div>
 </div>
 </section>
@@ -738,8 +738,8 @@ the high-level helpers).  For each gadget we compare <code class="docutils liter
 <span class="p">)</span>
 </pre></div>
 </div>
-<div class="sphx-glr-script-out highlight-none notranslate"><div class="highlight"><pre><span></span>ORC (L=4)   Toeplitz    1.23 ms  |  nested    1.38 ms  | speed-up x 1.13  | rel-err 1.37e-07
-Subspace (K=4) Toeplitz    0.63 ms  |  nested    3.09 ms  | speed-up x 4.93  | rel-err 1.87e-07
+<div class="sphx-glr-script-out highlight-none notranslate"><div class="highlight"><pre><span></span>ORC (L=4)   Toeplitz    0.85 ms  |  nested    1.29 ms  | speed-up x 1.52  | rel-err 1.37e-07
+Subspace (K=4) Toeplitz    0.67 ms  |  nested    4.18 ms  | speed-up x 6.23  | rel-err 1.87e-07
 </pre></div>
 </div>
 <section id="accuracy-summary">
@@ -764,7 +764,7 @@ Subspace (K=4) Toeplitz    0.63 ms  |  nested    3.09 ms  | speed-up x 4.93  | r
 <a href="https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.show.html#matplotlib.pyplot.show" title="matplotlib.pyplot.show" class="sphx-glr-backref-module-matplotlib-pyplot sphx-glr-backref-type-py-function"><span class="n">plt</span><span class="o">.</span><span class="n">show</span></a><span class="p">()</span>
 </pre></div>
 </div>
-<img src="../../_images/sphx_glr_example_toeplitz_002.png" srcset="../../_images/sphx_glr_example_toeplitz_002.png" alt="Toeplitz `op.normal` accuracy" class = "sphx-glr-single-img"/><p class="sphx-glr-timing"><strong>Total running time of the script:</strong> (0 minutes 1.755 seconds)</p>
+<img src="../../_images/sphx_glr_example_toeplitz_002.png" srcset="../../_images/sphx_glr_example_toeplitz_002.png" alt="Toeplitz `op.normal` accuracy" class = "sphx-glr-single-img"/><p class="sphx-glr-timing"><strong>Total running time of the script:</strong> (0 minutes 2.080 seconds)</p>
 <div class="sphx-glr-footer sphx-glr-footer-example docutils container" id="sphx-glr-download-generated-autoexamples-example-toeplitz-py">
 <div class="sphx-glr-download sphx-glr-download-jupyter docutils container">
 <p><a class="reference download internal" download="" href="../../_downloads/8b0f45768564e4574a7e0ec2b617eb12/example_toeplitz.ipynb"><code class="xref download docutils literal notranslate"><span class="pre">Download</span> <span class="pre">Jupyter</span> <span class="pre">notebook:</span> <span class="pre">example_toeplitz.ipynb</span></code></a></p>

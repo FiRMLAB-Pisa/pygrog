@@ -591,7 +591,9 @@ def plot_linop(results: dict, out: Path) -> None:
     plt.close(fig)
 
 
-def plot_runtime(results: dict, out: Path) -> None:
+def plot_runtime(
+    results: dict, out: Path, *, exclude_dual_stream_gpu: bool = False
+) -> None:
     """2×2 panel: runtime / speedup factor / memory footprint / preprocessing.
 
     Panel (0,0): SubspaceSparseFFT runtime per operation (adj/fwd), all devices.
@@ -640,7 +642,9 @@ def plot_runtime(results: dict, out: Path) -> None:
 
     nufft_gpu_avail = not np.isnan(_rt_g("nufft_cufinufft_gpu", "nufft_adjoint")[0])
     grog_full_avail = not np.isnan(_rt_g("grog_full_gpu", "grog_adjoint")[0])
-    grog_dual_avail = not np.isnan(_rt_g("grog_dual_stream_gpu", "grog_adjoint")[0])
+    grog_dual_avail = (not exclude_dual_stream_gpu) and not np.isnan(
+        _rt_g("grog_dual_stream_gpu", "grog_adjoint")[0]
+    )
 
     # (label, color, [(mean,std) per op], [ram per op], [vram per op])
     specs: list[tuple] = [
@@ -840,6 +844,7 @@ def plot_runtime(results: dict, out: Path) -> None:
 
     # ── (1,0) Memory footprint ────────────────────────────────────────────
     bar_ann_mem: list[tuple] = []
+    bar_ann_mem_detail: list[tuple] = []  # (bar, ram, vram) for split labels
     any_vram = False
     for mi, (label, color, _rt_pairs, ram_list, vram_list) in enumerate(specs):
         xpos = x + bar_off + mi * bar_w
@@ -860,9 +865,10 @@ def plot_runtime(results: dict, out: Path) -> None:
             )
             any_vram = True
         ghost = ax_mem.bar(xpos, total, bar_w, alpha=0.0)
-        for bar, m in zip(ghost, total, strict=False):
+        for bar, m, r, v in zip(ghost, total, ram_list, vram_list, strict=False):
             if not np.isnan(m):
                 bar_ann_mem.append((bar, m, 0.0))
+                bar_ann_mem_detail.append((bar, float(r), float(v)))
     ax_mem.set_xticks(x)
     ax_mem.set_xticklabels([lb for _, lb in ops])
     ax_mem.set_ylabel("Peak memory (GB)")
@@ -876,7 +882,45 @@ def plot_runtime(results: dict, out: Path) -> None:
         legend_handles.append(Patch(facecolor="#888888", hatch="///"))
         legend_labels.append("VRAM (on top)")
     ax_mem.legend(legend_handles, legend_labels, fontsize=8, loc="upper right")
-    _finalize(ax_mem, bar_ann_mem, _format_memory)
+    # Annotate RAM and VRAM inside their respective bar segments to avoid
+    # horizontal crowding above closely-packed bars.
+    valid_totals = [m for _, m, _ in bar_ann_mem if not np.isnan(m)]
+    if valid_totals:
+        ymax = max(valid_totals)
+        ax_mem.set_ylim(0, ymax * 1.45)
+        fontsize = 7 if len(bar_ann_mem_detail) <= 8 else 6
+        min_seg = ymax * 0.08  # threshold: label inside if segment is tall enough
+        margin = ymax * 0.02
+        for bar, ram, vram in bar_ann_mem_detail:
+            x_c = bar.get_x() + bar.get_width() / 2
+            has_vram = vram > 0.0 and not np.isnan(vram)
+            total = ram + (vram if has_vram else 0.0)
+            # RAM label — centre of the RAM segment (inside)
+            if ram >= min_seg:
+                ax_mem.text(
+                    x_c, ram / 2.0,
+                    _format_memory(ram),
+                    ha="center", va="center", fontsize=fontsize,
+                    color="white", fontweight="bold", rotation=90,
+                )
+            # VRAM label — inside if tall enough, otherwise just above the bar
+            if has_vram:
+                if vram >= min_seg:
+                    ax_mem.text(
+                        x_c, ram + vram / 2.0,
+                        _format_memory(vram),
+                        ha="center", va="center", fontsize=fontsize,
+                        color="white", fontweight="bold", rotation=90,
+                    )
+                else:
+                    ax_mem.text(
+                        x_c, total + margin,
+                        _format_memory(vram),
+                        ha="center", va="bottom", fontsize=fontsize,
+                        color="black", fontweight="bold", rotation=90,
+                        bbox={"boxstyle": "round,pad=0.1", "facecolor": "white",
+                              "edgecolor": "none", "alpha": 0.7},
+                    )
 
     # ── (1,1) GROG preprocessing ─────────────────────────────────────────
     prep_labels = ["Plan\ncreation", "Interpolation"]
@@ -941,6 +985,11 @@ def parse_args(argv=None) -> argparse.Namespace:
         "--results-json", type=Path, default=Path("benchmark/results/results.json")
     )
     parser.add_argument("--output-dir", type=Path, default=Path("benchmark/results"))
+    parser.add_argument(
+        "--exclude-dual-stream-gpu",
+        action="store_true",
+        help="Omit GROG dual-stream GPU series from runtime plots.",
+    )
     return parser.parse_args(argv)
 
 
@@ -955,7 +1004,11 @@ def main(argv=None) -> None:
 
     plot_preprocessing(results, args.output_dir / "figure_preprocessing.png")
     plot_linop(results, args.output_dir / "figure_linop.png")
-    plot_runtime(results, args.output_dir / "figure_runtime.png")
+    plot_runtime(
+        results,
+        args.output_dir / "figure_runtime.png",
+        exclude_dual_stream_gpu=args.exclude_dual_stream_gpu,
+    )
     plot_subspace(
         coeff_nufft, coeff_grog, args.output_dir / "figure_coeffs_cpu.png", label="CPU"
     )
