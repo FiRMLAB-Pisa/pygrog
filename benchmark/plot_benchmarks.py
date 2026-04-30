@@ -12,6 +12,28 @@ from matplotlib.patches import Patch
 import numpy as np
 
 
+_FONT_SCALE = 1.0
+
+
+def _set_font_scale(scale: float) -> None:
+    global _FONT_SCALE
+    _FONT_SCALE = max(float(scale), 0.5)
+    plt.rcParams.update(
+        {
+            "font.size": 11 * _FONT_SCALE,
+            "axes.titlesize": 13 * _FONT_SCALE,
+            "axes.labelsize": 12 * _FONT_SCALE,
+            "xtick.labelsize": 10 * _FONT_SCALE,
+            "ytick.labelsize": 10 * _FONT_SCALE,
+            "legend.fontsize": 10 * _FONT_SCALE,
+        }
+    )
+
+
+def _fs(size: float) -> float:
+    return float(size) * _FONT_SCALE
+
+
 def _load_json(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
@@ -36,7 +58,7 @@ def _annotate_bars(ax, bars, formatter, x_shift: float = 0.0, stagger: bool = Tr
     ymax = max(vals) if vals else 0.0
     offset = max(0.01 * ymax, 0.003)
     n = len(vals)
-    fontsize = 8 if n <= 8 else 7
+    fontsize = _fs(8 if n <= 8 else 7)
     for i, (bar, val) in enumerate(zip(bars, vals, strict=False)):
         x = bar.get_x() + bar.get_width() / 2.0 + x_shift
         y = val + offset
@@ -296,11 +318,11 @@ def plot_subspace(
         cursor += w
 
     ax_gray.set_xticks(col_centers)
-    ax_gray.set_xticklabels([rf"$\phi_{{{i}}}$" for i in range(k)], fontsize=13)
+    ax_gray.set_xticklabels([rf"$\phi_{{{i}}}$" for i in range(k)], fontsize=_fs(13))
     ax_gray.xaxis.tick_top()
     ax_gray.tick_params(axis="x", length=0, pad=3)
     ax_gray.set_yticks([h / 2.0, h + h / 2.0])
-    ax_gray.set_yticklabels(["NUFFT reference", "GROG"], fontsize=13)
+    ax_gray.set_yticklabels(["NUFFT reference", "GROG"], fontsize=_fs(13))
     for tick in ax_gray.get_yticklabels():
         tick.set_rotation(90)
         tick.set_verticalalignment("center")
@@ -325,7 +347,7 @@ def plot_subspace(
     )
     ax_err.set_xticks([])
     ax_err.set_yticks([err_row.shape[0] / 2.0])
-    ax_err.set_yticklabels(["Error (GROG\u2212NUFFT)"], fontsize=13)
+    ax_err.set_yticklabels(["Error (GROG\u2212NUFFT)"], fontsize=_fs(13))
     for tick in ax_err.get_yticklabels():
         tick.set_rotation(90)
         tick.set_verticalalignment("center")
@@ -343,7 +365,7 @@ def plot_subspace(
             f"NRMSE={nrmse:.3f}",
             ha="center",
             va="bottom",
-            fontsize=10,
+            fontsize=_fs(10),
             color="black",
             transform=ax_err.transData,
         )
@@ -357,15 +379,15 @@ def plot_subspace(
         transform=ax_err.transAxes,
         ha="right",
         va="bottom",
-        fontsize=12,
+        fontsize=_fs(12),
         color="white",
         bbox={"boxstyle": "round,pad=0.2", "facecolor": "black", "alpha": 0.5},
     )
 
     cbar = fig.colorbar(im, ax=ax_err, orientation="vertical", fraction=0.015, pad=0.01)
-    cbar.set_label("Signed error (%)", fontsize=11)
+    cbar.set_label("Signed error (%)", fontsize=_fs(11))
 
-    fig.suptitle(label, fontsize=14, fontweight="bold")
+    fig.suptitle(label, fontsize=_fs(14), fontweight="bold")
     fig.savefig(out, dpi=200, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
@@ -430,9 +452,9 @@ def plot_grog_views(coeff_grog: np.ndarray, out: Path, label: str = "CPU") -> No
     ax.imshow(canvas, cmap="gray", origin="upper", vmin=0.0, vmax=1.0)
 
     ax.set_xticks(col_centers)
-    ax.set_xticklabels([rf"$\phi_{{{i}}}$" for i in range(k)], fontsize=13)
+    ax.set_xticklabels([rf"$\phi_{{{i}}}$" for i in range(k)], fontsize=_fs(13))
     ax.set_yticks(row_centers)
-    ax.set_yticklabels(view_names, fontsize=13)
+    ax.set_yticklabels(view_names, fontsize=_fs(13))
     for tick in ax.get_yticklabels():
         tick.set_rotation(90)
         tick.set_verticalalignment("center")
@@ -454,7 +476,7 @@ def plot_grog_views(coeff_grog: np.ndarray, out: Path, label: str = "CPU") -> No
         ax.axhline(ry - 0.5, color="#555555", linewidth=0.5, linestyle="--")
 
     fig.tight_layout(pad=0.3)
-    fig.suptitle(label, fontsize=14, fontweight="bold")
+    fig.suptitle(label, fontsize=_fs(14), fontweight="bold")
     fig.savefig(out, dpi=200, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
@@ -651,6 +673,8 @@ def plot_runtime(
     grog_dual_avail = (not exclude_dual_stream_gpu) and not np.isnan(
         _rt_g("grog_dual_stream_gpu", "grog_adjoint")[0]
     )
+    grog_full_label = "GROG GPU" if exclude_dual_stream_gpu else "GROG GPU (full)"
+    gpu_speed_label = "GPU" if exclude_dual_stream_gpu else "GPU (full)"
 
     # (label, color, [(mean,std) per op], [ram per op], [vram per op])
     specs: list[tuple] = [
@@ -691,7 +715,7 @@ def plot_runtime(
     if grog_full_avail:
         specs.append(
             (
-                "GROG GPU (full)",
+                grog_full_label,
                 "#E15759",
                 [
                     _rt_g("grog_full_gpu", "grog_adjoint"),
@@ -742,9 +766,9 @@ def plot_runtime(
         for bar, m, std in valid:
             kw: dict = {"ha": "center", "va": "bottom"}
             if bold:
-                kw.update(fontsize=10, fontweight="bold")
+                kw.update(fontsize=_fs(10), fontweight="bold")
             else:
-                kw["fontsize"] = 7
+                kw["fontsize"] = _fs(7)
                 if rot:
                     kw["rotation"] = 35
             ax.text(
@@ -775,8 +799,18 @@ def plot_runtime(
     ax_rt.set_xticks(x)
     ax_rt.set_xticklabels([lb for _, lb in ops])
     ax_rt.set_ylabel("Runtime (s)")
-    ax_rt.set_title("SubspaceSparseFFT runtime")
-    ax_rt.legend(fontsize=8, loc="upper right")
+    ax_rt.set_title("Runtime")
+    rt_h, rt_l = ax_rt.get_legend_handles_labels()
+    if rt_h:
+        ax_rt.legend(
+            rt_h,
+            rt_l,
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.20),
+            ncol=2,
+            frameon=False,
+            fontsize=_fs(8),
+        )
     _finalize(ax_rt, bar_ann_rt, _format_runtime, rot=True)
 
     # ── (0,1) Speedup factor ─────────────────────────────────────────────
@@ -791,8 +825,8 @@ def plot_runtime(
         ],
     }
     if nufft_gpu_avail and grog_full_avail:
-        sp_types.append(("GPU (full)", "#E15759"))
-        sp_vals_map["GPU (full)"] = [
+        sp_types.append((gpu_speed_label, "#E15759"))
+        sp_vals_map[gpu_speed_label] = [
             _sp(
                 _rt_g("nufft_cufinufft_gpu", "nufft_adjoint")[0],
                 _rt_g("grog_full_gpu", "grog_adjoint")[0],
@@ -828,10 +862,19 @@ def plot_runtime(
     ax_sp.axhline(1.0, color="black", linestyle="--", linewidth=0.8)
     ax_sp.set_xticks(x)
     ax_sp.set_xticklabels([lb for _, lb in ops])
-    ax_sp.set_ylabel("Speedup  (NUFFT / GROG)")
+    ax_sp.set_ylabel("Speedup")
     ax_sp.set_title("Speedup factor")
-    if sp_types:
-        ax_sp.legend(fontsize=8)
+    sp_h, sp_l = ax_sp.get_legend_handles_labels()
+    if sp_h:
+        ax_sp.legend(
+            sp_h,
+            sp_l,
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.20),
+            ncol=min(len(sp_h), 3),
+            frameon=False,
+            fontsize=_fs(8),
+        )
     if bar_ann_sp:
         ymax_sp = max(v for _, v, _ in bar_ann_sp if not np.isnan(v))
         ax_sp.set_ylim(0, max(ymax_sp * 1.45, 2.0))
@@ -844,7 +887,7 @@ def plot_runtime(
                     f"{v:.1f}×",
                     ha="center",
                     va="bottom",
-                    fontsize=10,
+                    fontsize=_fs(10),
                     fontweight="bold",
                 )
 
@@ -884,18 +927,24 @@ def plot_runtime(
     ax_mem.set_title(title_mem)
     legend_handles = list(ax_mem.get_legend_handles_labels()[0])
     legend_labels  = list(ax_mem.get_legend_handles_labels()[1])
-    if any_vram:
-        legend_handles.append(Patch(facecolor="#888888", hatch="///"))
-        legend_labels.append("VRAM (on top)")
-    ax_mem.legend(legend_handles, legend_labels, fontsize=8, loc="upper right")
+    if legend_handles:
+        ax_mem.legend(
+            legend_handles,
+            legend_labels,
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.20),
+            ncol=2,
+            frameon=False,
+            fontsize=_fs(8),
+        )
     # Annotate RAM and VRAM inside their respective bar segments to avoid
     # horizontal crowding above closely-packed bars.
     valid_totals = [m for _, m, _ in bar_ann_mem if not np.isnan(m)]
     if valid_totals:
         ymax = max(valid_totals)
         ax_mem.set_ylim(0, ymax * 1.45)
-        fontsize = 7 if len(bar_ann_mem_detail) <= 8 else 6
-        min_seg = ymax * 0.08  # threshold: label inside if segment is tall enough
+        fontsize = _fs(6 if len(bar_ann_mem_detail) <= 8 else 5)
+        min_seg = ymax * 0.11  # only place inside when it clearly fits
         margin = ymax * 0.02
         for bar, ram, vram in bar_ann_mem_detail:
             x_c = bar.get_x() + bar.get_width() / 2
@@ -905,23 +954,23 @@ def plot_runtime(
             if ram >= min_seg:
                 ax_mem.text(
                     x_c, ram / 2.0,
-                    _format_memory(ram),
+                    f"{ram:.1f}",
                     ha="center", va="center", fontsize=fontsize,
-                    color="white", fontweight="bold", rotation=90,
+                    color="white", fontweight="bold", rotation=90, clip_on=True,
                 )
             # VRAM label — inside if tall enough, otherwise just above the bar
             if has_vram:
                 if vram >= min_seg:
                     ax_mem.text(
                         x_c, ram + vram / 2.0,
-                        _format_memory(vram),
+                        f"{vram:.1f}",
                         ha="center", va="center", fontsize=fontsize,
-                        color="white", fontweight="bold", rotation=90,
+                        color="white", fontweight="bold", rotation=90, clip_on=True,
                     )
                 else:
                     ax_mem.text(
                         x_c, total + margin,
-                        _format_memory(vram),
+                        f"{vram:.1f}",
                         ha="center", va="bottom", fontsize=fontsize,
                         color="black", fontweight="bold", rotation=90,
                         bbox={"boxstyle": "round,pad=0.1", "facecolor": "white",
@@ -974,13 +1023,22 @@ def plot_runtime(
     ax_prep.set_xticklabels(prep_labels)
     ax_prep.set_ylabel("Runtime (s)", color="#76B7B2")
     ax_prep2.set_ylabel("Peak RAM (GB)", color="#EDC948")
-    ax_prep.set_title("GROG preprocessing  (one-time cost)")
+    ax_prep.set_title("Preprocessing (one-time cost)")
     lines1, lbls1 = ax_prep.get_legend_handles_labels()
     lines2, lbls2 = ax_prep2.get_legend_handles_labels()
-    ax_prep.legend(lines1 + lines2, lbls1 + lbls2, fontsize=8)
+    if lines1 or lines2:
+        ax_prep.legend(
+            lines1 + lines2,
+            lbls1 + lbls2,
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.20),
+            ncol=2,
+            frameon=False,
+            fontsize=_fs(8),
+        )
 
-    fig.suptitle("3D subspace MRF benchmark", fontsize=14, fontweight="bold")
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0.10, 1, 1])
+    fig.subplots_adjust(hspace=0.82, wspace=0.32)
     fig.savefig(out, dpi=200, bbox_inches="tight")
     plt.close(fig)
 
@@ -996,11 +1054,17 @@ def parse_args(argv=None) -> argparse.Namespace:
         action="store_true",
         help="Omit GROG dual-stream GPU series from runtime plots.",
     )
+    parser.add_argument(
+        "--poster",
+        action="store_true",
+        help="Increase fonts and annotation sizes for poster readability.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv=None) -> None:
     args = parse_args(argv)
+    _set_font_scale(1.6 if args.poster else 1.0)
     results = _load_json(args.results_json)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
