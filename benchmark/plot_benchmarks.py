@@ -239,20 +239,26 @@ def _normalize_unit(arr: np.ndarray) -> np.ndarray:
 
 
 def plot_subspace(
-    coeff_nufft: np.ndarray, coeff_grog: np.ndarray, out: Path, label: str = "CPU"
+    coeff_nufft: np.ndarray,
+    coeff_grog: np.ndarray,
+    out: Path,
+    label: str = "CPU",
+    *,
+    error_vmax_pct: float = 10.0,
 ) -> None:
     """Three-row coefficient comparison figure.
 
     Row 1: NUFFT reference magnitudes (gray, per-coeff normalized)
     Row 2: GROG magnitudes (gray, per-coeff normalized)
-    Row 3: signed error (GROG - NUFFT) on bwr colormap, ±10% of max
+    Row 3: signed error (GROG - NUFFT) on bwr colormap, shown in percent
+    with a configurable symmetric color range (default: +/-10%).
     Each column is one subspace coefficient.  Per-coefficient NRMSE annotated.
     """
     k = min(coeff_nufft.shape[0], coeff_grog.shape[0])
 
     top_tiles = []  # NUFFT
     mid_tiles = []  # GROG
-    err_tiles = []  # signed error
+    err_tiles = []  # signed error in percentage points
     nrmse_vals = []
 
     for i in range(k):
@@ -262,7 +268,7 @@ def plot_subspace(
         top_tiles.append(nufft_2d)
         mid_tiles.append(grog_2d)
         err = grog_2d - nufft_2d  # signed difference, both in [0,1]
-        err_tiles.append(err.astype(np.float32))
+        err_tiles.append((100.0 * err).astype(np.float32))
         nrmse = float(np.sqrt(np.mean(err**2)))
         nrmse_vals.append(nrmse)
 
@@ -313,7 +319,7 @@ def plot_subspace(
     for spine in ["top", "right", "bottom", "left"]:
         ax_gray.spines[spine].set_visible(False)
 
-    err_vmax = 0.10  # ±10% of normalized max
+    err_vmax = float(error_vmax_pct)
     im = ax_err.imshow(
         err_row, cmap="bwr", origin="upper", vmin=-err_vmax, vmax=err_vmax
     )
@@ -357,7 +363,7 @@ def plot_subspace(
     )
 
     cbar = fig.colorbar(im, ax=ax_err, orientation="vertical", fraction=0.015, pad=0.01)
-    cbar.set_label("Signed error", fontsize=11)
+    cbar.set_label("Signed error (%)", fontsize=11)
 
     fig.suptitle(label, fontsize=14, fontweight="bold")
     fig.savefig(out, dpi=200, bbox_inches="tight", pad_inches=0.02)
@@ -1026,6 +1032,7 @@ def main(argv=None) -> None:
             coeff_grog_cuda,
             args.output_dir / "figure_coeffs_cuda.png",
             label="CUDA",
+            error_vmax_pct=20.0,
         )
         plot_grog_views(
             coeff_grog_cuda,
