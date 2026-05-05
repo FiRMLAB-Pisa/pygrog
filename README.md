@@ -4,8 +4,8 @@
 
 [![PyPI version](https://badge.fury.io/py/pygrog.svg)](https://badge.fury.io/py/pygrog)
 [![Read the Docs](https://readthedocs.org/projects/pygrog/badge/?version=latest)](https://pygrog.readthedocs.io/en/latest/)
-[![Tests](https://github.com/FiRMLAB-Pisa/pygrog/actions/workflows/test_build.yml/badge.svg?branch=main)](https://github.com/FiRMLAB-Pisa/pygrog/actions/workflows/ci.yml)
-[![Docs Check](https://github.com/FiRMLAB-Pisa/pygrog/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/FiRMLAB-Pisa/pygrog/actions/workflows/docs-check.yml)
+[![Tests](https://github.com/FiRMLAB-Pisa/pygrog/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/FiRMLAB-Pisa/pygrog/actions/workflows/ci.yml)
+[![Docs Check](https://github.com/FiRMLAB-Pisa/pygrog/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/FiRMLAB-Pisa/pygrog/actions/workflows/docs.yml)
 [![Coverage](https://codecov.io/gh/FiRMLAB-Pisa/pygrog/branch/main/graph/badge.svg)](https://codecov.io/gh/FiRMLAB-Pisa/pygrog)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
