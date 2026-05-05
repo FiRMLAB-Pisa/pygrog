@@ -7,20 +7,44 @@ examples/*.ipynb
 *.xml
 .coverage*
 .vscode
+.DS_Store
 
 
 .idea
 *.log
 tmp/
+temp/
 
 *_cache/
 *.py[cod]
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.nox/
+.tox/
+.hypothesis/
 *.egg
 *.nbi
 *.nbc
+*.so
+*.dylib
+*.dll
+*.pyd
+*.o
+*.obj
+*.a
+*.lib
+*.exp
+*.manifest
+*.whl
+wheelhouse/
+pip-wheel-metadata/
 
 docs/generated/
 docs_build/
 jupyter_execute/
+docs/_build/
+docs/generated/autoexamples/
 
 src/pygrog/_version.py
