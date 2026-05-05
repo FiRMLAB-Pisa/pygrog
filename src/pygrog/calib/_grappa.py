@@ -27,7 +27,7 @@ def lstsq(A, b, lamda=0.0):
         Source matrix of shape ``(*, M, N)``.
     b : NDArray
         Target matrix of shape ``(*, M, K)``.
-    lamda : float
+    lamda: float
         Tikhonov regularization parameter.
 
     Returns
@@ -86,7 +86,7 @@ def KernelTable(
         Desired interpolation radius in k-space grid units (radius = 1 -> distance between two Cartesian samples).
     precision : int
         Number of decimal digits to round shifts.
-    lamda : float
+    lamda: float
         L2 regularization for GRAPPA kernel estimation.
 
     Returns
@@ -221,7 +221,7 @@ def train_grappa(
     train_data : NDArray[complex]
         Calibration region data of shape ``(nc, nz, ny, nx)`` or ``(nc, ny, nx)``.
         Usually a small portion from the center of kspace.
-    lamda : float | None, optional
+    lamda: float | None, optional
         Tikhonov regularization parameter.  Set to 0 for no
         regularization. Defaults to ``0.01`` for standard GROG.
         and ``0.0`` for self-calibrating GROG.

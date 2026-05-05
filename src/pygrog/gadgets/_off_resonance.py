@@ -70,7 +70,7 @@ class OffResonanceCorrection:
     References
     ----------
     Sutton et al., IEEE Trans Med Imaging, 2003. (SVD)
-    Man et al., Magn Reson Med, 1997. (MFI)
+    Man et al., Magn Reason Med, 1997. (MFI)
     Noll et al., IEEE Trans Med Imaging, 1991. (MTI)
     """
 

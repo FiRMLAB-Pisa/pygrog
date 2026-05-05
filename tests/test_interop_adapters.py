@@ -160,9 +160,7 @@ def test_deepinv_grog_interpolator(fixture):
     fix = fixture
     ksp_t = torch.as_tensor(
         fix["ksp"].reshape(fix["n_coils"], *fix["samples"].shape[:2])
-    ).unsqueeze(
-        0
-    )  # (B=1, coils, k1, k0)
+    ).unsqueeze(0)  # (B=1, coils, k1, k0)
     grog = pg_deepinv.GrogInterpolator(
         fix["coords"],
         fix["shape"],

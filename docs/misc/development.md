@@ -41,7 +41,7 @@ pytest --cov=pygrog --cov-report=html tests/
 ## Writing documentation
 
 Documentation is hosted at
-<https://firnlab-pisa.github.io/pygrog/>.
+<https://pygrog.readthedocs.io/en/latest/>.
 
 Build locally with:
 

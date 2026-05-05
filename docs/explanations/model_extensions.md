@@ -129,9 +129,9 @@ subspace + off-resonance corrected operator.
 
 ## References
 
-- Griswold MA, et al. *GRAPPA.* Magn Reson Med. 2002;47(6):1202-10.
-- Seiberlich N, et al. *GROG.* Magn Reson Med. 2007;58(6):1257-65.
-- Uecker M, et al. *NLINV.* Magn Reson Med. 2008;60(3):674-82.
+- Griswold MA, et al. *GRAPPA.* Magn Reason Med. 2002;47(6):1202-10.
+- Seiberlich N, et al. *GROG.* Magn Reason Med. 2007;58(6):1257-65.
+- Uecker M, et al. *NLINV.* Magn Reason Med. 2008;60(3):674-82.
 - Sutton BP, et al. *Fast, iterative image reconstruction for MRI in the
   presence of field inhomogeneities.* IEEE Trans Med Imaging. 2003;22(2):178-88.
 - Liang ZP. *Spatiotemporal imaging with partially separable functions.*

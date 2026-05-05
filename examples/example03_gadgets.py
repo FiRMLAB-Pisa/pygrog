@@ -212,9 +212,7 @@ kspace_sub = kspace_frames.reshape(
     etl, n_coils, 1, n_shots, n_read
 ).transpose(  # (T, C, 1, n_shots, n_read)
     1, 0, 2, 3, 4
-)[
-    np.newaxis
-]  # (1, C, T, 1, n_shots, n_read)
+)[np.newaxis]  # (1, C, T, 1, n_shots, n_read)
 sparse_sub = grog_sub.interpolate(kspace_sub).reshape(
     1, n_coils, *grog_sub.plan.natural_shape
 )

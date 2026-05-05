@@ -205,6 +205,68 @@ def nufft(
     return output.reshape(*output.shape[:-1], *coords.shape[:-1])
 
 
+def _estimate_menon_dcf(
+    coords: torch.Tensor,
+    shape: tuple[int, ...],
+    oversamp: float,
+    eps: float,
+) -> torch.Tensor:
+    """Estimate non-Cartesian DCF using mrinufft PIPE (Menon) iterations."""
+    coords_np = np.asarray(coords.detach().cpu(), dtype=np.float32)
+    samples = coords_np.reshape(-1, coords_np.shape[-1])
+
+    # PIPE (Menon) is implemented by finufft/cufinufft in mrinufft. The
+    # private pytorch-finufft backend is used for forward/adjoint operators in
+    # this project, but may not expose a `pipe` implementation.
+    backends = (
+        ("cufinufft", "finufft")
+        if coords.device.type == "cuda"
+        else (
+            "finufft",
+            "cufinufft",
+        )
+    )
+    backend = None
+    for candidate in backends:
+        iface = FourierOperatorBase.interfaces.get(candidate)
+        if iface is None or not iface[0]:
+            continue
+        try:
+            op_cls = mrinufft.get_operator(candidate)
+        except ValueError:
+            continue
+        if hasattr(op_cls, "pipe"):
+            backend = candidate
+            break
+
+    if backend is None:
+        raise RuntimeError(
+            "Failed to estimate Menon DCF: no PIPE-capable mrinufft backend "
+            "available (expected finufft or cufinufft)."
+        )
+
+    from mrinufft.density.nufft_based import pipe as pipe_density
+
+    dcf = pipe_density(
+        samples,
+        tuple(int(s) for s in shape),
+        backend=backend,
+        osf=float(oversamp),
+        eps=float(eps),
+    )
+    dcf = np.asarray(dcf)
+    if np.iscomplexobj(dcf):
+        # DCF is expected to be real-valued. Some backends return a complex
+        # array with negligible imaginary residuals from numerical noise.
+        dcf = np.real_if_close(dcf, tol=1000)
+        if np.iscomplexobj(dcf):
+            dcf = np.real(dcf)
+
+    return torch.as_tensor(dcf, dtype=torch.float32, device=coords.device).reshape(
+        coords.shape[:-1]
+    )
+
+
 def nufft_adjoint(
     input: NDArray[complex],  # noqa: A002
     coords: NDArray[float],

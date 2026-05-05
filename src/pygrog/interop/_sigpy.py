@@ -81,8 +81,7 @@ class GrogLinop:
             from sigpy.linop import Linop
         except ImportError as exc:
             raise ImportError(
-                "sigpy is required for GrogLinop.  "
-                "Install it with: pip install sigpy"
+                "sigpy is required for GrogLinop.  Install it with: pip install sigpy"
             ) from exc
 
         class _GrogLinopImpl(Linop):

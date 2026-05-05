@@ -145,8 +145,8 @@ t_nest, y_nest = _bench(op_n.normal, x)
 err_sparse = _rel_err(y_toep, y_nest)
 
 print(
-    f"SparseFFT  Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
-    f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_sparse:.2e}"
+    f"SparseFFT  Toeplitz {t_toep * 1e3:7.2f} ms  |  nested {t_nest * 1e3:7.2f} ms"
+    f"  | speed-up x{t_nest / t_toep:5.2f}  | rel-err {err_sparse:.2e}"
 )
 
 # %%
@@ -189,7 +189,7 @@ t_cg_nest = time.perf_counter() - t0
 
 print(
     f"CG (12 iter):  Toeplitz {t_cg_toep:.2f} s  |  nested {t_cg_nest:.2f} s"
-    f"  | speed-up x{t_cg_nest/t_cg_toep:.2f}"
+    f"  | speed-up x{t_cg_nest / t_cg_toep:.2f}"
 )
 
 # %%
@@ -267,8 +267,8 @@ t_toep, y_toep = _bench(orc_t.normal, x_orc, n_iter=5)
 t_nest, y_nest = _bench(orc_n.normal, x_orc, n_iter=5)
 err_orc = _rel_err(y_toep, y_nest)
 print(
-    f"ORC (L={L})   Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
-    f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_orc:.2e}"
+    f"ORC (L={L})   Toeplitz {t_toep * 1e3:7.2f} ms  |  nested {t_nest * 1e3:7.2f} ms"
+    f"  | speed-up x{t_nest / t_toep:5.2f}  | rel-err {err_orc:.2e}"
 )
 
 # ---- Subspace -----------------------------------------------------------
@@ -312,8 +312,8 @@ t_toep, y_toep = _bench(sub_t.normal, x_sub, n_iter=5)
 t_nest, y_nest = _bench(sub_n.normal, x_sub, n_iter=5)
 err_sub = _rel_err(y_toep, y_nest)
 print(
-    f"Subspace (K={K}) Toeplitz {t_toep*1e3:7.2f} ms  |  nested {t_nest*1e3:7.2f} ms"
-    f"  | speed-up x{t_nest/t_toep:5.2f}  | rel-err {err_sub:.2e}"
+    f"Subspace (K={K}) Toeplitz {t_toep * 1e3:7.2f} ms  |  nested {t_nest * 1e3:7.2f} ms"
+    f"  | speed-up x{t_nest / t_toep:5.2f}  | rel-err {err_sub:.2e}"
 )
 
 # %%

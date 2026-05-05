@@ -173,6 +173,10 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=xml"
 ]
+filterwarnings = [
+    'ignore:Samples will be rescaled to \[-pi, pi\), assuming they were in \[-0.5, 0.5\):UserWarning',
+    'ignore:Samples will be rescaled to \[-0.5, 0.5\), assuming they were in \[-pi, pi\):UserWarning',
+]
 
 [tool.pylsp-mypy]
 enabled = false
@@ -180,3 +184,7 @@ live_mode = false
 
 [tool.mypy]
 ignore_missing_imports = true
+
+[tool.codespell]
+ignore-words-list = "te,lamda"
+skip = "*.ipynb,docs/_build,docs/generated,*.npy,*.json"

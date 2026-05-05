@@ -8,12 +8,13 @@ __all__ = ["nlinv_calib"]
 
 import numpy as np
 import torch
+import warnings
 
 from numpy.typing import NDArray
 from mrinufft._array_compat import with_torch
 
 from .._base._fftc import fft, ifft
-from .._base._nufft import nufft, nufft_adjoint
+from .._base._nufft import _estimate_menon_dcf, nufft, nufft_adjoint
 from .._toep._toep_op import ToeplitzOp
 from .._utils import resize, estimate_shape
 
@@ -363,39 +364,54 @@ def _setup_noncartesian(
     coords,
     weights,
     cal_width,
-    oversamp,  # noqa: ARG001
-    eps,  # noqa: ARG001
+    oversamp,
+    eps,
     sobolev_width,
     sobolev_deg,
 ):
     """Setup for non-Cartesian acquisition."""
     ndim = coords.shape[-1]
     oshape = tuple(shape) if shape is not None else estimate_shape(coords)
-
-    # Filter to calibration samples: keep only those within cal_width/2 radius
-    # in scaled k-space units (coords scaled so each axis spans oshape).
-    # rescale_coords expects (ndim, npts); coords is (..., ndim) → transpose
-    from .._utils import rescale_coords
-
     flat_coords = coords.reshape(-1, ndim)
     flat_y = y.reshape(y.shape[0], -1)
     flat_w = weights.reshape(-1) if weights is not None else None
 
-    scaled = rescale_coords(flat_coords.movedim(-1, 0), list(oshape[-ndim:])).movedim(
-        0, -1
-    )
-    radius = 0.5 * cal_width
-    mask = (scaled**2).sum(dim=-1).sqrt() <= radius
+    if cal_width is None:
+        cshape = tuple(oshape[-ndim:])
+    else:
+        # Filter to calibration samples: keep only those within cal_width/2 radius
+        # in scaled k-space units (coords scaled so each axis spans oshape).
+        # rescale_coords expects (ndim, npts); coords is (..., ndim) → transpose.
+        from .._utils import rescale_coords
 
-    flat_coords = flat_coords[mask].contiguous()
-    flat_y = flat_y[:, mask].contiguous()
-    flat_w = flat_w[mask].contiguous() if flat_w is not None else None
+        scaled = rescale_coords(
+            flat_coords.movedim(-1, 0), list(oshape[-ndim:])
+        ).movedim(0, -1)
+        radius = 0.5 * cal_width
+        mask = (scaled**2).sum(dim=-1).sqrt() <= radius
+
+        flat_coords = flat_coords[mask].contiguous()
+        flat_y = flat_y[:, mask].contiguous()
+        flat_w = flat_w[mask].contiguous() if flat_w is not None else None
+        cshape = tuple([cal_width] * ndim)
+
+    # Calibrationless non-Cartesian path: when coords are available but DCF is
+    # missing, estimate it with mrinufft PIPE (Menon iterations).
+    if flat_w is None:
+        # mrinufft may emit coordinate normalization warnings during PIPE
+        # setup; this path is intentional and handled internally.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r"Samples will be rescaled to .*",
+                category=UserWarning,
+            )
+            flat_w = _estimate_menon_dcf(flat_coords, cshape, oversamp, eps)
 
     # Apply DCF
     if flat_w is not None:
         flat_y = flat_y * flat_w**0.5
 
-    cshape = tuple([cal_width] * ndim)
     W = _sobolev_weights(cshape, oshape, sobolev_width, sobolev_deg, device=y.device)
 
     return oshape, cshape, flat_y, flat_coords, flat_w, W
@@ -456,7 +472,7 @@ def _op_noncart(X, coords, _weights, _shape, oversamp, eps):
         (X.shape[0] - 1, *coords.shape[:-1]), dtype=X.dtype, device=X.device
     )
     for i in range(X.shape[0] - 1):
-        K[i] = nufft(X[0] * X[i + 1], coords, oversamp, eps)
+        K[i] = _nufft_silent(X[0] * X[i + 1], coords, oversamp, eps)
     return K
 
 
@@ -466,7 +482,7 @@ def _der_noncart(X0, DX, W, coords, _weights, _shape, oversamp, eps):
         (DX.shape[0] - 1, *coords.shape[:-1]), dtype=DX.dtype, device=DX.device
     )
     for i in range(DX.shape[0] - 1):
-        K[i] = nufft(
+        K[i] = _nufft_silent(
             X0[0] * ifft(W * DX[i + 1]) + DX[0] * X0[i + 1],
             coords,
             oversamp,
@@ -479,10 +495,32 @@ def _derH_noncart(X0, DK, W, coords, _weights, shape, oversamp, eps):
     """Adjoint derivative for non-Cartesian."""
     DX = torch.zeros_like(X0)
     for i in range(DK.shape[0]):
-        K = nufft_adjoint(DK[i], coords, shape, oversamp, eps)
+        K = _nufft_adjoint_silent(DK[i], coords, shape, oversamp, eps)
         DX[0] = DX[0] + K * X0[i + 1].conj()
         DX[i + 1] = _apply_WH(K * X0[0].conj(), W)
     return DX
+
+
+def _nufft_silent(input, coords, oversamp, eps):  # noqa: A002
+    """NLINV-local NUFFT call with mrinufft rescale warnings suppressed."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Samples will be rescaled to .*",
+            category=UserWarning,
+        )
+        return nufft(input, coords, oversamp, eps)
+
+
+def _nufft_adjoint_silent(input, coords, shape, oversamp, eps):  # noqa: A002
+    """NLINV-local adjoint NUFFT call with rescale warnings suppressed."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Samples will be rescaled to .*",
+            category=UserWarning,
+        )
+        return nufft_adjoint(input, coords, shape, oversamp, eps)
 
 
 def _derH_der_noncart_toeplitz(X0, DX, W, toep_op, _shape):

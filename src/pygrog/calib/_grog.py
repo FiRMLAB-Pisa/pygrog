@@ -391,7 +391,7 @@ class GrogInterpolator:
         ----------
         train_data : complex array, (coils, ...)
             Calibration k-space region.
-        lamda : float
+        lamda: float
             Tikhonov regularisation.
         precision : int
             Decimal digits for distance rounding.
@@ -834,9 +834,7 @@ class GrogInterpolator:
             grid_off = (
                 torch.arange(S_total, device=sparse_dc.device, dtype=idx_v.dtype)
                 * grid_size
-            ).unsqueeze(
-                -1
-            )  # (S, 1)
+            ).unsqueeze(-1)  # (S, 1)
             data_off = (
                 torch.arange(S_total, device=sparse_dc.device, dtype=sp_v.dtype) * n_per
             ).unsqueeze(-1)

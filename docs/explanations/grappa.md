@@ -87,6 +87,6 @@ Tikhonov regularisation ($\lambda$) is critical for ill-conditioned kernels
 ## References
 
 - Griswold MA, et al. *Generalized autocalibrating partially parallel
-  acquisitions (GRAPPA).* Magn Reson Med. 2002;47(6):1202-10.
+  acquisitions (GRAPPA).* Magn Reason Med. 2002;47(6):1202-10.
 - Uecker M, et al. *ESPIRiT — an eigenvalue approach to autocalibrating
-  parallel MRI.* Magn Reson Med. 2014;71(3):990-1001.
+  parallel MRI.* Magn Reason Med. 2014;71(3):990-1001.

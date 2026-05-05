@@ -21,6 +21,7 @@ import pytest
 from pygrog.calib import GrogInterpolator, GrogPlan
 from pygrog.operator import SparseFFT
 from pygrog.utils import nlinv_calib
+from pygrog.utils import _nlinv as _nlinv_mod
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -231,8 +232,55 @@ def test_nlinv_calib_train_reduce_mean():
 
 def test_nlinv_calib_invalid_train_reduce():
     rng = np.random.default_rng(0)
-    y = (rng.standard_normal((4, 16, 16)) + 1j * rng.standard_normal((4, 16, 16))).astype(
-        np.complex64
-    )
+    y = (
+        rng.standard_normal((4, 16, 16)) + 1j * rng.standard_normal((4, 16, 16))
+    ).astype(np.complex64)
     with pytest.raises(ValueError, match="train_reduce"):
         nlinv_calib(y, ndim=2, cal_width=8, train_reduce="bogus")
+
+
+def test_nlinv_noncart_missing_weights_uses_menon_dcf(monkeypatch):
+    rng = np.random.default_rng(0)
+    n_coils = 3
+    n_samples = 128
+    cal_width = 12
+
+    y = (
+        rng.standard_normal((n_coils, n_samples))
+        + 1j * rng.standard_normal((n_coils, n_samples))
+    ).astype(np.complex64)
+    coords = rng.uniform(-0.5, 0.5, size=(n_samples, 2)).astype(np.float32)
+
+    calls: list[tuple[tuple[int, ...], tuple[int, ...], float, float]] = []
+
+    def _fake_menon(coords_in, shape_in, oversamp_in, eps_in):
+        calls.append(
+            (
+                tuple(coords_in.shape),
+                tuple(shape_in),
+                float(oversamp_in),
+                float(eps_in),
+            )
+        )
+        return torch.ones(
+            coords_in.shape[:-1], dtype=torch.float32, device=coords_in.device
+        )
+
+    monkeypatch.setattr(_nlinv_mod, "_estimate_menon_dcf", _fake_menon)
+
+    smaps, train = nlinv_calib(
+        y,
+        coords=coords,
+        weights=None,
+        shape=(32, 32),
+        cal_width=cal_width,
+        max_iter=1,
+        cg_iter=1,
+        ret_cal=True,
+        ret_image=False,
+    )
+
+    assert len(calls) == 1
+    assert calls[0][1] == (cal_width, cal_width)
+    assert torch.as_tensor(smaps).shape == (n_coils, 32, 32)
+    assert torch.as_tensor(train).shape == (n_coils, cal_width, cal_width)

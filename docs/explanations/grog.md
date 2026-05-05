@@ -112,8 +112,8 @@ NUFFT backend when calibration data are unavailable.
 ## References
 
 - Seiberlich N, et al. *Non-Cartesian data reconstruction using GRAPPA
-  operator gridding (GROG).* Magn Reson Med. 2007;58(6):1257-65.
+  operator gridding (GROG).* Magn Reason Med. 2007;58(6):1257-65.
 - Seiberlich N, et al. *Improved radial GRAPPA calibration for real-time
-  free-breathing cardiac imaging.* Magn Reson Med. 2011;65(2):492-505.
+  free-breathing cardiac imaging.* Magn Reason Med. 2011;65(2):492-505.
 - Griswold MA, et al. *Generalized autocalibrating partially parallel
-  acquisitions (GRAPPA).* Magn Reson Med. 2002;47(6):1202-10.
+  acquisitions (GRAPPA).* Magn Reason Med. 2002;47(6):1202-10.

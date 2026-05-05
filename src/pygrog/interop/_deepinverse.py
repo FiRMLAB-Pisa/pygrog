@@ -156,7 +156,9 @@ class GrogLinearPhysics:
                 return ksp.reshape(ksp.shape[0], ksp.shape[1], -1)
 
             def A_adjoint(
-                self, y: torch.Tensor, **kwargs  # noqa: ARG002
+                self,
+                y: torch.Tensor,
+                **kwargs,  # noqa: ARG002
             ) -> torch.Tensor:
                 """Backprojection: k-space → image.
 
@@ -175,7 +177,9 @@ class GrogLinearPhysics:
                 return self._wrap_image(img)
 
             def A_adjoint_A(
-                self, x: torch.Tensor, **kwargs  # noqa: ARG002
+                self,
+                x: torch.Tensor,
+                **kwargs,  # noqa: ARG002
             ) -> torch.Tensor:
                 """Self-adjoint operator ``A^H A``.
 
@@ -401,8 +405,7 @@ def coil_compress(
     if is_torch and has_batch:
         if kspace.shape[0] != 1:
             raise ValueError(
-                "coil_compress expects batch size 1; got shape "
-                f"{tuple(kspace.shape)}."
+                f"coil_compress expects batch size 1; got shape {tuple(kspace.shape)}."
             )
         ks_in = kspace[0]
     else:

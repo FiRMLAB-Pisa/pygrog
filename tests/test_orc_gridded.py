@@ -76,9 +76,9 @@ def test_gridded_orc_basis_shape_matches_grid(gridded_setup):
     )
     assert isinstance(orc, OffResonanceMaskedFFT)
     grid_shape = gridded_setup["grid_shape"]
-    assert (
-        orc.B.shape[:-1] == grid_shape
-    ), f"expected B shape (*grid_shape, L) = {(*grid_shape, 3)}, got {tuple(orc.B.shape)}"
+    assert orc.B.shape[:-1] == grid_shape, (
+        f"expected B shape (*grid_shape, L) = {(*grid_shape, 3)}, got {tuple(orc.B.shape)}"
+    )
     assert orc.L == 3
 
 
@@ -111,9 +111,9 @@ def test_gridded_orc_recenter_at_k0(gridded_setup):
     center = tuple(g // 2 for g in s["grid_shape"])
     k_norms = np.linalg.norm(s["coords"].reshape(-1, 2), axis=-1)
     expected = float(s["readout_time"][int(np.argmin(k_norms))])
-    assert np.isclose(
-        t_grid[center], expected, atol=1e-5
-    ), f"t_grid[center]={t_grid[center]:.6e}, expected={expected:.6e}"
+    assert np.isclose(t_grid[center], expected, atol=1e-5), (
+        f"t_grid[center]={t_grid[center]:.6e}, expected={expected:.6e}"
+    )
 
 
 def test_with_off_resonance_masked_requires_coords_dcf(gridded_setup):

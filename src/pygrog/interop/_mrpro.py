@@ -131,9 +131,9 @@ def _data_to_spatial(data, ndim):
     """
     if ndim == 2:
         # k2 (axis -3) must be 1.
-        assert (
-            data.shape[-3] == 1
-        ), f"2D interpolation expects k2 == 1; got {tuple(data.shape)}"
+        assert data.shape[-3] == 1, (
+            f"2D interpolation expects k2 == 1; got {tuple(data.shape)}"
+        )
         new_shape = data.shape[:-3] + data.shape[-2:]
         return data.reshape(new_shape)
     return data
