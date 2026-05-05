@@ -151,16 +151,22 @@ endif()
 
 # ── Extension target ──────────────────────────────────────────────────────────
 python_add_library(_pygrog_torch MODULE WITH_SOABI ${SOURCES})
-# torch_python provides pybind11 type_casters for at::Tensor (libtorch_python.so).
-# It is NOT included in TORCH_LIBRARIES; link it by full path so the linker can
-# find it regardless of whether torch/lib is in the default search path.
+# torch_python provides pybind11 type_casters for at::Tensor (libtorch_python).
+# It is NOT included in TORCH_LIBRARIES; use find_library so the linker can
+# find the platform-appropriate file (.so on Linux, .dylib on macOS, .lib on Windows)
+# regardless of whether torch/lib is in the default search path.
 cmake_path(GET TORCH_CMAKE_PREFIX PARENT_PATH _tp_share)
 cmake_path(GET _tp_share PARENT_PATH _tp_root)
-set(_torch_python_lib "${_tp_root}/lib/libtorch_python.so")
+find_library(_torch_python_lib
+    NAMES torch_python
+    HINTS "${_tp_root}/lib"
+    NO_DEFAULT_PATH
+    REQUIRED
+)
 unset(_tp_share)
 unset(_tp_root)
-target_link_libraries(_pygrog_torch PRIVATE ${TORCH_LIBRARIES} "${_torch_python_lib}")
-unset(_torch_python_lib)
+target_link_libraries(_pygrog_torch PRIVATE ${TORCH_LIBRARIES} ${_torch_python_lib})
+unset(_torch_python_lib CACHE)
 target_include_directories(_pygrog_torch PRIVATE ${TORCH_INCLUDE_DIRS})
 # PyTorch's cpp_extension.py injects -DTORCH_EXTENSION_NAME=<name> automatically.
 # With plain CMake we must define it ourselves so PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
@@ -172,7 +178,7 @@ target_compile_definitions(_pygrog_torch PRIVATE TORCH_EXTENSION_NAME=_pygrog_to
 # per-file flag needed.  MSVC requires explicit /arch: flags.
 if(MSVC)
     target_compile_options(_pygrog_torch PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:/O2 /openmp>
+        $<$<COMPILE_LANGUAGE:CXX>:/O2 /openmp:experimental>
     )
     set_source_files_properties(csrc/torch/sparse_ops_avx2.cpp PROPERTIES
         COMPILE_FLAGS "/arch:AVX2"
