@@ -17,7 +17,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install scikit-build-core setuptools-scm cmake ninja
           PYGROG_NO_CUDA=1 pip install --no-build-isolation -e ".[dev-cpu]"
       - name: Build docs (strict)

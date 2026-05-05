@@ -7,24 +7,9 @@ https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path().resolve()))
 sys.path.insert(0, str(Path("../src").resolve()))
-
-# torchvision CPU wheels fail at import time when the torchvision C extension
-# has not been compiled with the required ops (e.g. torchvision::nms).
-# deepinv imports torchvision at the top level, so this would break autosummary
-# and autodoc even though deepinv itself is only *optionally* required by pygrog.
-# We try to import torchvision; if it raises, we install a lightweight mock so
-# that deepinv (and therefore the whole pygrog package) can be imported for docs.
-# sphinx-gallery notebooks that exercise deepinv functionality run with
-# abort_on_example_error=False and will skip gracefully if torchvision is broken.
-if "torchvision" not in sys.modules:
-    try:
-        import torchvision  # noqa: F401
-    except (RuntimeError, ImportError):
-        sys.modules["torchvision"] = MagicMock()
 
 
 def _invalidate_gallery_cache_if_thumb_missing() -> None:
