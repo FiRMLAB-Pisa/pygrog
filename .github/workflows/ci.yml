@@ -69,6 +69,12 @@ jobs:
         run: pip install --no-build-isolation -e ".[dev-cpu]"
 
       - name: Run tests
+        # KMP_DUPLICATE_LIB_OK: on macOS, PyTorch and finufft each bundle their
+        # own libomp.dylib. Without this flag the second OMP runtime init calls
+        # abort(). Setting TRUE suppresses the duplicate-runtime error so both
+        # libraries can coexist in the same process.
+        env:
+          KMP_DUPLICATE_LIB_OK: "TRUE"
         run: python -m pytest tests/ -v --ignore=tests/test_fast_binning.py
 
       - name: Upload coverage
