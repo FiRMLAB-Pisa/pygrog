@@ -11,8 +11,6 @@ build:
       # prefix path.  pip's default build isolation creates a fresh environment
       # that doesn't see the host venv, so we pre-install the build requirements
       # here and then pass --no-build-isolation when building the package.
-      - pip install torch numpy scikit-build-core setuptools-scm
-      - pip install --no-build-isolation .[dev-cpu]
       - python -m pip install --upgrade pip
       - pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
       - pip install scikit-build-core setuptools-scm cmake ninja
