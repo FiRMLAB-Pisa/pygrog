@@ -29,6 +29,7 @@ jobs:
     name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
     needs: lint
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -73,8 +74,12 @@ jobs:
         # own libomp.dylib. Without this flag the second OMP runtime init calls
         # abort(). Setting TRUE suppresses the duplicate-runtime error so both
         # libraries can coexist in the same process.
+        # OMP_NUM_THREADS=1: forces single-threaded OMP execution, which prevents
+        # thread-pool deadlocks that occur when two OMP runtimes both attempt to
+        # initialise parallel thread pools simultaneously (macOS hang).
         env:
           KMP_DUPLICATE_LIB_OK: "TRUE"
+          OMP_NUM_THREADS: "1"
         run: python -m pytest tests/ -v --ignore=tests/test_fast_binning.py
 
       - name: Upload coverage
