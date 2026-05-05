@@ -1,0 +1,183 @@
+name: Publish to PyPI
+
+# CPU wheels → PyPI (manylinux, macOS, Windows).
+# CUDA wheels → GitHub Release assets (Linux x86_64, cu126 / cu128 / cu130).
+#
+# Install CPU wheel (default):
+#   pip install pygrog
+#
+# Install a CUDA wheel from a release:
+#   pip install "pygrog==1.0.0+cu128" \
+#     --find-links https://github.com/FiRMLAB-Pisa/pygrog/releases/expanded_assets/v1.0.0
+
+on:
+  push:
+    tags: ['v*']
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── CPU wheels ─────────────────────────────────────────────────────────────
+  build_cpu_wheels:
+    name: CPU wheel — ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            os: ubuntu-latest
+            arch: x86_64
+          - name: Linux aarch64
+            os: ubuntu-latest
+            arch: aarch64
+          - name: macOS x86_64
+            os: macos-13
+            arch: x86_64
+          - name: macOS arm64
+            os: macos-14
+            arch: arm64
+          - name: Windows x86_64
+            os: windows-latest
+            arch: AMD64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU (Linux aarch64)
+        if: matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install cibuildwheel==2.22.0
+
+      - name: Build wheels
+        env:
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
+          CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_SKIP: "pp* *-musllinux*"
+          CIBW_BUILD_FRONTEND: "pip; args: --no-build-isolation"
+          CIBW_BEFORE_BUILD: >-
+            pip install --upgrade pip &&
+            pip install torch --index-url https://download.pytorch.org/whl/cpu &&
+            pip install scikit-build-core setuptools-scm cmake ninja
+          CIBW_ENVIRONMENT: "PYGROG_NO_CUDA=1"
+          CIBW_ENVIRONMENT_MACOS: "PYGROG_NO_CUDA=1 MACOSX_DEPLOYMENT_TARGET=12.0 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1"
+          CIBW_ENVIRONMENT_WINDOWS: "PYGROG_NO_CUDA=1"
+          CIBW_TEST_REQUIRES: pytest
+          CIBW_TEST_COMMAND: python -m pytest {project}/tests/ -q --ignore={project}/tests/test_fast_binning.py
+        run: python -m cibuildwheel --output-dir wheelhouse
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cpu-wheels-${{ matrix.name }}
+          path: wheelhouse/*.whl
+
+  # ── CUDA wheels ────────────────────────────────────────────────────────────
+  build_cuda_wheels:
+    name: CUDA ${{ matrix.cuda.label }} Python ${{ matrix.python }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda:
+          - version: '12.6.3'
+            pkg: '12-6'
+            label: 'cu126'
+            torch_index: 'https://download.pytorch.org/whl/cu126'
+          - version: '12.8.1'
+            pkg: '12-8'
+            label: 'cu128'
+            torch_index: 'https://download.pytorch.org/whl/cu128'
+          - version: '13.0.0'
+            pkg: '13-0'
+            label: 'cu130'
+            torch_index: 'https://download.pytorch.org/whl/cu130'
+        python: ['3.10', '3.11', '3.12', '3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install CUDA toolkit ${{ matrix.cuda.version }}
+        run: |
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update
+          sudo apt-get install -y cuda-toolkit-${{ matrix.cuda.pkg }} build-essential cmake ninja-build
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip build wheel
+          pip install torch --index-url ${{ matrix.cuda.torch_index }}
+          pip install scikit-build-core setuptools-scm cmake ninja
+
+      - name: Stamp local version label (+cuXYZ)
+        run: |
+          BASE=$(python -c "import setuptools_scm; print(setuptools_scm.get_version())")
+          echo "SETUPTOOLS_SCM_PRETEND_VERSION=${BASE}+${{ matrix.cuda.label }}" >> $GITHUB_ENV
+
+      - name: Build wheel
+        env:
+          CUDA_HOME: /usr/local/cuda
+        run: pip wheel --no-build-isolation --no-deps -w wheelhouse .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cuda-wheels-${{ matrix.cuda.label }}-py${{ matrix.python }}
+          path: wheelhouse/*.whl
+
+  # ── Publish CPU wheels to PyPI ─────────────────────────────────────────────
+  publish_pypi:
+    name: Publish to PyPI
+    needs: build_cpu_wheels
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cpu-wheels-*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # ── Attach CUDA wheels to GitHub Release ───────────────────────────────────
+  publish_cuda_release:
+    name: Attach CUDA wheels to release
+    needs: build_cuda_wheels
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cuda-wheels-*
+          path: cuda-dist
+          merge-multiple: true
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: cuda-dist/*.whl

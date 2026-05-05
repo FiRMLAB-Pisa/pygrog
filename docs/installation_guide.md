@@ -1,305 +1,229 @@
-# PyGROG Installation and Distribution Guide
+# PyGROG Installation Guide
 
-This document explains how PyGROG handles installation, precompiled binaries, and CI/CD.
+## Requirements
 
-## Installation Methods
+- Python ≥ 3.10 (3.10 – 3.14 supported)
+- PyTorch ≥ 2.0
 
-### 1. From PyPI (Recommended)
+---
+
+## Quick install (recommended)
+
+Precompiled CPU wheels are published to PyPI for Linux (x86\_64, aarch64),
+macOS (Intel and Apple Silicon), and Windows (x86\_64):
+
 ```bash
 pip install pygrog
 ```
 
-This will:
-- **First try**: Download a precompiled wheel for your platform (OS + architecture)
-- **Fallback**: Build from source if no compatible wheel is available
-- **Final fallback**: Install pure Python version if compilation fails
+Verify the installation:
 
-### 2. From Source (Development)
 ```bash
-# Clone repository
+python -c "import pygrog._pygrog_torch as e; assert hasattr(e, 'scatter_add'); import pygrog; print('pygrog', pygrog.__version__, '-- OK')"
+```
+
+---
+
+## CUDA wheels
+
+CUDA wheels are **not** on PyPI (manylinux rules forbid CUDA runtime
+libraries in standard wheels).  They are attached as assets to every
+[GitHub Release](https://github.com/FiRMLAB-Pisa/pygrog/releases) and can
+be installed with `--find-links`:
+
+| CUDA version | Matches PyTorch index | Label |
+|---|---|---|
+| 12.6 | `cu126` | `+cu126` |
+| 12.8 | `cu128` | `+cu128` |
+| 13.0 | `cu130` | `+cu130` |
+
+Replace `<version>` and `<cu>` (e.g. `1.0.0` / `cu126`):
+
+```bash
+pip install "pygrog==<version>+<cu>" \
+  --find-links https://github.com/FiRMLAB-Pisa/pygrog/releases/expanded_assets/v<version>
+```
+
+Example for CUDA 12.6:
+
+```bash
+pip install "pygrog==1.0.0+cu126" \
+  --find-links https://github.com/FiRMLAB-Pisa/pygrog/releases/expanded_assets/v1.0.0
+```
+
+> **Tip:** match the CUDA version to the PyTorch wheel you already have
+> installed (`python -c "import torch; print(torch.version.cuda)"`).
+
+---
+
+## Build from source
+
+If no precompiled wheel matches your platform (e.g. exotic Linux distro,
+custom Python build), pip falls back to a source build automatically.
+A C++17 compiler and CMake are required.
+
+### 1. Install the C++ toolchain
+
+**Linux (requires sudo):**
+
+```bash
+sudo ./scripts/install_build_deps.sh                              # C++ only
+sudo ./scripts/install_build_deps.sh --cuda                       # C++ + CUDA 12.6
+sudo ./scripts/install_build_deps.sh --cuda --cuda-version=12.8   # CUDA 12.8
+sudo ./scripts/install_build_deps.sh --cuda --cuda-version=13.0   # CUDA 13.0
+```
+
+Supported distributions: Ubuntu/Debian, Fedora/RHEL/Rocky, openSUSE/SLES, Arch.
+
+**macOS (no sudo):**
+
+```bash
+./scripts/install_build_deps.sh
+```
+
+Requires [Homebrew](https://brew.sh) and Xcode Command Line Tools.
+CUDA is not supported on macOS.
+
+**Windows (Administrator PowerShell):**
+
+```powershell
+.\scripts\install_build_deps.ps1                          # C++ only
+.\scripts\install_build_deps.ps1 -Cuda                    # C++ + CUDA 12.6
+.\scripts\install_build_deps.ps1 -Cuda -CudaVersion 12.8  # CUDA 12.8
+.\scripts\install_build_deps.ps1 -Cuda -CudaVersion 13.0  # CUDA 13.0
+```
+
+### 2. Install pygrog
+
+First, install torch, numpy, and the build tools into the active environment:
+
+```bash
+pip install torch numpy
+# or CUDA torch, e.g.:
+# pip install torch numpy --index-url https://download.pytorch.org/whl/cu126
+
+# Build tools (required with --no-build-isolation)
+# cmake and ninja are installed by install_build_deps.sh above
+pip install scikit-build-core setuptools-scm
+```
+
+Then install pygrog:
+
+```bash
+pip install --no-build-isolation pygrog                           # auto-detects CUDA
+PYGROG_NO_CUDA=1 pip install --no-build-isolation pygrog          # force CPU-only
+PYGROG_FORCE_CUDA=1 pip install --no-build-isolation pygrog       # fail if no CUDA found
+```
+
+Or pass the flag through pip's CMake interface:
+
+```bash
+pip install --no-build-isolation pygrog -C cmake.define.PYGROG_NO_CUDA=ON
+```
+
+> **Note:** `--no-build-isolation` is required whenever torch is installed in
+> a conda or virtualenv environment. With build isolation disabled, pip no
+> longer auto-installs `[build-system].requires`, so the `pip install
+> scikit-build-core ...` step above is mandatory.
+
+### 3. Development install (editable)
+
+```bash
 git clone https://github.com/FiRMLAB-Pisa/pygrog.git
 cd pygrog
 
-# Development install
-pip install -e .
+# 1. Install torch and numpy into the active environment first.
+pip install torch numpy          # CPU
+# pip install torch numpy --index-url https://download.pytorch.org/whl/cu126  # CUDA
 
-# Or using CMake build script
-./build_cmake.sh
+# 2. Install the build tools (required because --no-build-isolation is used below).
+#    cmake and ninja are already installed by install_build_deps.sh above.
+pip install scikit-build-core setuptools-scm
+
+# 3. Editable install.
+pip install --no-build-isolation -e .
 ```
 
-### 3. Force Pure Python (No C++ Extension)
+> **Why `--no-build-isolation`?** pygrog's CMake build queries the active
+> Python for PyTorch's location (`torch.utils.cmake_prefix_path`).  pip's
+> default build isolation creates a fresh venv that does not inherit your
+> conda/virtualenv packages, so torch is not found.  `--no-build-isolation`
+> lets CMake see the torch already installed in your environment — but it
+> also means pip will no longer auto-install the `[build-system].requires`
+> packages, so you must install them yourself (step 2 above).
+>
+> **Python version:** PyTorch ≥ 2.11 supports Python 3.10 – 3.14.
+
+### 4. Verify
+
 ```bash
-PYGROG_PURE_PYTHON=1 pip install pygrog
+python scripts/verify_install.py
 ```
 
-## Precompiled Wheel Support
+---
 
-### Supported Platforms
-| OS      | Architecture | Python Versions | SIMD Support |
-|---------|-------------|----------------|--------------|
-| Linux   | x86_64      | 3.10, 3.11, 3.12 | AVX-512, AVX2, SSE |
-| Linux   | aarch64     | 3.10, 3.11, 3.12 | NEON |
-| macOS   | x86_64      | 3.10, 3.11, 3.12 | AVX2, SSE |
-| macOS   | arm64       | 3.10, 3.11, 3.12 | NEON |
-| Windows | x86_64      | 3.10, 3.11, 3.12 | AVX2, SSE |
+## Precompiled wheel matrix
 
-### Wheel Naming Convention
-```
-pygrog-1.0.0-cp311-cp311-linux_x86_64.whl
-pygrog-1.0.0-cp311-cp311-macosx_10_15_x86_64.whl
-pygrog-1.0.0-cp311-cp311-win_amd64.whl
-```
+| Platform | Architectures | Python | Notes |
+|---|---|---|---|
+| Linux | x86\_64, aarch64 | 3.10 – 3.14 | manylinux2014, PyPI |
+| macOS | x86\_64 (Intel), arm64 (Apple Silicon) | 3.10 – 3.14 | macOS 12+, PyPI |
+| Windows | x86\_64 | 3.10 – 3.14 | PyPI |
+| Linux (CUDA 12.6) | x86\_64 | 3.10 – 3.14 | GitHub Releases |
+| Linux (CUDA 12.8) | x86\_64 | 3.10 – 3.14 | GitHub Releases |
+| Linux (CUDA 13.0) | x86\_64 | 3.10 – 3.14 | GitHub Releases |
 
-## CI/CD Pipeline
-
-### GitHub Actions Workflow
-
-#### 1. Build Wheels (`.github/workflows/wheels.yml`)
-Triggered on:
-- Push to `main` branch
-- Pull requests
-- New releases
-- Manual dispatch
-
-**Process:**
-```mermaid
-graph TD
-    A[Trigger Event] --> B[Build Wheels Matrix]
-    B --> C[Linux x86_64]
-    B --> D[Linux aarch64]
-    B --> E[macOS Intel]
-    B --> F[macOS ARM64]
-    B --> G[Windows x86_64]
-    
-    C --> H[Test Wheels]
-    D --> H
-    E --> H
-    F --> H
-    G --> H
-    
-    H --> I{Release?}
-    I -->|Yes| J[Publish to PyPI]
-    I -->|No| K[Publish to TestPyPI]
-```
-
-#### 2. Test Local Build (`.github/workflows/test_build.yml`)
-Tests local compilation on all platforms to ensure source distribution works.
-
-### Build Matrix
-```yaml
-strategy:
-  matrix:
-    include:
-      - os: ubuntu-latest
-        arch: x86_64
-        build: "cp310-* cp311-* cp312-*"
-      - os: ubuntu-latest  
-        arch: aarch64
-        build: "cp310-* cp311-* cp312-*"
-      - os: macos-13      # Intel
-        arch: x86_64
-        build: "cp310-* cp311-* cp312-*"
-      - os: macos-14      # ARM64
-        arch: arm64
-        build: "cp310-* cp311-* cp312-*"
-      - os: windows-latest
-        arch: AMD64
-        build: "cp310-* cp311-* cp312-*"
-```
-
-## Performance Optimization
-
-### SIMD Instruction Sets
-The build system automatically detects and enables:
-
-**x86_64 platforms:**
-- AVX-512F: 8 complex operations per instruction
-- AVX2: 4 complex operations per instruction  
-- SSE4.2: 2 complex operations per instruction
-- Scalar: Fallback implementation
-
-**ARM platforms:**
-- NEON: 4 complex operations per instruction
-- Scalar: Fallback implementation
-
-### Build Optimization Flags
-
-**Linux/macOS (GCC/Clang):**
-```cmake
--O3 -march=native -mavx2 -mfma -fopenmp-simd -flto
-```
-
-**Windows (MSVC):**
-```cmake
-/O2 /arch:AVX2 /Oi /Ot /Oy /GL /LTCG
-```
-
-## Local Development
-
-### Setup Development Environment
-```bash
-# Install build dependencies
-pip install cmake ninja pybind11 scikit-build-core[pyproject]
-
-# Clone and build
-git clone https://github.com/FiRMLAB-Pisa/pygrog.git
-cd pygrog
-pip install -e .
-
-# Test installation
-python -c "from pygrog.operator import detect_simd_level; print(detect_simd_level())"
-```
-
-### Build Scripts
-```bash
-# Automated CMake build
-./build_cmake.sh [--debug|--release] [--clean] [--verbose]
-
-# Test PyPI workflow
-./test_pypi_workflow.sh
-
-# Legacy setuptools build
-./build_extension.sh
-```
-
-### Testing Different Scenarios
-```bash
-# Test precompiled wheel installation
-pip install --find-links wheelhouse pygrog
-
-# Test source installation
-pip install --no-binary pygrog pygrog
-
-# Test pure Python fallback
-PYGROG_PURE_PYTHON=1 pip install .
-```
-
-## Distribution Workflow
-
-### 1. Development Cycle
-```bash
-# Make changes
-edit src/pygrog/operator/_fast_binning.py
-edit csrc/cpu/fast_binning_cpu.h
-
-# Test locally
-pip install -e .
-python examples/fast_binning_example.py
-python -m pytest tests/
-
-# Push changes
-git commit -am "Improve fast binning performance"
-git push origin feature-branch
-```
-
-### 2. Release Process
-```bash
-# Create release
-git tag v1.0.0
-git push origin v1.0.0
-
-# GitHub Actions will:
-# 1. Build wheels for all platforms
-# 2. Test wheels
-# 3. Publish to PyPI
-```
-
-### 3. User Installation
-```bash
-# Users install with
-pip install pygrog
-
-# pip will:
-# 1. Check for compatible wheel on PyPI
-# 2. Download and install wheel if available
-# 3. Build from source if no wheel found
-# 4. Use pure Python if build fails
-```
+---
 
 ## Troubleshooting
 
-### Common Installation Issues
+### Build fails — no C++ compiler
 
-#### No Precompiled Wheel Available
 ```
-Building wheel for pygrog (pyproject.toml) ... done
-```
-This means no compatible wheel was found and pip is building from source.
-
-#### Build Failure
-```
-error: Failed building wheel for pygrog
-```
-Solutions:
-1. Install build dependencies: `pip install cmake pybind11`
-2. Force pure Python: `PYGROG_PURE_PYTHON=1 pip install pygrog`
-3. Use older version: `pip install pygrog==1.0.0`
-
-#### Missing SIMD Performance
-```python
-from pygrog.operator import detect_simd_level
-print(detect_simd_level())  # Should show AVX512/AVX/SSE, not Scalar
+error: command 'gcc' failed
 ```
 
-If showing "Scalar" or "Unavailable":
-1. Check if C++ extension built: `python -c "import pygrog.operator._fast_binning"`
-2. Rebuild with optimizations: `pip install --force-reinstall --no-binary pygrog pygrog`
+Install the C++ toolchain first:
 
-### Verification Commands
 ```bash
-# Check installation type
-python -c "
-try:
-    import pygrog.operator._fast_binning
-    print('✓ C++ extension available')
-except ImportError:
-    print('✗ Pure Python fallback')
-"
+# Linux
+sudo ./scripts/install_build_deps.sh
 
-# Performance test
-python -c "
-from pygrog.operator import benchmark_binning
-results = benchmark_binning(n_points=10000, num_runs=3)
-print(f'Speedup: {results.get(\"speedup\", \"N/A\")}x')
-"
+# macOS
+./scripts/install_build_deps.sh
 
-# SIMD detection
-python -c "
-from pygrog.operator import detect_simd_level
-print(f'SIMD level: {detect_simd_level()}')
-"
+# Windows (Admin PowerShell)
+.\scripts\install_build_deps.ps1
 ```
 
-## Platform-Specific Notes
+### Build fails — CUDA not found
 
-### Linux
-- Uses `manylinux2014` for maximum compatibility
-- Static linking of C++ runtime
-- Supports both glibc and musl (Alpine)
+```
+CMake Error: PYGROG_FORCE_CUDA is set but no CUDA compiler was found.
+```
 
-### macOS
-- Universal wheels for Intel and Apple Silicon
-- Deployment target: macOS 10.15+
-- Code signing for distribution
+Either install the CUDA toolkit (`--cuda` flag above) or build CPU-only:
 
-### Windows
-- MSVC runtime statically linked
-- Support for Windows 10+
-- Both x86_64 and potentially x86 (32-bit)
+```bash
+PYGROG_NO_CUDA=1 pip install pygrog
+```
 
-## Performance Expectations
+### Wrong CUDA version
 
-| System | SIMD | Expected Speedup |
-|--------|------|------------------|
-| Modern Intel/AMD | AVX-512 | 4-8x |
-| Intel/AMD | AVX2 | 2-4x |
-| Older x86_64 | SSE4.2 | 1.5-2x |
-| Apple M1/M2 | NEON | 2-4x |
-| ARM64 Linux | NEON | 2-4x |
-| Pure Python | None | 1x (baseline) |
+Check the CUDA version that matches your installed PyTorch:
 
-Actual performance depends on:
-- Data size (larger = better speedup)
-- Memory layout (C-contiguous = faster)
-- System memory bandwidth
-- Compiler optimizations
+```bash
+python -c "import torch; print(torch.version.cuda)"
+```
+
+Then pick the corresponding CUDA wheel (`cu126`, `cu128`, or `cu130`).
+
+### Verify the installation
+
+```bash
+python scripts/verify_install.py
+```
+
+The script checks the import, the pre-built C++ extension, CUDA
+availability, and runs a CPU (and optionally CUDA) scatter/gather smoke
+test.  Exit code 0 means everything is working.

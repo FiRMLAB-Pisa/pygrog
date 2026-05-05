@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Lint ───────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+
+  # ── Tests ──────────────────────────────────────────────────────────────────
+  test:
+    name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    needs: lint
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install system deps (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build
+
+      - name: Install system deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja
+
+      - name: Install system deps (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install scikit-build-core setuptools-scm cmake ninja
+
+      - name: Install package (CPU-only)
+        shell: bash
+        env:
+          PYGROG_NO_CUDA: "1"
+        run: pip install --no-build-isolation -e ".[dev-cpu]"
+
+      - name: Run tests
+        # KMP_DUPLICATE_LIB_OK: on macOS, PyTorch and finufft each bundle their
+        # own libomp.dylib. Without this flag the second OMP runtime init calls
+        # abort(). Setting TRUE suppresses the duplicate-runtime error so both
+        # libraries can coexist in the same process.
+        # OMP_NUM_THREADS=1: forces single-threaded OMP execution, which prevents
+        # thread-pool deadlocks that occur when two OMP runtimes both attempt to
+        # initialise parallel thread pools simultaneously (macOS hang).
+        env:
+          KMP_DUPLICATE_LIB_OK: "TRUE"
+          OMP_NUM_THREADS: "1"
+        run: python -m pytest tests/ -v --ignore=tests/test_fast_binning.py
+
+      - name: Upload coverage
+        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false

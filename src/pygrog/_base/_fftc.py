@@ -11,12 +11,12 @@ import torch
 
 from mrinufft._array_compat import with_torch
 
-from .._sigpy import util
+from .._utils import resize, normalize_axes
 
 
 @with_torch
 def fft(
-    input: NDArray[complex],
+    input: NDArray[complex],  # noqa: A002
     oshape: list[int] | tuple[int] | None = None,
     axes: int | list[int] | tuple[int] | None = None,
     center: bool = True,
@@ -49,7 +49,7 @@ def fft(
     if axes is not None and np.isscalar(axes):
         axes = (axes,)
     if not torch.is_complex(input):
-        input = input.to(torch.complex64)
+        input = input.to(torch.complex64)  # noqa: A001
 
     if center:
         output = _fftc(input, oshape=oshape, axes=axes, norm=norm)
@@ -64,7 +64,7 @@ def fft(
 
 @with_torch
 def ifft(
-    input: NDArray[complex],
+    input: NDArray[complex],  # noqa: A002
     oshape: list[int] | tuple[int] | None = None,
     axes: int | list[int] | tuple[int] | None = None,
     center: bool = True,
@@ -97,7 +97,7 @@ def ifft(
     if axes is not None and np.isscalar(axes):
         axes = (axes,)
     if not torch.is_complex(input):
-        input = input.to(torch.complex64)
+        input = input.to(torch.complex64)  # noqa: A001
 
     if center:
         output = _ifftc(input, oshape=oshape, axes=axes, norm=norm)
@@ -111,28 +111,28 @@ def ifft(
 
 
 # %% local subroutines
-def _fftc(input, oshape=None, axes=None, norm="ortho"):
-    ndim = input.ndim
-    axes = util._normalize_axes(axes, ndim)
+def _fftc(x, oshape=None, axes=None, norm="ortho"):
+    ndim = x.ndim
+    axes = normalize_axes(ndim, axes)
 
     if oshape is None:
-        oshape = input.shape
+        oshape = x.shape
 
-    tmp = util.resize(input, oshape)
+    tmp = resize(x, oshape)
     tmp = torch.fft.ifftshift(tmp, dim=axes)
     tmp = torch.fft.fftn(tmp, dim=axes, norm=norm)
     output = torch.fft.fftshift(tmp, dim=axes)
     return output
 
 
-def _ifftc(input, oshape=None, axes=None, norm="ortho"):
-    ndim = input.ndim
-    axes = util._normalize_axes(axes, ndim)
+def _ifftc(x, oshape=None, axes=None, norm="ortho"):
+    ndim = x.ndim
+    axes = normalize_axes(ndim, axes)
 
     if oshape is None:
-        oshape = input.shape
+        oshape = x.shape
 
-    tmp = util.resize(input, oshape)
+    tmp = resize(x, oshape)
     tmp = torch.fft.ifftshift(tmp, dim=axes)
     tmp = torch.fft.ifftn(tmp, dim=axes, norm=norm)
     output = torch.fft.fftshift(tmp, dim=axes)

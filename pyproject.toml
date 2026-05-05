@@ -1,7 +1,7 @@
 [build-system]
 requires = [
-    "scikit-build-core>=0.4.3",
-    "pybind11>=2.6.0",
+    "scikit-build-core>=0.9",
+    "setuptools-scm>=8",
     "numpy",
 ]
 build-backend = "scikit_build_core.build"
@@ -9,7 +9,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "pygrog"
 description = "An interoperable GROG package to accelerate Non-Cartesian MR reconstructions."
-readme = "README.rst"
+readme = "README.md"
 
 requires-python = ">=3.10"
 dynamic = ["version"]
@@ -28,45 +28,60 @@ classifiers = [  # Optional
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11", 
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering :: Medical Science Apps.",
   "Topic :: Scientific/Engineering :: Physics",
 ]
 
 dependencies = [
-    "numpy",
-    "scipy", 
-    "numba",
+    "numpy>=2.0",
+    "scipy",
+    "torch>=2.0",
     "mri-nufft",
-    "sigpy",
-    "torch",
-    "ipywidgets",
-    "ismrmrd",
-    "h5py",
+    "finufft",
+    "pytorch-finufft",
 ]
 
-
-
-[project.optional-dependencies] # Optional
-dev = [
-    "black", 
-    "isort", 
-    "ruff", 
-    "pre-commit"
+[project.optional-dependencies]
+cuda = [
+    "cufinufft; platform_system == 'Linux'",
 ]
-doc = [
-    "sphinx-book-theme",
-    "sphinx-copybutton", 
-    "sphinx-gallery",
-    "matplotlib",
+dev-cpu = [
+    # style / linting
+    "ruff",
+    "pre-commit",
+    # testing
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist",
+    "pytest-sugar",
+    "pytest-cases",
     "coverage",
-    "codecov"
+    "codecov",
+    # documentation
+    "sphinx-book-theme",
+    "sphinx-copybutton",
+    "sphinx-gallery",
+    "myst-parser",
+    "matplotlib",
+    # examples / non-cartesian references
+    "zenodo-get",
+    "psutil",
+    "brainweb-dl",
+    "scikit-image",
+    # interop
+    "mrpro",
+    "sigpy",
+    "deepinv",
 ]
-test = [
-    "pytest<8.0.0", 
-    "pytest-cov", 
-    "pytest-xdist", 
-    "pytest-sugar", 
-    "pytest-cases"
+dev-cu12 = [
+    "pygrog[dev-cpu,cuda]",
+    "cupy-cuda12x",
+]
+dev-cu13 = [
+    "pygrog[dev-cpu,cuda]",
+    "cupy-cuda13x",
 ]
 
 # List URLs that are relevant to your project
@@ -76,29 +91,31 @@ test = [
 "Bug Reports" = "https://github.com/FiRMLAB-Pisa/pygrog/issues"
 "Source" = "https://github.com/FiRMLAB-Pisa/pygrog"
 
-[tool.setuptools.packages.find]
-where=["src"]
+[tool.scikit-build]
+metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
+wheel.packages = ["src/pygrog"]
+
+# Build options (pass via pip install -C cmake.define.<NAME>=ON):
+#   cmake.define.PYGROG_NO_CUDA    — force CPU-only build (no nvcc required)
+#   cmake.define.PYGROG_FORCE_CUDA — fail if no CUDA compiler is found
 
 [tool.setuptools_scm]
 write_to = "src/pygrog/_version.py"
 version_scheme = "python-simplified-semver"
-local_scheme="no-local-version"
-fallback_version="v99-dev"
+local_scheme = "no-local-version"
+fallback_version = "v99-dev"
 
-# Formatting using black.
-[tool.black]
-line-length = 88
-target-version = ["py310"]  # Match your Python version
-
-# Sorting imports using isort.
-[tool.isort]
-profile="black"
-
-# Linting using ruff.
+# Formatting + linting using ruff.
 [tool.ruff]
 line-length = 88
+fix = true
 extend-exclude = ["__init__.py"]
-exclude = ["doc/**"]
+exclude = ["docs/**"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
 
 # RUFF section
 [tool.ruff.lint]
@@ -125,14 +142,14 @@ ignore = [
     "W191",  # tabs
     "E203",  # spacing before ':'
     "COM812", # missing trailing comma
-    "Q000", "Q001", "Q002",  # quote rules handled by Black
-    "I001", "I002",          # isort handled by Black
+    "Q000", "Q001", "Q002",  # quote rules handled by Ruff formatter
+    "I001", "I002",          # import sorting intentionally not enforced
     "S101",
 ]
 extend-ignore = [
-    "E501",  # line too long → Black wraps
-    "W191",  # tabs → Black uses spaces
-    "E203",  # colon spacing → Black style
+    "E501",  # line too long
+    "W191",  # tabs
+    "E203",  # colon spacing
 ]
 
 [tool.ruff.lint.isort]
@@ -141,7 +158,7 @@ split-on-trailing-comma = false
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
-inline-quotes = "single"
+inline-quotes = "double"
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
@@ -156,6 +173,10 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=xml"
 ]
+filterwarnings = [
+    'ignore:Samples will be rescaled to \[-pi, pi\), assuming they were in \[-0.5, 0.5\):UserWarning',
+    'ignore:Samples will be rescaled to \[-0.5, 0.5\), assuming they were in \[-pi, pi\):UserWarning',
+]
 
 [tool.pylsp-mypy]
 enabled = false
@@ -163,3 +184,7 @@ live_mode = false
 
 [tool.mypy]
 ignore_missing_imports = true
+
+[tool.codespell]
+ignore-words-list = "te,lamda"
+skip = "*.ipynb,docs/_build,docs/generated,*.npy,*.json"
