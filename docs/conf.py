@@ -80,6 +80,7 @@ autosummary_generate = True
 autodoc_inherit_docstrings = True
 autodoc_member_order = "bysource"
 autodoc_typehints = "none"
+autodoc_mock_imports = ["deepinv", "torchvision"]
 
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
