@@ -87,5 +87,6 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          slug: FiRMLAB-Pisa/pygrog
           files: coverage.xml
           fail_ci_if_error: false
