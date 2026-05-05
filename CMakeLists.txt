@@ -136,10 +136,17 @@ set(SOURCES
     csrc/torch/module.cpp
     csrc/torch/grog_interp.cpp
     csrc/torch/sparse_ops.cpp
-    csrc/torch/sparse_ops_avx2.cpp
-    csrc/torch/sparse_ops_avx512.cpp
     csrc/torch/toep_psf.cpp
 )
+# AVX dispatch TUs are x86/x86_64-only.  On GCC/Clang the separate TUs
+# satisfy the pragma-based ISA requirement; on MSVC they are the dispatch
+# targets called via CPUID at runtime.  Skip entirely on ARM (arm64/aarch64).
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64|armv")
+    list(APPEND SOURCES
+        csrc/torch/sparse_ops_avx2.cpp
+        csrc/torch/sparse_ops_avx512.cpp
+    )
+endif()
 
 if(USE_CUDA)
     list(APPEND SOURCES
@@ -206,15 +213,9 @@ elseif(APPLE)
     endif()
     unset(_brew_libomp)
     unset(_brew_result)
-    # Explicitly set the ISA for the AVX dispatch TUs so GCC 13+'s stricter
-    # always_inline target-mismatch check doesn't fire when std::allocator
-    # (always_inline) is instantiated under a #pragma GCC target("avx512f").
-    set_source_files_properties(csrc/torch/sparse_ops_avx2.cpp PROPERTIES
-        COMPILE_FLAGS "-mavx2 -mfma"
-    )
-    set_source_files_properties(csrc/torch/sparse_ops_avx512.cpp PROPERTIES
-        COMPILE_FLAGS "-mavx512f"
-    )
+    # On Apple Clang the #pragma GCC target in each AVX TU sets the ISA for
+    # the entire translation unit — no explicit -mavx2/-mavx512f flag needed.
+    # (These flags are x86-only and would fail on Apple Silicon / arm64.)
 else()
     target_compile_options(_pygrog_torch PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-O3 -fopenmp>
@@ -223,12 +224,15 @@ else()
     # Explicitly set the ISA for the AVX dispatch TUs so GCC 13+'s stricter
     # always_inline target-mismatch check doesn't fire when std::allocator
     # (always_inline) is instantiated under a #pragma GCC target("avx512f").
-    set_source_files_properties(csrc/torch/sparse_ops_avx2.cpp PROPERTIES
-        COMPILE_FLAGS "-mavx2 -mfma"
-    )
-    set_source_files_properties(csrc/torch/sparse_ops_avx512.cpp PROPERTIES
-        COMPILE_FLAGS "-mavx512f"
-    )
+    # Only meaningful on x86/x86_64; skip on ARM.
+    if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64|armv")
+        set_source_files_properties(csrc/torch/sparse_ops_avx2.cpp PROPERTIES
+            COMPILE_FLAGS "-mavx2 -mfma"
+        )
+        set_source_files_properties(csrc/torch/sparse_ops_avx512.cpp PROPERTIES
+            COMPILE_FLAGS "-mavx512f"
+        )
+    endif()
 endif()
 
 # ── CUDA settings ─────────────────────────────────────────────────────────────
