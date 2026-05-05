@@ -11,8 +11,6 @@ name: Publish to PyPI
 #     --find-links https://github.com/FiRMLAB-Pisa/pygrog/releases/expanded_assets/v1.0.0
 
 on:
-  push:
-    tags: ['v*']
   release:
     types: [published]
   workflow_dispatch:
@@ -166,6 +164,7 @@ jobs:
   publish_cuda_release:
     name: Attach CUDA wheels to release
     needs: build_cuda_wheels
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
       contents: write
