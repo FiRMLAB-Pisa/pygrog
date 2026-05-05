@@ -23,6 +23,7 @@ The Toeplitz path is the default on CPU and is opt-in on CUDA via
 """
 
 import time
+import types
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -34,8 +35,8 @@ from mrinufft import get_operator, initialize_2D_spiral
 from mrinufft.density import voronoi
 
 from pygrog.calib import GrogInterpolator
+from pygrog.gadgets import SubspaceGadget
 from pygrog.gadgets._off_resonance import OffResonanceSparseFFT
-from pygrog.gadgets._subspace import SubspaceSparseFFT
 from pygrog.operator import SparseFFT
 
 
@@ -221,8 +222,8 @@ plt.show()
 # Part 2 — accuracy of the gadget Toeplitz operators
 # ==================================================
 # Small random problems where ``OffResonanceSparseFFT`` and
-# ``SubspaceSparseFFT`` are constructed directly (no broadcasting through
-# the high-level helpers).  For each gadget we compare ``op.normal`` for
+# :class:`~pygrog.gadgets.SubspaceGadget` are used directly to verify that
+# ``op.normal`` gives the same result for
 # ``toeplitz=True`` and ``toeplitz=False``.
 
 
@@ -272,8 +273,6 @@ print(
 )
 
 # ---- Subspace -----------------------------------------------------------
-import types
-
 T = 12
 K = 4
 n_pts = 60
@@ -284,17 +283,17 @@ weights = rng.random(n_samples_sub).astype(np.float32) + 0.1
 smaps_sub = (
     rng.standard_normal((4, *grid)) + 1j * rng.standard_normal((4, *grid))
 ).astype(np.complex64) * 0.5
-sort_perm = torch.argsort(torch.as_tensor(indices))
-inv_perm = torch.empty_like(sort_perm)
-inv_perm[sort_perm] = torch.arange(n_samples_sub)
 indices_t = torch.as_tensor(indices)
 weights_t = torch.as_tensor(weights)
+sort_perm = torch.argsort(indices_t)
+inv_perm = torch.empty_like(sort_perm)
+inv_perm[sort_perm] = torch.arange(n_samples_sub)
 plan = types.SimpleNamespace(
     grid_shape=grid,
     image_shape=grid,
     grid_size=int(np.prod(grid)),
     indices=indices_t[sort_perm],
-    sqrt_weights=torch.sqrt(weights_t)[sort_perm],
+    sqrt_weights=weights_t.sqrt()[sort_perm],
     sort_perm=sort_perm,
     inv_perm=inv_perm,
     natural_shape=(T, n_pts),
@@ -305,8 +304,8 @@ base_sub_n = SparseFFT(plan=plan, smaps=smaps_sub, toeplitz=False)
 basis = (rng.standard_normal((K, T)) + 1j * rng.standard_normal((K, T))).astype(
     np.complex64
 )
-sub_t = SubspaceSparseFFT(base_sub_t, basis, encoding_axis=-2)
-sub_n = SubspaceSparseFFT(base_sub_n, basis, encoding_axis=-2)
+sub_t = SubspaceGadget(base_sub_t, basis, encoding_axis=-2)
+sub_n = SubspaceGadget(base_sub_n, basis, encoding_axis=-2)
 x_sub = torch.randn(K, *grid, dtype=torch.complex64)
 t_toep, y_toep = _bench(sub_t.normal, x_sub, n_iter=5)
 t_nest, y_nest = _bench(sub_n.normal, x_sub, n_iter=5)
