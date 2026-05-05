@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and discussion
+    url: https://github.com/FiRMLAB-Pisa/pygrog/discussions
+    about: Please use Discussions for usage and design questions.

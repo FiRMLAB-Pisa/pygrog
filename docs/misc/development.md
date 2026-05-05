@@ -64,6 +64,7 @@ PyGROG uses **Ruff-only** formatting and linting:
 ```bash
 ruff format .
 ruff check .
+codespell .
 ```
 
 `ruff check` is configured with `fix = true`, so safe auto-fixes are applied
@@ -73,4 +74,5 @@ A pre-commit hook is provided for convenience:
 
 ```bash
 pre-commit install
+pre-commit run --all-files
 ```

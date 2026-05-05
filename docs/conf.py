@@ -101,7 +101,13 @@ sphinx_gallery_conf = {
     "ignore_pattern": r"(__init__|conftest|fast_binning)\.py",
     "nested_sections": True,
     "within_subsection_order": "FileNameSortKey",
-    "first_notebook_cell": "!pip install pygrog[dev]",
+    "first_notebook_cell": (
+        "import sys\n"
+        "IN_COLAB = 'google.colab' in sys.modules\n"
+        "if IN_COLAB:\n"
+        "    import subprocess\n"
+        "    subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'pygrog'])"
+    ),
     "abort_on_example_error": False,
 }
 

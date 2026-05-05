@@ -51,6 +51,7 @@ dev-cpu = [
     # style / linting
     "ruff",
     "pre-commit",
+    "codespell",
     # testing
     "pytest",
     "pytest-cov",

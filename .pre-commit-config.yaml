@@ -1,0 +1,21 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff-format
+      - id: ruff
+        args: [--fix]
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.3.0
+    hooks:
+      - id: codespell
+        args: [--ignore-words-list=nd,te,fo]
+
+  - repo: local
+    hooks:
+      - id: check-colab-preamble
+        name: Check Colab notebook preamble
+        entry: python scripts/check_colab_preamble.py
+        language: system
+        pass_filenames: false

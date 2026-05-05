@@ -1,0 +1,38 @@
+name: Bug report
+description: Report a reproducible defect in pygrog.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please provide enough detail to reproduce the problem.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug and expected behavior.
+      placeholder: A clear and concise description.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Include a minimal script and inputs.
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Python, torch, pygrog, CUDA (if any).
+      placeholder: Linux, Python 3.12, torch 2.4, pygrog 0.x, CUDA 12.6
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or traceback
+      render: text

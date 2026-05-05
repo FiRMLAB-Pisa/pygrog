@@ -79,9 +79,18 @@ For contributors, formatting and linting are Ruff-only:
 ```bash
 ruff format .
 ruff check .
+codespell .
 ```
 
 `ruff check` is configured to apply safe auto-fixes by default.
+
+Recommended: enable pre-commit hooks so checks run automatically before each
+commit:
+
+```bash
+pre-commit install
+pre-commit run --all-files
+```
 
 ## Related Projects
 
