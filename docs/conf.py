@@ -11,6 +11,33 @@ from pathlib import Path
 sys.path.insert(0, str(Path().resolve()))
 sys.path.insert(0, str(Path("../src").resolve()))
 
+
+def _invalidate_gallery_cache_if_thumb_missing() -> None:
+    """Drop stale Sphinx-Gallery md5 files when thumbs are missing.
+
+    Sphinx-Gallery may skip an example when its ``.md5`` cache exists,
+    but backreference generation still requires the thumbnail file.
+    If a thumbnail was removed from ``docs/generated`` while the ``.md5``
+    persisted, the docs build can fail with a missing-thumb error.
+    """
+    docs_dir = Path(__file__).resolve().parent
+    examples_dir = (docs_dir / "../examples").resolve()
+    gallery_dir = (docs_dir / "generated/autoexamples").resolve()
+    thumbs_dir = gallery_dir / "images" / "thumb"
+
+    if not examples_dir.exists() or not gallery_dir.exists():
+        return
+
+    for example in sorted(examples_dir.glob("example*_*.py")):
+        stem = example.stem
+        md5_file = gallery_dir / f"{example.name}.md5"
+        thumb_file = thumbs_dir / f"sphx_glr_{stem}_thumb.png"
+        if md5_file.exists() and not thumb_file.exists():
+            md5_file.unlink()
+
+
+_invalidate_gallery_cache_if_thumb_missing()
+
 # -- Project information -----------------------------------------------------
 
 project = "PyGROG"
@@ -42,7 +69,7 @@ exclude_patterns = [
     "installation_guide.md",
 ]
 
-suppress_warnings = ["myst.xref_missing"]
+suppress_warnings = ["myst.xref_missing", "ref.ref", "docutils"]
 
 # MyST (Markdown) settings
 myst_enable_extensions = ["colon_fence", "deflist", "dollarmath", "amsmath"]
@@ -52,11 +79,11 @@ myst_heading_anchors = 3
 autosummary_generate = True
 autodoc_inherit_docstrings = True
 autodoc_member_order = "bysource"
-autodoc_typehints = "description"
+autodoc_typehints = "none"
 
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
-napoleon_include_private_with_doc = True
+napoleon_include_private_with_doc = False
 napoleon_use_admonition_for_references = True
 
 pygments_style = "sphinx"
@@ -70,7 +97,7 @@ sphinx_gallery_conf = {
     "reference_url": {"pygrog": None},
     "examples_dirs": ["../examples/"],
     "gallery_dirs": ["generated/autoexamples"],
-    "filename_pattern": "/example_",
+    "filename_pattern": r"/example\d*_",
     "ignore_pattern": r"(__init__|conftest|fast_binning)\.py",
     "nested_sections": True,
     "within_subsection_order": "FileNameSortKey",

@@ -14,10 +14,16 @@ using GRAPPA kernels trained from an auto-calibration region.  It provides:
 - **SparseFFT operator** (`pygrog.operator.SparseFFT`) — fast sparse forward
   and adjoint Cartesian FFT for undersampled MRI, with optional sensitivity
   maps and GPU pipelining.
+- **MaskedFFT operator** (`pygrog.operator.MaskedFFT`) — dense-grid masked FFT
+  companion for GROG gridded paths.
 - **Reconstruction gadgets** (`pygrog.gadgets`) — off-resonance correction and
   low-rank subspace projection, stackable on any base operator.
+  Public aliases include `SubspaceGadget`, `OffResonanceGadget`,
+  `with_subspace`, and `with_offresonance`.
 - **Calibration utilities** (`pygrog.utils`) — NLINV coil sensitivity
   estimation and PCA coil compression.
+- **Iterative solvers** (`op.solve(...)`, `pygrog.solve`) — CG/LSMR interfaces
+  that accept torch, NumPy, and CuPy arrays (CuPy via DLPack, no CPU copy).
 - **Interoperability** (`pygrog.interop`) — drop-in adapters for
   [mri-nufft](https://mind-inria.github.io/mri-nufft/),
   [sigpy](https://sigpy.readthedocs.io/),
@@ -65,6 +71,17 @@ pip install --no-build-isolation -e ".[dev]"
 
 CUDA wheels are attached to each
 [GitHub Release](https://github.com/FiRMLAB-Pisa/pygrog/releases).
+
+## Development Style
+
+For contributors, formatting and linting are Ruff-only:
+
+```bash
+ruff format .
+ruff check .
+```
+
+`ruff check` is configured to apply safe auto-fixes by default.
 
 ## Related Projects
 

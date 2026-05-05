@@ -164,30 +164,46 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Examples</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1 has-children"><a class="reference internal" href="../../../generated/autoexamples/index.html">Examples</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_solve.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example01_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example02_stacked.html">Batched and Stacked Reconstructions with PyGROG</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example03_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example04_calibration.html">Utils Tour: Coil Compression and NLINV</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example05_solvers.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example06_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example07_interoperability.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
 </ul>
 </details></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1 has-children"><a class="reference internal" href="../../../api.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.calib.KernelTable.html">KernelTable</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.calib.GrogInterpolator.html">GrogInterpolator</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.operator.SparseFFT.html">SparseFFT</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.gadgets.SubspaceProjection.html">SubspaceProjection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.gadgets.SubspaceSparseFFT.html">SubspaceSparseFFT</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.gadgets.with_subspace.html">with_subspace</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.gadgets.OffResonanceCorrection.html">OffResonanceCorrection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.gadgets.OffResonanceSparseFFT.html">OffResonanceSparseFFT</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.utils.coil_compress.html">coil_compress</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.utils.nlinv_calib.html">nlinv_calib</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.interop.GrogLinop.html">GrogLinop</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.interop.GrogLinearOp.html">GrogLinearOp</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../api/calib.html">Calibration</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.utils.coil_compression.html">coil_compression</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.utils.nlinv.html">nlinv</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../api/grog.html">GROG</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.calib.GrogInterpolator.html">GrogInterpolator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../api/gadgets.html">Gadgets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.gadgets.OffResonanceGadget.html">OffResonanceGadget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.gadgets.SubspaceGadget.html">SubspaceGadget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.gadgets.with_offresonance.html">with_offresonance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.gadgets.with_subspace.html">with_subspace</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../api/operators.html">Operators</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.operator.SparseFFT.html">SparseFFT</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.operator.MaskedFFT.html">MaskedFFT</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../api/interop.html">Interoperability</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.interop.GrogLinop.html">GrogLinop</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.interop.GrogLinearOp.html">GrogLinearOp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.interop.GrogLinearPhysics.html">GrogLinearPhysics</a></li>
+</ul>
+</details></li>
 </ul>
 </details></li>
 </ul>
@@ -674,14 +690,22 @@
         <span class="n">image_shape</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">stack_shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
     <span class="p">):</span>
+        <span class="n">coords_arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">coords</span><span class="p">)</span>
+        <span class="n">stack_shape_eff</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="p">(</span><span class="n">stack_shape</span> <span class="ow">or</span> <span class="p">()))</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">stack_shape_eff</span> <span class="ow">and</span> <span class="n">coords_arr</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">4</span><span class="p">:</span>
+            <span class="c1"># Conservative auto-stack detection for canonical 2D trajectories:</span>
+            <span class="c1"># coords = (*stack, k1, k0, 2). We infer a single stack axis.</span>
+            <span class="c1"># More complex layouts (ndim != 4) must pass stack_shape explicitly.</span>
+            <span class="n">stack_shape_eff</span> <span class="o">=</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">coords_arr</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]),)</span>
+
         <span class="bp">self</span><span class="o">.</span><span class="n">plan</span> <span class="o">=</span> <span class="n">_create_plan</span><span class="p">(</span>
             <span class="n">shape</span><span class="p">,</span>
-            <span class="n">coords</span><span class="p">,</span>
+            <span class="n">coords_arr</span><span class="p">,</span>
             <span class="n">oversamp</span><span class="p">,</span>
             <span class="n">kernel_width</span><span class="p">,</span>
             <span class="n">kernel_shape</span><span class="p">,</span>
             <span class="n">time_map</span><span class="p">,</span>
-            <span class="n">stack_shape</span><span class="o">=</span><span class="n">stack_shape</span><span class="p">,</span>
+            <span class="n">stack_shape</span><span class="o">=</span><span class="n">stack_shape_eff</span><span class="p">,</span>
         <span class="p">)</span>
         <span class="c1"># Attach FFT plan fields to self.plan for SparseFFT consumption</span>
         <span class="n">_attach_fft_plan</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">plan</span><span class="p">,</span> <span class="n">image_shape</span><span class="p">)</span>
@@ -925,17 +949,12 @@
         <span class="k">return</span> <span class="n">out</span></div>
 
 
-<div class="viewcode-block" id="GrogInterpolator.__call__">
-<a class="viewcode-back" href="../../../generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator.__call__">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">shot_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ret_image</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">grid</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">interpolate</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">shot_index</span><span class="p">,</span> <span class="n">ret_image</span><span class="p">,</span> <span class="n">grid</span><span class="p">)</span></div>
-
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">interpolate</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">shot_index</span><span class="p">,</span> <span class="n">ret_image</span><span class="p">,</span> <span class="n">grid</span><span class="p">)</span>
 
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Core interpolation</span>
     <span class="c1"># ------------------------------------------------------------------</span>
-<div class="viewcode-block" id="GrogInterpolator._sparse_full">
-<a class="viewcode-back" href="../../../generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator._sparse_full">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_sparse_full</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Shape-preserving GROG interpolation.</span>
 
@@ -1039,11 +1058,8 @@
         <span class="n">stacked</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
             <span class="n">outs</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">batch_shape</span><span class="p">)</span>
         <span class="p">)</span>  <span class="c1"># (*batch, S, C, *spatial, kw)</span>
-        <span class="k">return</span> <span class="n">stacked</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">batch_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">s_shape</span><span class="p">,</span> <span class="n">ncoils</span><span class="p">,</span> <span class="o">*</span><span class="n">spatial</span><span class="p">,</span> <span class="n">kw</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">stacked</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">batch_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">s_shape</span><span class="p">,</span> <span class="n">ncoils</span><span class="p">,</span> <span class="o">*</span><span class="n">spatial</span><span class="p">,</span> <span class="n">kw</span><span class="p">)</span>
 
-
-<div class="viewcode-block" id="GrogInterpolator._sparse_full_single">
-<a class="viewcode-back" href="../../../generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator._sparse_full_single">[docs]</a>
     <span class="nd">@staticmethod</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">_sparse_full_single</span><span class="p">(</span>
         <span class="n">data</span><span class="p">,</span>
@@ -1051,7 +1067,7 @@
         <span class="n">ncoils</span><span class="p">,</span>
         <span class="n">spatial</span><span class="p">,</span>
         <span class="n">kw</span><span class="p">,</span>
-        <span class="n">target_idx</span><span class="p">,</span>
+            <span class="n">_target_idx</span><span class="p">,</span>
         <span class="n">interp_idx</span><span class="p">,</span>
         <span class="n">kernel</span><span class="p">,</span>
     <span class="p">):</span>
@@ -1071,11 +1087,8 @@
             <span class="o">.</span><span class="n">contiguous</span><span class="p">()</span>
             <span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">batch_shape</span><span class="p">,</span> <span class="n">ncoils</span><span class="p">,</span> <span class="o">*</span><span class="n">spatial</span><span class="p">,</span> <span class="n">kw</span><span class="p">)</span>
         <span class="p">)</span>
-        <span class="k">return</span> <span class="n">out</span></div>
+        <span class="k">return</span> <span class="n">out</span>
 
-
-<div class="viewcode-block" id="GrogInterpolator._grid_shot">
-<a class="viewcode-back" href="../../../generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator._grid_shot">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_grid_shot</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">shot_index</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Grid a single shot and return its contribution.&quot;&quot;&quot;</span>
         <span class="c1"># data: (C, npts)</span>
@@ -1110,14 +1123,11 @@
             <span class="n">t</span> <span class="o">=</span> <span class="n">target_1d</span><span class="p">[</span><span class="n">valid</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">ncoils</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
             <span class="n">output</span><span class="o">.</span><span class="n">scatter_add_</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">data_interp</span><span class="p">[</span><span class="n">valid</span><span class="p">]</span><span class="o">.</span><span class="n">T</span><span class="p">)</span>
 
-        <span class="k">return</span> <span class="n">output</span></div>
-
+        <span class="k">return</span> <span class="n">output</span>
 
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Gridded k-space construction (for grid=True codepath)</span>
     <span class="c1"># ------------------------------------------------------------------</span>
-<div class="viewcode-block" id="GrogInterpolator._grid_kspace">
-<a class="viewcode-back" href="../../../generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator._grid_kspace">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_grid_kspace</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sparse_flat</span><span class="p">,</span> <span class="n">plan</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Scatter density-compensated sparse samples onto the oversampled grid.</span>
 
@@ -1286,8 +1296,7 @@
             <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">,</span>
             <span class="n">density</span><span class="o">=</span><span class="n">density</span><span class="p">,</span>
         <span class="p">)</span>
-        <span class="k">return</span> <span class="n">grid_kspace</span><span class="p">,</span> <span class="n">masked_plan</span></div>
-
+        <span class="k">return</span> <span class="n">grid_kspace</span><span class="p">,</span> <span class="n">masked_plan</span>
 
 <div class="viewcode-block" id="GrogInterpolator.collect_shots">
 <a class="viewcode-back" href="../../../generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator.collect_shots">[docs]</a>

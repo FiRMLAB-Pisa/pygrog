@@ -54,8 +54,8 @@
     <script>DOCUMENTATION_OPTIONS.pagename = 'generated/pygrog.gadgets.with_subspace';</script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="OffResonanceCorrection" href="pygrog.gadgets.OffResonanceCorrection.html" />
-    <link rel="prev" title="SubspaceSparseFFT" href="pygrog.gadgets.SubspaceSparseFFT.html" />
+    <link rel="next" title="Operators" href="../api/operators.html" />
+    <link rel="prev" title="with_offresonance" href="pygrog.gadgets.with_offresonance.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -165,30 +165,46 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Examples</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1 has-children"><a class="reference internal" href="autoexamples/index.html">Examples</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
-<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
-<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
-<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_solve.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
-<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
-<li class="toctree-l2"><a class="reference internal" href="autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example01_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example02_stacked.html">Batched and Stacked Reconstructions with PyGROG</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example03_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example04_calibration.html">Utils Tour: Coil Compression and NLINV</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example05_solvers.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example06_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
+<li class="toctree-l2"><a class="reference internal" href="autoexamples/example07_interoperability.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
 </ul>
 </details></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="current nav bd-sidenav">
 <li class="toctree-l1 current active has-children"><a class="reference internal" href="../api.html">API Reference</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
-<li class="toctree-l2"><a class="reference internal" href="pygrog.calib.KernelTable.html">KernelTable</a></li>
-<li class="toctree-l2"><a class="reference internal" href="pygrog.calib.GrogInterpolator.html">GrogInterpolator</a></li>
-<li class="toctree-l2"><a class="reference internal" href="pygrog.operator.SparseFFT.html">SparseFFT</a></li>
-<li class="toctree-l2"><a class="reference internal" href="pygrog.gadgets.SubspaceProjection.html">SubspaceProjection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="pygrog.gadgets.SubspaceSparseFFT.html">SubspaceSparseFFT</a></li>
-<li class="toctree-l2 current active"><a class="current reference internal" href="#">with_subspace</a></li>
-<li class="toctree-l2"><a class="reference internal" href="pygrog.gadgets.OffResonanceCorrection.html">OffResonanceCorrection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="pygrog.gadgets.OffResonanceSparseFFT.html">OffResonanceSparseFFT</a></li>
-<li class="toctree-l2"><a class="reference internal" href="pygrog.utils.coil_compress.html">coil_compress</a></li>
-<li class="toctree-l2"><a class="reference internal" href="pygrog.utils.nlinv_calib.html">nlinv_calib</a></li>
-<li class="toctree-l2"><a class="reference internal" href="pygrog.interop.GrogLinop.html">GrogLinop</a></li>
-<li class="toctree-l2"><a class="reference internal" href="pygrog.interop.GrogLinearOp.html">GrogLinearOp</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../api/calib.html">Calibration</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="pygrog.utils.coil_compression.html">coil_compression</a></li>
+<li class="toctree-l3"><a class="reference internal" href="pygrog.utils.nlinv.html">nlinv</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../api/grog.html">GROG</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="pygrog.calib.GrogInterpolator.html">GrogInterpolator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 current active has-children"><a class="reference internal" href="../api/gadgets.html">Gadgets</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="pygrog.gadgets.OffResonanceGadget.html">OffResonanceGadget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="pygrog.gadgets.SubspaceGadget.html">SubspaceGadget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="pygrog.gadgets.with_offresonance.html">with_offresonance</a></li>
+<li class="toctree-l3 current active"><a class="current reference internal" href="#">with_subspace</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../api/operators.html">Operators</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="pygrog.operator.SparseFFT.html">SparseFFT</a></li>
+<li class="toctree-l3"><a class="reference internal" href="pygrog.operator.MaskedFFT.html">MaskedFFT</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../api/interop.html">Interoperability</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="pygrog.interop.GrogLinop.html">GrogLinop</a></li>
+<li class="toctree-l3"><a class="reference internal" href="pygrog.interop.GrogLinearOp.html">GrogLinearOp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="pygrog.interop.GrogLinearPhysics.html">GrogLinearPhysics</a></li>
+</ul>
+</details></li>
 </ul>
 </details></li>
 </ul>
@@ -444,7 +460,7 @@
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>base_op</strong> (<a class="reference internal" href="pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT" title="pygrog.operator.SparseFFT"><em>SparseFFT</em></a><em> | </em><em>MaskedFFT</em>) – Underlying operator with a multi-dim <code class="docutils literal notranslate"><span class="pre">natural_shape</span></code> containing
+<li><p><strong>base_op</strong> (<a class="reference internal" href="pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT" title="pygrog.operator.SparseFFT"><em>SparseFFT</em></a><em> | </em><a class="reference internal" href="pygrog.operator.MaskedFFT.html#pygrog.operator.MaskedFFT" title="pygrog.operator.MaskedFFT"><em>MaskedFFT</em></a>) – Underlying operator with a multi-dim <code class="docutils literal notranslate"><span class="pre">natural_shape</span></code> containing
 the temporal axis.</p></li>
 <li><p><strong>subspace_basis</strong> (<em>array-like</em><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#complex" title="(in Python v3.14)"><em>complex</em></a>) – <code class="docutils literal notranslate"><span class="pre">(K,</span> <span class="pre">T)</span></code> subspace basis matrix.</p></li>
 <li><p><strong>encoding_axis</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Axis (in the full sparse-tensor layout) carrying <code class="docutils literal notranslate"><span class="pre">T</span></code>.  Default
@@ -470,20 +486,20 @@ from <code class="docutils literal notranslate"><span class="pre">base_op.toepli
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="pygrog.gadgets.SubspaceSparseFFT.html"
+       href="pygrog.gadgets.with_offresonance.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">SubspaceSparseFFT</p>
+        <p class="prev-next-title">with_offresonance</p>
       </div>
     </a>
     <a class="right-next"
-       href="pygrog.gadgets.OffResonanceCorrection.html"
+       href="../api/operators.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">OffResonanceCorrection</p>
+        <p class="prev-next-title">Operators</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>

@@ -49,8 +49,6 @@ cuda = [
 ]
 dev-cpu = [
     # style / linting
-    "black",
-    "isort",
     "ruff",
     "pre-commit",
     # testing
@@ -107,20 +105,17 @@ version_scheme = "python-simplified-semver"
 local_scheme = "no-local-version"
 fallback_version = "v99-dev"
 
-# Formatting using black.
-[tool.black]
-line-length = 88
-target-version = ["py310"]  # Match your Python version
-
-# Sorting imports using isort.
-[tool.isort]
-profile="black"
-
-# Linting using ruff.
+# Formatting + linting using ruff.
 [tool.ruff]
 line-length = 88
+fix = true
 extend-exclude = ["__init__.py"]
-exclude = ["doc/**"]
+exclude = ["docs/**"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
 
 # RUFF section
 [tool.ruff.lint]
@@ -147,14 +142,14 @@ ignore = [
     "W191",  # tabs
     "E203",  # spacing before ':'
     "COM812", # missing trailing comma
-    "Q000", "Q001", "Q002",  # quote rules handled by Black
-    "I001", "I002",          # isort handled by Black
+    "Q000", "Q001", "Q002",  # quote rules handled by Ruff formatter
+    "I001", "I002",          # import sorting intentionally not enforced
     "S101",
 ]
 extend-ignore = [
-    "E501",  # line too long → Black wraps
-    "W191",  # tabs → Black uses spaces
-    "E203",  # colon spacing → Black style
+    "E501",  # line too long
+    "W191",  # tabs
+    "E203",  # colon spacing
 ]
 
 [tool.ruff.lint.isort]
@@ -163,7 +158,7 @@ split-on-trailing-comma = false
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
-inline-quotes = "single"
+inline-quotes = "double"
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"

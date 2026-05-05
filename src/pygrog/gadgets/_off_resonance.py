@@ -289,7 +289,6 @@ def _gridded_orc_basis(
     from .._base._nufft import nufft_adjoint
 
     L = int(B_orig.shape[-1])
-    n_grid = int(np.prod(grid_shape))
 
     # ----- 1. Adjoint-NUFFT time map ---------------------------------------
     coords_np = np.asarray(coords, dtype=np.float32)
@@ -396,13 +395,15 @@ def _gridded_orc_basis(
 
     # E_grid[g, b] = exp(t_grid[g] * w_active[b])
     # For numerical safety in float32 we use complex128 for the lstsq.
-    E_grid = np.exp(
-        np.outer(t_grid_np.ravel(), w_active)
-    ).astype(np.complex128)  # (n_grid, n_active)
+    E_grid = np.exp(np.outer(t_grid_np.ravel(), w_active)).astype(
+        np.complex128
+    )  # (n_grid, n_active)
 
     # Want: B_grid (n_grid, L) such that B_grid @ C_active ≈ E_grid.
     # Solve  C_active.T @ B_grid.T = E_grid.T  →  lstsq.
-    B_grid_T, *_ = np.linalg.lstsq(C_active.T.astype(np.complex128), E_grid.T, rcond=None)
+    B_grid_T, *_ = np.linalg.lstsq(
+        C_active.T.astype(np.complex128), E_grid.T, rcond=None
+    )
     B_grid = B_grid_T.T.astype(np.complex64)  # (n_grid, L)
 
     return B_grid.reshape(*grid_shape, L), t_grid_np

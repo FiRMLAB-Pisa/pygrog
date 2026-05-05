@@ -181,7 +181,7 @@ def lsmr(
     torch.Tensor
         Solution image.
     """
-    # Initialise via Golub–Kahan bidiagonalisation.
+    # Initialise via Golub-Kahan bidiagonalisation.
     # Pygrog convention: A = forward (image→kspace), A^H = adjoint (kspace→image).
     b = _normalize_kspace_shape(op, b)
     if x0 is not None:

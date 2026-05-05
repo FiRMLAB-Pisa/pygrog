@@ -59,13 +59,15 @@ Then open <http://localhost:8000> in your browser.
 
 ## Code style
 
-PyGROG enforces **black** formatting and **ruff** linting:
+PyGROG uses **Ruff-only** formatting and linting:
 
 ```bash
-black .
-ruff check --fix .
+ruff format .
 ruff check .
 ```
+
+`ruff check` is configured with `fix = true`, so safe auto-fixes are applied
+automatically.
 
 A pre-commit hook is provided for convenience:
 

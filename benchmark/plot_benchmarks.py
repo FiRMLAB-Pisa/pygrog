@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 import numpy as np
 
-
 _FONT_SCALE = 1.0
 
 
@@ -357,7 +356,7 @@ def plot_subspace(
 
     # Annotate per-coefficient NRMSE above each error tile
     cursor = 0
-    for i, (w, nrmse) in enumerate(zip(tile_widths, nrmse_vals, strict=False)):
+    for _i, (w, nrmse) in enumerate(zip(tile_widths, nrmse_vals, strict=False)):
         cx = cursor + w / 2.0
         ax_err.text(
             cx,
@@ -622,7 +621,7 @@ def plot_linop(results: dict, out: Path) -> None:
 def plot_runtime(
     results: dict, out: Path, *, exclude_dual_stream_gpu: bool = False
 ) -> None:
-    """2×2 panel: runtime / speedup factor / memory footprint / preprocessing.
+    """2x2 panel: runtime / speedup factor / memory footprint / preprocessing.
 
     Panel (0,0): SubspaceSparseFFT runtime per operation (adj/fwd), all devices.
     Panel (0,1): Speedup factor NUFFT/GROG per device.
@@ -884,7 +883,7 @@ def plot_runtime(
                 ax_sp.text(
                     bar.get_x() + bar.get_width() / 2,
                     v + margin_sp,
-                    f"{v:.1f}×",
+                    f"{v:.1f}x",
                     ha="center",
                     va="bottom",
                     fontsize=_fs(10),
@@ -926,7 +925,7 @@ def plot_runtime(
     )
     ax_mem.set_title(title_mem)
     legend_handles = list(ax_mem.get_legend_handles_labels()[0])
-    legend_labels  = list(ax_mem.get_legend_handles_labels()[1])
+    legend_labels = list(ax_mem.get_legend_handles_labels()[1])
     if legend_handles:
         ax_mem.legend(
             legend_handles,
@@ -953,28 +952,49 @@ def plot_runtime(
             # RAM label — centre of the RAM segment (inside)
             if ram >= min_seg:
                 ax_mem.text(
-                    x_c, ram / 2.0,
+                    x_c,
+                    ram / 2.0,
                     f"{ram:.1f}",
-                    ha="center", va="center", fontsize=fontsize,
-                    color="white", fontweight="bold", rotation=90, clip_on=True,
+                    ha="center",
+                    va="center",
+                    fontsize=fontsize,
+                    color="white",
+                    fontweight="bold",
+                    rotation=90,
+                    clip_on=True,
                 )
             # VRAM label — inside if tall enough, otherwise just above the bar
             if has_vram:
                 if vram >= min_seg:
                     ax_mem.text(
-                        x_c, ram + vram / 2.0,
+                        x_c,
+                        ram + vram / 2.0,
                         f"{vram:.1f}",
-                        ha="center", va="center", fontsize=fontsize,
-                        color="white", fontweight="bold", rotation=90, clip_on=True,
+                        ha="center",
+                        va="center",
+                        fontsize=fontsize,
+                        color="white",
+                        fontweight="bold",
+                        rotation=90,
+                        clip_on=True,
                     )
                 else:
                     ax_mem.text(
-                        x_c, total + margin,
+                        x_c,
+                        total + margin,
                         f"{vram:.1f}",
-                        ha="center", va="bottom", fontsize=fontsize,
-                        color="black", fontweight="bold", rotation=90,
-                        bbox={"boxstyle": "round,pad=0.1", "facecolor": "white",
-                              "edgecolor": "none", "alpha": 0.7},
+                        ha="center",
+                        va="bottom",
+                        fontsize=fontsize,
+                        color="black",
+                        fontweight="bold",
+                        rotation=90,
+                        bbox={
+                            "boxstyle": "round,pad=0.1",
+                            "facecolor": "white",
+                            "edgecolor": "none",
+                            "alpha": 0.7,
+                        },
                     )
 
     # ── (1,1) GROG preprocessing ─────────────────────────────────────────
@@ -1010,7 +1030,9 @@ def plot_runtime(
         ax_prep,
         [
             (b, m, s)
-            for b, m, s in zip(bar_prt, [plan_rt, interp_rt], [plan_std, interp_std], strict=False)
+            for b, m, s in zip(
+                bar_prt, [plan_rt, interp_rt], [plan_std, interp_std], strict=False
+            )
         ],
         _format_runtime,
     )

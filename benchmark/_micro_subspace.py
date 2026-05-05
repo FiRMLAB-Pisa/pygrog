@@ -74,9 +74,7 @@ def time_run(fn, *args, repeat=3, warmup=1, device="cpu"):
         if device == "cuda":
             torch.cuda.synchronize()
         times.append(time.perf_counter() - t0)
-    peak = (
-        torch.cuda.max_memory_allocated() / (1024**3) if device == "cuda" else 0.0
-    )
+    peak = torch.cuda.max_memory_allocated() / (1024**3) if device == "cuda" else 0.0
     return out, float(np.mean(times)), float(np.std(times)), peak
 
 

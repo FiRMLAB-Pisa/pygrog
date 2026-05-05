@@ -1,0 +1,726 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Gadgets with mri-nufft Data: Subspace and B0 ORC &#8212; PyGROG</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=3c74b3bc" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sg_gallery.css?v=fd6457a4" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sg_gallery-binder.css?v=f4aeca0c" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sg_gallery-dataframe.css?v=2082cf3c" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sg_gallery-rendered-html.css?v=1277b6f3" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="../../_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/sg-tags.js?v=d80f6fa4"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'generated/autoexamples/example03_gadgets';</script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Utils Tour: Coil Compression and NLINV" href="example04_calibration.html" />
+    <link rel="prev" title="Batched and Stacked Reconstructions with PyGROG" href="example02_stacked.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">PyGROG</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        
+        <ul class="nav bd-sidenav bd-sidenav__home-link">
+            <li class="toctree-l1">
+                <a class="reference internal" href="../../index.html">
+                    PyGROG
+                </a>
+            </li>
+        </ul>
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">User Guides</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../getting_started.html">Getting Started</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../getting_started.html">Getting Started</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html">Installation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../install.html">Installation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Examples</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="index.html">Examples</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="example01_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
+<li class="toctree-l2"><a class="reference internal" href="example02_stacked.html">Batched and Stacked Reconstructions with PyGROG</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
+<li class="toctree-l2"><a class="reference internal" href="example04_calibration.html">Utils Tour: Coil Compression and NLINV</a></li>
+<li class="toctree-l2"><a class="reference internal" href="example05_solvers.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
+<li class="toctree-l2"><a class="reference internal" href="example06_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
+<li class="toctree-l2"><a class="reference internal" href="example07_interoperability.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api/calib.html">Calibration</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.utils.coil_compression.html">coil_compression</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.utils.nlinv.html">nlinv</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api/grog.html">GROG</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.calib.GrogInterpolator.html">GrogInterpolator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api/gadgets.html">Gadgets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.gadgets.OffResonanceGadget.html">OffResonanceGadget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.gadgets.SubspaceGadget.html">SubspaceGadget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.gadgets.with_offresonance.html">with_offresonance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.gadgets.with_subspace.html">with_subspace</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api/operators.html">Operators</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.operator.SparseFFT.html">SparseFFT</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.operator.MaskedFFT.html">MaskedFFT</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api/interop.html">Interoperability</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.interop.GrogLinop.html">GrogLinop</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.interop.GrogLinearOp.html">GrogLinearOp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.interop.GrogLinearPhysics.html">GrogLinearPhysics</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Explanations</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../explanations/index.html">Explanations</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../explanations/grappa.html">The GRAPPA Algorithm</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../explanations/grog.html">GROG: GRAPPA Operator Gridding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../explanations/model_extensions.html">Model Extensions</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Miscellaneous</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../misc/contributors.html">Contributors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../misc/code_of_conduct.html">Code of Conduct</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../misc/license.html">License</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../misc/development.html">Developing PyGROG</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Related Projects</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference external" href="https://mind-inria.github.io/mri-nufft/">mri-nufft</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://mrpro.readthedocs.io/">mrpro</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://sigpy.readthedocs.io/">sigpy</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://deepinv.github.io/">deepinverse</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/FiRMLAB-Pisa/pygrog" target="_blank"
+   class="btn btn-sm btn-source-repository-button dropdown-item"
+   title="Source repository"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fab fa-github"></i>
+  </span>
+<span class="btn__text-container">Repository</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/FiRMLAB-Pisa/pygrog/edit/main/generated/autoexamples/example03_gadgets.rst" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/FiRMLAB-Pisa/pygrog/issues/new?title=Issue%20on%20page%20%2Fgenerated/autoexamples/example03_gadgets.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../../_sources/generated/autoexamples/example03_gadgets.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button pst-navbar-icon"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<button class="sidebar-toggle secondary-toggle btn btn-sm pst-navbar-icon" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Gadgets with mri-nufft Data: Subspace and B0 ORC</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#gadget-1-subspacesparsefft-for-multi-echo-fse">Gadget 1: SubspaceSparseFFT for Multi-Echo FSE</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog-subspace-gadget-api-call">PyGROG Subspace gadget API call</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#gadget-2-off-resonance-gadget">Gadget 2: Off-resonance gadget</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog-off-resonance-api-call">PyGROG off-resonance API call</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <div class="sphx-glr-download-link-note admonition note">
+<p class="admonition-title">Note</p>
+<p><a class="reference internal" href="#sphx-glr-download-generated-autoexamples-example03-gadgets-py"><span class="std std-ref">Go to the end</span></a>
+to download the full example code.</p>
+</div>
+<section class="sphx-glr-example-title" id="gadgets-with-mri-nufft-data-subspace-and-b0-orc">
+<span id="sphx-glr-generated-autoexamples-example03-gadgets-py"></span><h1>Gadgets with mri-nufft Data: Subspace and B0 ORC<a class="headerlink" href="#gadgets-with-mri-nufft-data-subspace-and-b0-orc" title="Link to this heading">#</a></h1>
+<p>This example uses a common data pipeline for both PyGROG gadgets:</p>
+<ol class="arabic simple">
+<li><p>BrainWeb phantom from <code class="docutils literal notranslate"><span class="pre">brainweb-dl</span></code>.</p></li>
+<li><p>Trajectory + k-space simulation + reference adjoint from <code class="docutils literal notranslate"><span class="pre">mri-nufft</span></code>.</p></li>
+<li><p>GROG gridding to feed <a class="reference internal" href="../pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT" title="pygrog.operator.SparseFFT"><code class="xref py py-class docutils literal notranslate"><span class="pre">SparseFFT</span></code></a>.</p></li>
+<li><p>Comparison against mri-nufft reference formulations.</p></li>
+</ol>
+<div class="highlight-Python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">mrinufft</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_operator</span><span class="p">,</span> <span class="n">initialize_2D_spiral</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mrinufft.density</span><span class="w"> </span><span class="kn">import</span> <span class="n">voronoi</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mrinufft.extras</span><span class="w"> </span><span class="kn">import</span> <span class="n">fse_simulation</span><span class="p">,</span> <span class="n">get_brainweb_map</span><span class="p">,</span> <span class="n">make_b0map</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mrinufft.operators.off_resonance</span><span class="w"> </span><span class="kn">import</span> <a href="https://mind-inria.github.io/mri-nufft/generated/_autosummary/mrinufft.operators.off_resonance.MRIFourierCorrected.html#mrinufft.operators.off_resonance.MRIFourierCorrected" title="mrinufft.operators.off_resonance.MRIFourierCorrected" class="sphx-glr-backref-module-mrinufft-operators-off_resonance sphx-glr-backref-type-py-class"><span class="n">MRIFourierCorrected</span></a>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mrinufft.trajectories.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">Acquisition</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pygrog.calib</span><span class="w"> </span><span class="kn">import</span> <a href="../pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator" title="pygrog.calib.GrogInterpolator" class="sphx-glr-backref-module-pygrog-calib sphx-glr-backref-type-py-class"><span class="n">GrogInterpolator</span></a>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pygrog.gadgets</span><span class="w"> </span><span class="kn">import</span> <a href="../pygrog.gadgets.OffResonanceGadget.html#pygrog.gadgets.OffResonanceGadget" title="pygrog.gadgets.OffResonanceGadget" class="sphx-glr-backref-module-pygrog-gadgets sphx-glr-backref-type-py-class"><span class="n">OffResonanceGadget</span></a><span class="p">,</span> <a href="../pygrog.gadgets.SubspaceGadget.html#pygrog.gadgets.SubspaceGadget" title="pygrog.gadgets.SubspaceGadget" class="sphx-glr-backref-module-pygrog-gadgets sphx-glr-backref-type-py-class"><span class="n">SubspaceGadget</span></a><span class="p">,</span> <span class="n">with_offresonance</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pygrog.operator</span><span class="w"> </span><span class="kn">import</span> <a href="../pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT" title="pygrog.operator.SparseFFT" class="sphx-glr-backref-module-pygrog-operator sphx-glr-backref-type-py-class"><span class="n">SparseFFT</span></a>
+
+
+<a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">m0</span></a><span class="p">,</span> <a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">t1</span></a><span class="p">,</span> <a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">t2</span></a> <span class="o">=</span> <span class="n">get_brainweb_map</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="sphx-glr-script-out highlight-none notranslate"><div class="highlight"><pre><span></span>/home/mcencini/.conda/envs/pygrog/lib/python3.13/site-packages/mrinufft/_utils.py:67: UserWarning: Samples will be rescaled to [-pi, pi), assuming they were in [-0.5, 0.5)
+  warnings.warn(
+</pre></div>
+</div>
+<section id="gadget-1-subspacesparsefft-for-multi-echo-fse">
+<h2>Gadget 1: SubspaceSparseFFT for Multi-Echo FSE<a class="headerlink" href="#gadget-1-subspacesparsefft-for-multi-echo-fse" title="Link to this heading">#</a></h2>
+<p>Learn a low-rank basis from a dictionary of FSE signal evolutions,
+then project GROG-interpolated k-space onto that basis to extract
+subspace coefficients.</p>
+<div class="highlight-Python notranslate"><div class="highlight"><pre><span></span>
+</pre></div>
+</div>
+<div class="sphx-glr-script-out highlight-none notranslate"><div class="highlight"><pre><span></span>/home/mcencini/.conda/envs/pygrog/lib/python3.13/site-packages/mrinufft/_utils.py:67: UserWarning: Samples will be rescaled to [-pi, pi), assuming they were in [-0.5, 0.5)
+  warnings.warn(
+</pre></div>
+</div>
+</section>
+<section id="pygrog-subspace-gadget-api-call">
+<h2>PyGROG Subspace gadget API call<a class="headerlink" href="#pygrog-subspace-gadget-api-call" title="Link to this heading">#</a></h2>
+<p>Build a GROG plan with temporal frames as the leading stack axis,
+interpolate all frames, and project onto the learned subspace basis
+via the public decorator/wrapper API.</p>
+<div class="highlight-Python notranslate"><div class="highlight"><pre><span></span><a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">n_shots</span></a><span class="p">,</span> <a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">n_read</span></a> <span class="o">=</span> <a href="https://docs.python.org/3/library/stdtypes.html#tuple" title="builtins.tuple" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">samples</span><span class="o">.</span><span class="n">shape</span></a><span class="p">[:</span><span class="mi">2</span><span class="p">]</span>
+<a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">coords_sub</span></a> <span class="o">=</span> <a href="https://numpy.org/doc/stable/reference/generated/numpy.broadcast_to.html#numpy.broadcast_to" title="numpy.broadcast_to" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-function"><span class="n">np</span><span class="o">.</span><span class="n">broadcast_to</span></a><span class="p">(</span>
+    <a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">coords</span></a><span class="p">[</span><a href="https://numpy.org/doc/stable/reference/constants.html#numpy.newaxis" title="numpy.newaxis" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-data"><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span></a><span class="p">,</span> <a href="https://numpy.org/doc/stable/reference/constants.html#numpy.newaxis" title="numpy.newaxis" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-data"><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span></a><span class="p">],</span>  <span class="c1"># (1, 1, n_shots, n_read, 2)</span>
+    <span class="p">(</span><a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">etl</span></a><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">n_shots</span></a><span class="p">,</span> <a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">n_read</span></a><span class="p">,</span> <span class="mi">2</span><span class="p">),</span>  <span class="c1"># (T, 1, n_shots, n_read, 2)</span>
+<span class="p">)</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+<a href="../pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator" title="pygrog.calib.GrogInterpolator" class="sphx-glr-backref-module-pygrog-calib sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">grog_sub</span></a> <span class="o">=</span> <a href="../pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator" title="pygrog.calib.GrogInterpolator" class="sphx-glr-backref-module-pygrog-calib sphx-glr-backref-type-py-class"><span class="n">GrogInterpolator</span></a><span class="p">(</span>
+    <a href="https://docs.python.org/3/library/stdtypes.html#tuple" title="builtins.tuple" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">shape</span></a><span class="o">=</span><a href="https://docs.python.org/3/library/stdtypes.html#tuple" title="builtins.tuple" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">shape</span></a><span class="p">,</span> <a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">coords</span></a><span class="o">=</span><a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">coords_sub</span></a><span class="p">,</span> <span class="n">kernel_width</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">oversamp</span><span class="o">=</span><span class="mf">1.25</span><span class="p">,</span> <span class="n">image_shape</span><span class="o">=</span><a href="https://docs.python.org/3/library/stdtypes.html#tuple" title="builtins.tuple" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">shape</span></a>
+<span class="p">)</span>
+<a href="../pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator.calc_interp_table" title="pygrog.calib.GrogInterpolator.calc_interp_table" class="sphx-glr-backref-module-pygrog-calib sphx-glr-backref-type-py-method"><span class="n">grog_sub</span><span class="o">.</span><span class="n">calc_interp_table</span></a><span class="p">(</span><a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">calib_cart</span></a><span class="p">,</span> <span class="n">lamda</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span> <span class="n">precision</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<a href="../pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT" title="pygrog.operator.SparseFFT" class="sphx-glr-backref-module-pygrog-operator sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">base_op_sub</span></a> <span class="o">=</span> <a href="../pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT" title="pygrog.operator.SparseFFT" class="sphx-glr-backref-module-pygrog-operator sphx-glr-backref-type-py-class"><span class="n">SparseFFT</span></a><span class="p">(</span><span class="n">plan</span><span class="o">=</span><a href="../pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator" title="pygrog.calib.GrogInterpolator" class="sphx-glr-backref-module-pygrog-calib sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">grog_sub</span></a><span class="o">.</span><span class="n">plan</span><span class="p">,</span> <a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">smaps</span></a><span class="o">=</span><a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">smaps</span></a><span class="p">)</span>
+
+<span class="c1"># kspace_frames: (T, C, n_shots*n_read) -&gt; (T, C, 1, n_shots, n_read) -&gt; (1, C, T, 1, n_shots, n_read)</span>
+<a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">kspace_sub</span></a> <span class="o">=</span> <span class="p">(</span>
+    <a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">kspace_frames</span></a><span class="o">.</span><span class="n">reshape</span><span class="p">(</span>
+        <a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">etl</span></a><span class="p">,</span> <a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">n_coils</span></a><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">n_shots</span></a><span class="p">,</span> <a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">n_read</span></a>
+    <span class="p">)</span>  <span class="c1"># (T, C, 1, n_shots, n_read)</span>
+    <span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">)[</span><a href="https://numpy.org/doc/stable/reference/constants.html#numpy.newaxis" title="numpy.newaxis" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-data"><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span></a><span class="p">]</span>  <span class="c1"># (1, C, T, 1, n_shots, n_read)</span>
+<span class="p">)</span>
+<a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">sparse_sub</span></a> <span class="o">=</span> <a href="../pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator.interpolate" title="pygrog.calib.GrogInterpolator.interpolate" class="sphx-glr-backref-module-pygrog-calib sphx-glr-backref-type-py-method"><span class="n">grog_sub</span><span class="o">.</span><span class="n">interpolate</span></a><span class="p">(</span><a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">kspace_sub</span></a><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">n_coils</span></a><span class="p">,</span> <span class="o">*</span><a href="https://docs.python.org/3/library/stdtypes.html#tuple" title="builtins.tuple" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">grog_sub</span><span class="o">.</span><span class="n">plan</span><span class="o">.</span><span class="n">natural_shape</span></a><span class="p">)</span>
+
+<span class="c1"># Learn a rank-K temporal basis Phi from the training dictionary (K, T).</span>
+<a href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="torch.Tensor" class="sphx-glr-backref-module-torch sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">basis_torch</span></a> <span class="o">=</span> <a href="https://docs.pytorch.org/docs/stable/generated/torch.as_tensor.html#torch.as_tensor" title="torch.as_tensor" class="sphx-glr-backref-module-torch sphx-glr-backref-type-py-function"><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span></a><span class="p">(</span><span class="n">_estimate_basis</span><span class="p">(</span><a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">train</span><span class="o">.</span><span class="n">T</span></a><span class="p">,</span> <a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">rank</span></a><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><a href="https://docs.pytorch.org/docs/stable/tensor_attributes.html#torch.dtype" title="torch.dtype" class="sphx-glr-backref-module-torch sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">torch</span><span class="o">.</span><span class="n">complex64</span></a><span class="p">)</span>
+
+<span class="c1"># Preferred public construction via wrapper class.</span>
+<a href="../pygrog.gadgets.SubspaceGadget.html#pygrog.gadgets.SubspaceGadget" title="pygrog.gadgets.SubspaceGadget" class="sphx-glr-backref-module-pygrog-gadgets sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">sub_op</span></a> <span class="o">=</span> <a href="../pygrog.gadgets.SubspaceGadget.html#pygrog.gadgets.SubspaceGadget" title="pygrog.gadgets.SubspaceGadget" class="sphx-glr-backref-module-pygrog-gadgets sphx-glr-backref-type-py-class"><span class="n">SubspaceGadget</span></a><span class="p">(</span><a href="../pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT" title="pygrog.operator.SparseFFT" class="sphx-glr-backref-module-pygrog-operator sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">base_op_sub</span></a><span class="p">,</span> <a href="https://docs.pytorch.org/docs/stable/tensors.html#torch.Tensor" title="torch.Tensor" class="sphx-glr-backref-module-torch sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">basis_torch</span></a><span class="p">,</span> <span class="n">encoding_axis</span><span class="o">=-</span><span class="mi">5</span><span class="p">)</span>
+<span class="c1"># Equivalent decorator-style wrapping (same behavior):</span>
+<span class="c1"># sub_op = with_subspace(base_op_sub, basis_torch, encoding_axis=-5)</span>
+
+<a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">coeff_pygrog</span></a> <span class="o">=</span> <a href="https://numpy.org/doc/stable/reference/generated/numpy.asarray.html#numpy.asarray" title="numpy.asarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-function"><span class="n">np</span><span class="o">.</span><span class="n">asarray</span></a><span class="p">(</span><a href="../pygrog.gadgets.SubspaceGadget.html#pygrog.gadgets.SubspaceGadget" title="pygrog.gadgets.SubspaceGadget" class="sphx-glr-backref-module-pygrog-gadgets sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">sub_op</span></a><span class="o">.</span><span class="n">adjoint</span><span class="p">(</span><a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">sparse_sub</span></a><span class="p">))</span>
+<span class="c1"># Drop leading B=1 batch axis -&gt; (rank, H, W)</span>
+<a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">coeff_pygrog</span></a> <span class="o">=</span> <a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">coeff_pygrog</span></a><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+</pre></div>
+</div>
+<p>Display all coefficients: one row per coefficient.</p>
+<div class="highlight-Python notranslate"><div class="highlight"><pre><span></span><a href="https://matplotlib.org/stable/api/_as_gen/matplotlib.figure.Figure.html#matplotlib.figure.Figure" title="matplotlib.figure.Figure" class="sphx-glr-backref-module-matplotlib-figure sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">fig</span></a><span class="p">,</span> <a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">axes</span></a> <span class="o">=</span> <a href="https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.subplots.html#matplotlib.pyplot.subplots" title="matplotlib.pyplot.subplots" class="sphx-glr-backref-module-matplotlib-pyplot sphx-glr-backref-type-py-function"><span class="n">plt</span><span class="o">.</span><span class="n">subplots</span></a><span class="p">(</span><a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">rank</span></a><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">11</span><span class="p">,</span> <span class="mf">3.5</span> <span class="o">*</span> <a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">rank</span></a><span class="p">),</span> <span class="n">squeeze</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</pre></div>
+</div>
+<img src="../../_images/sphx_glr_example03_gadgets_001.png" srcset="../../_images/sphx_glr_example03_gadgets_001.png" alt="GT coeff #1, NUFFT coeff, PyGROG coeff, GT coeff #2, NUFFT coeff, PyGROG coeff, GT coeff #3, NUFFT coeff, PyGROG coeff, GT coeff #4, NUFFT coeff, PyGROG coeff" class = "sphx-glr-single-img"/></section>
+<section id="gadget-2-off-resonance-gadget">
+<h2>Gadget 2: Off-resonance gadget<a class="headerlink" href="#gadget-2-off-resonance-gadget" title="Link to this heading">#</a></h2>
+<p>Model and correct for B0 field inhomogeneity on GROG-gridded data.
+Create a field map and per-readout timing basis, then apply ORC to reconstruct
+sharp images despite off-resonance blurring.</p>
+<div class="highlight-Python notranslate"><div class="highlight"><pre><span></span>
+</pre></div>
+</div>
+<div class="sphx-glr-script-out highlight-none notranslate"><div class="highlight"><pre><span></span>/home/mcencini/.conda/envs/pygrog/lib/python3.13/site-packages/mrinufft/_array_compat.py:122: UserWarning: The input is CPU array but not C-contiguous.
+  warnings.warn(&quot;The input is CPU array but not C-contiguous. &quot;)
+</pre></div>
+</div>
+</section>
+<section id="pygrog-off-resonance-api-call">
+<h2>PyGROG off-resonance API call<a class="headerlink" href="#pygrog-off-resonance-api-call" title="Link to this heading">#</a></h2>
+<p>Apply <a class="reference internal" href="../pygrog.gadgets.OffResonanceGadget.html#pygrog.gadgets.OffResonanceGadget" title="pygrog.gadgets.OffResonanceGadget"><code class="xref py py-class docutils literal notranslate"><span class="pre">OffResonanceGadget</span></code></a> to correct
+off-resonance blurring. The wrapper automatically constructs a low-rank
+temporal basis for the correction term.</p>
+<div class="highlight-Python notranslate"><div class="highlight"><pre><span></span><a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">n_shots</span></a><span class="p">,</span> <a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">n_read</span></a> <span class="o">=</span> <a href="https://docs.python.org/3/library/stdtypes.html#tuple" title="builtins.tuple" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">samples</span><span class="o">.</span><span class="n">shape</span></a><span class="p">[:</span><span class="mi">2</span><span class="p">]</span>
+
+<a href="../pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT" title="pygrog.operator.SparseFFT" class="sphx-glr-backref-module-pygrog-operator sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">base_op_orc</span></a> <span class="o">=</span> <a href="../pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT" title="pygrog.operator.SparseFFT" class="sphx-glr-backref-module-pygrog-operator sphx-glr-backref-type-py-class"><span class="n">SparseFFT</span></a><span class="p">(</span><span class="n">plan</span><span class="o">=</span><a href="../pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator" title="pygrog.calib.GrogInterpolator" class="sphx-glr-backref-module-pygrog-calib sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">grog</span></a><span class="o">.</span><span class="n">plan</span><span class="p">)</span>  <span class="c1"># no smaps</span>
+<a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">sqrt_w_orc</span></a> <span class="o">=</span> <a href="https://numpy.org/doc/stable/reference/generated/numpy.asarray.html#numpy.asarray" title="numpy.asarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-function"><span class="n">np</span><span class="o">.</span><span class="n">asarray</span></a><span class="p">(</span><a href="../pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator" title="pygrog.calib.GrogInterpolator" class="sphx-glr-backref-module-pygrog-calib sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">grog</span></a><span class="o">.</span><span class="n">plan</span><span class="o">.</span><span class="n">pre_weights</span><span class="p">)</span>  <span class="c1"># (n_shots, n_read, kw)</span>
+
+<a href="../pygrog.gadgets.OffResonanceGadget.html#pygrog.gadgets.OffResonanceGadget" title="pygrog.gadgets.OffResonanceGadget" class="sphx-glr-backref-module-pygrog-gadgets sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">orc_pygrog</span></a> <span class="o">=</span> <a href="../pygrog.gadgets.OffResonanceGadget.html#pygrog.gadgets.OffResonanceGadget" title="pygrog.gadgets.OffResonanceGadget" class="sphx-glr-backref-module-pygrog-gadgets sphx-glr-backref-type-py-class"><span class="n">OffResonanceGadget</span></a><span class="p">(</span>
+    <a href="../pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT" title="pygrog.operator.SparseFFT" class="sphx-glr-backref-module-pygrog-operator sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">base_op_orc</span></a><span class="p">,</span>
+    <span class="n">field_map</span><span class="o">=</span><a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">b0_map</span></a><span class="p">,</span>
+    <a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">readout_time</span></a><span class="o">=</span><a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">readout_time</span></a><span class="p">,</span>
+    <span class="n">mask</span><span class="o">=</span><a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">brain_mask</span></a><span class="p">,</span>
+    <span class="n">n_components</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>
+    <span class="n">method</span><span class="o">=</span><span class="s2">&quot;svd&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># GROG-interpolate the off-resonance k-space and pre-weight.</span>
+<a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">sparse_off</span></a> <span class="o">=</span> <a href="../pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator.interpolate" title="pygrog.calib.GrogInterpolator.interpolate" class="sphx-glr-backref-module-pygrog-calib sphx-glr-backref-type-py-method"><span class="n">grog</span><span class="o">.</span><span class="n">interpolate</span></a><span class="p">(</span>
+    <a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">kspace_off</span></a><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">n_coils</span></a><span class="p">,</span> <a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">n_shots</span></a><span class="p">,</span> <a href="https://docs.python.org/3/library/functions.html#int" title="builtins.int" class="sphx-glr-backref-module-builtins sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">n_read</span></a><span class="p">),</span>
+    <span class="n">ret_image</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">*</span> <a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">sqrt_w_orc</span></a><span class="p">[</span><a href="https://numpy.org/doc/stable/reference/constants.html#numpy.newaxis" title="numpy.newaxis" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-data"><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span></a><span class="p">]</span>
+
+<span class="c1"># Adjoint returns (n_coils, *image_shape) — combine with smaps</span>
+<a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">result_orc</span></a> <span class="o">=</span> <a href="../pygrog.gadgets.OffResonanceGadget.html#pygrog.gadgets.OffResonanceGadget" title="pygrog.gadgets.OffResonanceGadget" class="sphx-glr-backref-module-pygrog-gadgets sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">orc_pygrog</span></a><span class="o">.</span><span class="n">adjoint</span><span class="p">(</span><a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">sparse_off</span></a><span class="p">)</span>  <span class="c1"># (n_coils, *image_shape)</span>
+<a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">image_pygrog_orc</span></a> <span class="o">=</span> <a href="https://numpy.org/doc/stable/reference/generated/numpy.ufunc.html#numpy.ufunc" title="numpy.ufunc" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">np</span><span class="o">.</span><span class="n">abs</span></a><span class="p">((</span><a href="https://numpy.org/doc/stable/reference/generated/numpy.asarray.html#numpy.asarray" title="numpy.asarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-function"><span class="n">np</span><span class="o">.</span><span class="n">asarray</span></a><span class="p">(</span><a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">result_orc</span></a><span class="p">)</span> <span class="o">*</span> <a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">smaps</span></a><span class="o">.</span><span class="n">conj</span><span class="p">())</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+
+<span class="c1"># Compose gadgets by double-decoration (recommended over instantiating</span>
+<span class="c1"># internal sparse classes directly):</span>
+<span class="c1"># op_joint = with_offresonance(</span>
+<span class="c1">#     with_subspace(base_op_sub, basis_torch, encoding_axis=-5),</span>
+<span class="c1">#     b0_map=b0_map,</span>
+<span class="c1">#     readout_time=readout_time,</span>
+<span class="c1">#     mask=brain_mask,</span>
+<span class="c1">#     L=-1,</span>
+<span class="c1">#     method=&quot;svd&quot;,</span>
+<span class="c1"># )</span>
+</pre></div>
+</div>
+<div class="highlight-Python notranslate"><div class="highlight"><pre><span></span><a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">truth_orc</span></a> <span class="o">=</span> <span class="n">_normalize_unit</span><span class="p">(</span><a href="https://numpy.org/doc/stable/reference/generated/numpy.ufunc.html#numpy.ufunc" title="numpy.ufunc" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">np</span><span class="o">.</span><span class="n">abs</span></a><span class="p">(</span><a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="numpy.ndarray" class="sphx-glr-backref-module-numpy sphx-glr-backref-type-py-class sphx-glr-backref-instance"><span class="n">image_orc</span></a><span class="p">))</span>
+</pre></div>
+</div>
+<img src="../../_images/sphx_glr_example03_gadgets_002.png" srcset="../../_images/sphx_glr_example03_gadgets_002.png" alt="Ground truth, NUFFT non-corrected, NUFFT corrected, PyGROG corrected" class = "sphx-glr-single-img"/><p class="sphx-glr-timing"><strong>Total running time of the script:</strong> (0 minutes 50.639 seconds)</p>
+<div class="sphx-glr-footer sphx-glr-footer-example docutils container" id="sphx-glr-download-generated-autoexamples-example03-gadgets-py">
+<div class="sphx-glr-download sphx-glr-download-jupyter docutils container">
+<p><a class="reference download internal" download="" href="../../_downloads/6624b7ecd7ab98d469333a088af0e685/example03_gadgets.ipynb"><code class="xref download docutils literal notranslate"><span class="pre">Download</span> <span class="pre">Jupyter</span> <span class="pre">notebook:</span> <span class="pre">example03_gadgets.ipynb</span></code></a></p>
+</div>
+<div class="sphx-glr-download sphx-glr-download-python docutils container">
+<p><a class="reference download internal" download="" href="../../_downloads/13fd31be3591b4f74185937317b3779d/example03_gadgets.py"><code class="xref download docutils literal notranslate"><span class="pre">Download</span> <span class="pre">Python</span> <span class="pre">source</span> <span class="pre">code:</span> <span class="pre">example03_gadgets.py</span></code></a></p>
+</div>
+<div class="sphx-glr-download sphx-glr-download-zip docutils container">
+<p><a class="reference download internal" download="" href="../../_downloads/8a88baf12a87e471cbbdcd784de4a835/example03_gadgets.zip"><code class="xref download docutils literal notranslate"><span class="pre">Download</span> <span class="pre">zipped:</span> <span class="pre">example03_gadgets.zip</span></code></a></p>
+</div>
+</div>
+<p class="sphx-glr-signature"><a class="reference external" href="https://sphinx-gallery.github.io">Gallery generated by Sphinx-Gallery</a></p>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="example02_stacked.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Batched and Stacked Reconstructions with PyGROG</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="example04_calibration.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Utils Tour: Coil Compression and NLINV</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item"><div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#gadget-1-subspacesparsefft-for-multi-echo-fse">Gadget 1: SubspaceSparseFFT for Multi-Echo FSE</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog-subspace-gadget-api-call">PyGROG Subspace gadget API call</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#gadget-2-off-resonance-gadget">Gadget 2: Off-resonance gadget</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pygrog-off-resonance-api-call">PyGROG off-resonance API call</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By PyGROG contributors
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, PyGROG contributors.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

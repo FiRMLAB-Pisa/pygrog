@@ -73,7 +73,7 @@ class _GrogMeasureFn(Function):
         return op.forward(x)  # SparseFFT.forward  ≡  forward NUFFT  ≡  A
 
     @staticmethod
-    def setup_context(ctx, inputs, output):
+    def setup_context(ctx, inputs, _output):
         _, op = inputs
         ctx.op = op
 
@@ -100,7 +100,7 @@ class _GrogBackprojectFn(Function):
         return op.adjoint(y)  # SparseFFT.adjoint  ≡  adjoint NUFFT  ≡  A^H
 
     @staticmethod
-    def setup_context(ctx, inputs, output):
+    def setup_context(ctx, inputs, _output):
         y, op = inputs
         ctx.op = op
         ctx.y_shape = y.shape

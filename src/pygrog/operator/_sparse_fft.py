@@ -282,11 +282,11 @@ class SparseFFT(SolveMixin):
         # frequently has a few cells (e.g. DC for radial trajectories)
         # that absorb most samples; doing those via a sum-reduction avoids
         # severe atomicAdd contention.  Computed lazily.
-        self._hot_uidx = None         # (n_hot,) int64 grid indices
-        self._hot_starts = None       # list[int] starts in sorted sample order
-        self._hot_ends = None         # list[int] ends   in sorted sample order
+        self._hot_uidx = None  # (n_hot,) int64 grid indices
+        self._hot_starts = None  # list[int] starts in sorted sample order
+        self._hot_ends = None  # list[int] ends   in sorted sample order
         self._cold_seg_starts = None  # list[int] cold range starts
-        self._cold_seg_ends = None    # list[int] cold range ends
+        self._cold_seg_ends = None  # list[int] cold range ends
 
         # Packed-stack arrays — built lazily on first stacked op (see
         # ``_packed_arrays``).  Cached per compute device.
@@ -344,15 +344,13 @@ class SparseFFT(SolveMixin):
         sorted_idx = self.indices.to(device)
 
         # --- hot-cell detection -------------------------------------------
-        unique_idx, counts = torch.unique_consecutive(
-            sorted_idx, return_counts=True
-        )
+        unique_idx, counts = torch.unique_consecutive(sorted_idx, return_counts=True)
         ends = torch.cumsum(counts, 0)
         starts = ends - counts
         # Threshold: cells with > sqrt(n_samples) entries are "hot".
         # In practice this catches the DC peak and a handful of high-density
         # cells that would otherwise serialise atomicAdd.
-        threshold = max(1024, int(self.n_samples ** 0.5))
+        threshold = max(1024, int(self.n_samples**0.5))
         hot_mask = counts > threshold
         n_hot = int(hot_mask.sum().item())
         if n_hot > 0:
@@ -369,7 +367,7 @@ class SparseFFT(SolveMixin):
             he = hot_ends.cpu().tolist()
             cold_s, cold_e = [], []
             prev = 0
-            for s, e in zip(hs, he):
+            for s, e in zip(hs, he, strict=False):
                 if s > prev:
                     cold_s.append(prev)
                     cold_e.append(s)
@@ -414,13 +412,15 @@ class SparseFFT(SolveMixin):
             and indices.numel() == self.n_samples
         ):
             # Cold segments — contiguous slices, low-contention atomic.
-            for s, e in zip(self._cold_seg_starts, self._cold_seg_ends):
+            for s, e in zip(self._cold_seg_starts, self._cold_seg_ends, strict=False):
                 ext.scatter_add(grid, data[s:e], indices[s:e], sqrt_w[s:e])
             # Hot segments — sum-reduce each, then a single index_add.
             hot_sums = torch.empty(
                 len(self._hot_starts), dtype=data.dtype, device=data.device
             )
-            for i, (s, e) in enumerate(zip(self._hot_starts, self._hot_ends)):
+            for i, (s, e) in enumerate(
+                zip(self._hot_starts, self._hot_ends, strict=False)
+            ):
                 hot_sums[i] = (data[s:e] * sqrt_w[s:e]).sum()
             grid.index_add_(0, self._hot_uidx, hot_sums)
             return
@@ -522,7 +522,10 @@ class SparseFFT(SolveMixin):
             len(nat) > 1
             and tuple(int(s) for s in sparse_kspace.shape[-len(nat) :]) == nat
         ):
-            flat_shape = (*tuple(int(s) for s in sparse_kspace.shape[:-len(nat)]), self.n_samples)
+            flat_shape = (
+                *tuple(int(s) for s in sparse_kspace.shape[: -len(nat)]),
+                self.n_samples,
+            )
             sparse_kspace = sparse_kspace.reshape(flat_shape)
 
         # x now has trailing (n_coils, n_samples).  Split prefix into (*B, *S).
@@ -699,7 +702,7 @@ class SparseFFT(SolveMixin):
 
     @with_torch
     def _adjoint_flat(self, image: torch.Tensor) -> torch.Tensor:
-        """Flat-output adjoint: returns (*B, *S, n_coils, n_samples)."""
+        """Flat-output adjoint: returns ``(*B, *S, n_coils, n_samples)``."""
         s_shape = self.stack_shape
         s_ndim = len(s_shape)
         # Single-frame ndim (no batch, no stack):
@@ -827,10 +830,7 @@ class SparseFFT(SolveMixin):
         )
 
         for c in range(n_coils):
-            if self.smaps is not None:
-                coil_imgs = image_d * smaps[c]  # (S, *image_shape)
-            else:
-                coil_imgs = image_d[:, c]  # (S, *image_shape)
+            coil_imgs = image_d * smaps[c] if self.smaps is not None else image_d[:, c]
             padded.zero_()
             padded[slc] = coil_imgs
             kgrid = fft(padded, axes=self.fft_axes)  # (S, *grid_shape)

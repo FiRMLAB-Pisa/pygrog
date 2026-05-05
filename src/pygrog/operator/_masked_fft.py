@@ -86,8 +86,15 @@ class MaskedFFTPlan:
     """
 
     def __init__(
-        self, grid_shape, image_shape, stack_shape, mask, density,
-        *, coords=None, dcf=None,
+        self,
+        grid_shape,
+        image_shape,
+        stack_shape,
+        mask,
+        density,
+        *,
+        coords=None,
+        dcf=None,
     ):
         self.grid_shape = tuple(int(s) for s in grid_shape)
         self.image_shape = tuple(int(s) for s in image_shape)

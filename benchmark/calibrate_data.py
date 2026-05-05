@@ -63,13 +63,15 @@ def main() -> None:
     cal_width = args.cal_width
 
     print(f"Loading benchmark data from {data_dir} ...")
-    kspace = np.load(data_dir / "kspace.npy")        # (T, C, k1, k0)
+    kspace = np.load(data_dir / "kspace.npy")  # (T, C, k1, k0)
     trajectory = np.load(data_dir / "trajectory.npy")  # (T, k1, k0, ndim)
-    dcf = np.load(data_dir / "dcf.npy")              # (T, k1, k0)
+    dcf = np.load(data_dir / "dcf.npy")  # (T, k1, k0)
 
     n_frames, n_coils, n_spokes, n_readout = kspace.shape
     ndim = trajectory.shape[-1]
-    print(f"  kspace:     {kspace.shape}  (T={n_frames}, C={n_coils}, spokes={n_spokes}, readout={n_readout})")
+    print(
+        f"  kspace:     {kspace.shape}  (T={n_frames}, C={n_coils}, spokes={n_spokes}, readout={n_readout})"
+    )
     print(f"  trajectory: {trajectory.shape}")
     print(f"  dcf:        {dcf.shape}")
 
@@ -103,7 +105,7 @@ def main() -> None:
     print(f"Saved smaps.npy -> {data_dir / 'smaps.npy'}")
 
     # -----------------------------------------------------------------------
-    # QC figure: 3 rows (axial, sagittal, coronal) × (1 + n_coils) columns
+    # QC figure: 3 rows (axial, sagittal, coronal) x (1 + n_coils) columns
     #   col 0       : NLINV image estimate — magnitude, grey
     #   col 1..C    : sensitivity maps — RGB hue=phase, value=magnitude
     # -----------------------------------------------------------------------

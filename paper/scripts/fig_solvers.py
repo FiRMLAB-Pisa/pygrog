@@ -17,7 +17,7 @@ from mrinufft import get_operator, initialize_2D_spiral
 from mrinufft.density import voronoi
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import (  # noqa: E402
+from _common import (
     POSTER_STYLE,
     nrmse,
     normalize,
@@ -25,9 +25,9 @@ from _common import (  # noqa: E402
     synthetic_smaps,
 )
 
-from pygrog import PolynomialPreconditioner  # noqa: E402
-from pygrog.calib import GrogInterpolator  # noqa: E402
-from pygrog.operator import MaskedFFT  # noqa: E402
+from pygrog import PolynomialPreconditioner
+from pygrog.calib import GrogInterpolator
+from pygrog.operator import MaskedFFT
 
 
 def main() -> None:
@@ -40,14 +40,21 @@ def main() -> None:
     smaps = synthetic_smaps(shape, n_coils=n_coils)
 
     nufft = get_operator("finufft")(
-        samples=samples, shape=shape, n_coils=n_coils,
-        smaps=smaps, density=density, squeeze_dims=True,
+        samples=samples,
+        shape=shape,
+        n_coils=n_coils,
+        smaps=smaps,
+        density=density,
+        squeeze_dims=True,
     )
     kspace = nufft.op(image.astype(np.complex64))
 
     grog = GrogInterpolator(
-        shape=shape, coords=samples.reshape(48, 600, 2),
-        kernel_width=2, oversamp=2.0, image_shape=shape,
+        shape=shape,
+        coords=samples.reshape(48, 600, 2),
+        kernel_width=2,
+        oversamp=2.0,
+        image_shape=shape,
     )
     calib_full = (smaps * image[None, ...]).astype(np.complex64)
     grog.calc_interp_table(calib_full, lamda=0.01, precision=1)
@@ -59,26 +66,41 @@ def main() -> None:
 
     res_cg, res_lsmr, res_pcg = [], [], []
 
-    img_cg = op.solve(b, method="cg", max_iter=20, damp=1e-3,
-                      callback=lambda k, x, r: res_cg.append(r))
-    img_lsmr = op.solve(b, method="lsmr", max_iter=20,
-                        callback=lambda k, x, r: res_lsmr.append(r))
+    img_cg = op.solve(
+        b,
+        method="cg",
+        max_iter=20,
+        damp=1e-3,
+        callback=lambda _k, _x, r: res_cg.append(r),
+    )
+    img_lsmr = op.solve(
+        b,
+        method="lsmr",
+        max_iter=20,
+        callback=lambda _k, _x, r: res_lsmr.append(r),
+    )
 
     pc = PolynomialPreconditioner(op, degree=3, n_power_iter=10)
-    img_pcg = op.solve(b, method="cg", max_iter=20, damp=1e-3, preconditioner=pc,
-                       callback=lambda k, x, r: res_pcg.append(r))
+    img_pcg = op.solve(
+        b,
+        method="cg",
+        max_iter=20,
+        damp=1e-3,
+        preconditioner=pc,
+        callback=lambda _k, _x, r: res_pcg.append(r),
+    )
 
     ref = normalize(image)
     metrics = {
-        "CG":   nrmse(normalize(np.abs(img_cg.cpu().numpy())), ref),
+        "CG": nrmse(normalize(np.abs(img_cg.cpu().numpy())), ref),
         "LSMR": nrmse(normalize(np.abs(img_lsmr.cpu().numpy())), ref),
-        f"PCG (deg={pc.degree})":
-                nrmse(normalize(np.abs(img_pcg.cpu().numpy())), ref),
+        f"PCG (deg={pc.degree})": nrmse(normalize(np.abs(img_pcg.cpu().numpy())), ref),
     }
 
     with POSTER_STYLE():
-        fig, axes = plt.subplots(1, 2, figsize=(13, 5.0),
-                                 gridspec_kw={"width_ratios": [1.4, 1.0]})
+        fig, axes = plt.subplots(
+            1, 2, figsize=(13, 5.0), gridspec_kw={"width_ratios": [1.4, 1.0]}
+        )
         axes[0].semilogy(res_cg, "-o", label="CG", lw=2)
         axes[0].semilogy(res_lsmr, "-s", label="LSMR", lw=2)
         axes[0].semilogy(res_pcg, "-^", label=f"PCG (deg={pc.degree})", lw=2)
@@ -90,13 +112,18 @@ def main() -> None:
 
         names = list(metrics.keys())
         vals = list(metrics.values())
-        bars = axes[1].bar(names, vals,
-                           color=["#1f77b4", "#ff7f0e", "#2ca02c"])
+        bars = axes[1].bar(names, vals, color=["#1f77b4", "#ff7f0e", "#2ca02c"])
         axes[1].set_ylabel("NRMSE vs ground truth")
         axes[1].set_title("Final-image accuracy")
-        for b_, v in zip(bars, vals):
-            axes[1].text(b_.get_x() + b_.get_width() / 2.0, v,
-                         f"{v:.3f}", ha="center", va="bottom", fontsize=12)
+        for b_, v in zip(bars, vals, strict=False):
+            axes[1].text(
+                b_.get_x() + b_.get_width() / 2.0,
+                v,
+                f"{v:.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=12,
+            )
         axes[1].tick_params(axis="x", rotation=15)
 
         fig.tight_layout()

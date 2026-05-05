@@ -1,64 +1,55 @@
 API Reference
 =============
 
-Calibration
------------
+Public API grouped by subpackage.
 
-Routines for GRAPPA kernel estimation and GROG interpolation.
+Calibration Helpers
+-------------------
 
 .. autosummary::
-   :toctree: generated
-   :nosignatures:
 
-   pygrog.calib.KernelTable
+   pygrog.utils.coil_compression
+   pygrog.utils.nlinv
+
+GROG
+----
+
+.. autosummary::
+
    pygrog.calib.GrogInterpolator
-
-Operators
----------
-
-Sparse FFT operator for non-Cartesian MRI.
-
-.. autosummary::
-   :toctree: generated
-   :nosignatures:
-
-   pygrog.operator.SparseFFT
 
 Gadgets
 -------
 
-Reconstruction gadgets that wrap a base :class:`~pygrog.operator.SparseFFT`.
-
 .. autosummary::
-   :toctree: generated
-   :nosignatures:
 
-   pygrog.gadgets.SubspaceProjection
-   pygrog.gadgets.SubspaceSparseFFT
+   pygrog.gadgets.SubspaceGadget
+   pygrog.gadgets.OffResonanceGadget
    pygrog.gadgets.with_subspace
-   pygrog.gadgets.OffResonanceCorrection
-   pygrog.gadgets.OffResonanceSparseFFT
+   pygrog.gadgets.with_offresonance
 
-Utils
------
-
-Pre-processing utilities and coil calibration algorithms.
+Operators
+---------
 
 .. autosummary::
-   :toctree: generated
-   :nosignatures:
 
-   pygrog.utils.coil_compress
-   pygrog.utils.nlinv_calib
+   pygrog.operator.SparseFFT
+   pygrog.operator.MaskedFFT
 
 Interoperability
 ----------------
 
-Adapters for third-party reconstruction frameworks.
-
 .. autosummary::
-   :toctree: generated
-   :nosignatures:
 
    pygrog.interop.GrogLinop
    pygrog.interop.GrogLinearOp
+   pygrog.interop.GrogLinearPhysics
+
+.. toctree::
+   :maxdepth: 1
+
+   api/calib
+   api/grog
+   api/gadgets
+   api/operators
+   api/interop

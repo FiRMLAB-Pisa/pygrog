@@ -98,7 +98,7 @@ def test_maskedfft_plan_constructor(grog_setup):
 
 
 def test_maskedfft_requires_plan_or_explicit_args():
-    with pytest.raises(ValueError, match="plan.*required"):
+    with pytest.raises(ValueError, match=r"plan.*required"):
         MaskedFFT()
 
 

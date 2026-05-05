@@ -1,9 +1,9 @@
 """fig_interop — same recon via sigpy / deepinv / mrpro adapters.
 
-A 1×5 strip: ground truth, zero-filled adjoint, then the three
+A 1x5 strip: ground truth, zero-filled adjoint, then the three
 framework L1-wavelet reconstructions.
 
-Faithful distillation of ``examples/example_interop.py``: same
+Faithful distillation of ``examples/example07_interoperability.py``: same
 trajectory, same n_compressed=4, same NLINV calibration, same FISTA
 parameters, and the deepinv-derived Lipschitz constant is reused for
 the mrpro path so all three solvers operate at the same step size.
@@ -22,7 +22,7 @@ from mrinufft import get_operator, initialize_2D_spiral
 from mrinufft.density import voronoi
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import (  # noqa: E402
+from _common import (
     POSTER_STYLE,
     center_crop_pad,
     normalize,
@@ -33,7 +33,7 @@ from _common import (  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# Shared synthetic acquisition (matches examples/example_interop.py)
+# Shared synthetic acquisition (matches examples/example07_interoperability.py)
 # ---------------------------------------------------------------------------
 def _build_acquisition():
     shape = (256, 256)
@@ -49,8 +49,12 @@ def _build_acquisition():
     coords = (samples * np.asarray(shape, dtype=np.float32)).astype(np.float32)
 
     nufft = get_operator("finufft")(
-        samples=samples, shape=shape, n_coils=n_coils_full,
-        smaps=smaps_true, density=density, squeeze_dims=True,
+        samples=samples,
+        shape=shape,
+        n_coils=n_coils_full,
+        smaps=smaps_true,
+        density=density,
+        squeeze_dims=True,
     )
     kspace_raw = nufft.op(image.astype(np.complex64))
     rng = np.random.default_rng(0)
@@ -75,10 +79,19 @@ def _run_sigpy(kspace_raw, coords, shape, n_shots, n_read, n_compressed):
     ksp_c, _ = pg_sigpy.coil_compress(kspace_raw, n_compressed)
     ksp_arms = ksp_c.reshape(n_compressed, n_shots, n_read)
     smaps_s, calib_s = pg_sigpy.nlinv_calib(
-        ksp_c, coords.reshape(-1, 2), shape, cal_width=24, max_iter=12, ret_cal=True,
+        ksp_c,
+        coords.reshape(-1, 2),
+        shape,
+        cal_width=24,
+        max_iter=12,
+        ret_cal=True,
     )
     grog = pg_sigpy.GrogInterpolator(
-        coords, shape, kernel_width=2, oversamp=1.25, image_shape=shape,
+        coords,
+        shape,
+        kernel_width=2,
+        oversamp=1.25,
+        image_shape=shape,
     )
     grog.calc_interp_table(calib_s, lamda=0.01, precision=1)
     sparse, plan = grog.interpolate(ksp_arms)
@@ -92,7 +105,11 @@ def _run_sigpy(kspace_raw, coords, shape, n_shots, n_read, n_compressed):
     y = sparse_t.reshape(n_compressed, op.indices.shape[0]).numpy()
     proxg = sp.prox.L1Reg(W.oshape, lamda=5e-4)
     wav = sp.app.LinearLeastSquares(
-        A=A, y=y, proxg=proxg, max_iter=150, show_pbar=False,
+        A=A,
+        y=y,
+        proxg=proxg,
+        max_iter=150,
+        show_pbar=False,
     ).run()
     return np.abs(W.H(wav)), np.abs(img_zf)
 
@@ -110,10 +127,19 @@ def _run_deepinv(kspace_raw, coords, shape, n_shots, n_read, n_compressed):
     ksp_c, _ = pg_deepinv.coil_compress(ksp_flat, n_compressed)
     ksp_arms = ksp_c.reshape(1, n_compressed, n_shots, n_read)
     smaps_d, calib_d = pg_deepinv.nlinv_calib(
-        ksp_c, coords.reshape(-1, 2), shape, cal_width=24, max_iter=12, ret_cal=True,
+        ksp_c,
+        coords.reshape(-1, 2),
+        shape,
+        cal_width=24,
+        max_iter=12,
+        ret_cal=True,
     )
     grog = pg_deepinv.GrogInterpolator(
-        coords, shape, kernel_width=2, oversamp=1.25, image_shape=shape,
+        coords,
+        shape,
+        kernel_width=2,
+        oversamp=1.25,
+        image_shape=shape,
     )
     grog.calc_interp_table(calib_d[0], lamda=0.01, precision=1)
     sparse, plan = grog.interpolate(ksp_arms)
@@ -127,16 +153,16 @@ def _run_deepinv(kspace_raw, coords, shape, n_shots, n_read, n_compressed):
         for _ in range(15):
             v = physics.A_adjoint(physics.A(v))
             v = v / (v.norm() + 1e-12)
-        lipschitz = (
-            physics.A_adjoint(physics.A(v)).norm() / (v.norm() + 1e-12)
-        ).item()
+        lipschitz = (physics.A_adjoint(physics.A(v)).norm() / (v.norm() + 1e-12)).item()
 
     prior = WaveletPrior(wv="db4", wvdim=2, level=3, is_complex=True)
     prior.explicit_prior = False
     recon = optim_builder(
         iteration="FISTA",
-        prior=prior, data_fidelity=L2(),
-        early_stop=False, max_iter=150,
+        prior=prior,
+        data_fidelity=L2(),
+        early_stop=False,
+        max_iter=150,
         params_algo={"stepsize": 0.9 / lipschitz, "lambda": 1e-2, "a": 3},
         verbose=False,
     )
@@ -144,8 +170,7 @@ def _run_deepinv(kspace_raw, coords, shape, n_shots, n_read, n_compressed):
     return img
 
 
-def _run_mrpro(kspace_raw, coords, shape, n_shots, n_read, n_coils_full,
-               n_compressed):
+def _run_mrpro(kspace_raw, coords, shape, n_shots, n_read, n_coils_full, n_compressed):
     """mrpro path with self-computed Lipschitz constant."""
     from mrpro.algorithms.optimizers import pgd
     from mrpro.data import KData, KHeader, KTrajectory, SpatialDimension
@@ -160,17 +185,22 @@ def _run_mrpro(kspace_raw, coords, shape, n_shots, n_read, n_coils_full,
     kz = torch.zeros_like(kx)
     traj = KTrajectory(kz=kz, ky=ky, kx=kx)
     data = (
-        torch.as_tensor(kspace_raw).reshape(n_coils_full, 1, n_shots, n_read).unsqueeze(0)
+        torch.as_tensor(kspace_raw)
+        .reshape(n_coils_full, 1, n_shots, n_read)
+        .unsqueeze(0)
     )
     spatial = SpatialDimension(z=1, y=shape[0], x=shape[1])
     header = KHeader(
-        recon_matrix=spatial, encoding_matrix=spatial,
+        recon_matrix=spatial,
+        encoding_matrix=spatial,
         recon_fov=SpatialDimension(z=1.0, y=1.0, x=1.0),
         encoding_fov=SpatialDimension(z=1.0, y=1.0, x=1.0),
     )
     kdata = KData(header=header, data=data, traj=traj)
     kdata = pg_mrpro.coil_compress(kdata, n_compressed)
-    smaps_m, calib_m = pg_mrpro.nlinv_calib(kdata, cal_width=24, max_iter=12, ret_cal=True)
+    smaps_m, calib_m = pg_mrpro.nlinv_calib(
+        kdata, cal_width=24, max_iter=12, ret_cal=True
+    )
     grog = pg_mrpro.GrogInterpolator(kdata, kernel_width=2, oversamp=1.25)
     grog.calc_interp_table(calib_m, lamda=0.01, precision=1)
     kdata_g, plan = grog.interpolate(kdata)
@@ -197,35 +227,42 @@ def _run_mrpro(kspace_raw, coords, shape, n_shots, n_read, n_coils_full,
     f = 0.5 * L2NormSquared(target=y, divide_by_n=False) @ acq
     g = 1e-3 * L1NormViewAsReal(divide_by_n=False)
     (init,) = wavelet(torch.zeros(shape, dtype=torch.complex64))
-    (wave_hat,) = pgd(f=f, g=g, initial_value=init,
-                      stepsize=0.9 / lipschitz,
-                      max_iterations=150, backtrack_factor=1.0)
+    (wave_hat,) = pgd(
+        f=f,
+        g=g,
+        initial_value=init,
+        stepsize=0.9 / lipschitz,
+        max_iterations=150,
+        backtrack_factor=1.0,
+    )
     (img,) = wavelet.H(wave_hat)
     return np.abs(img.detach().cpu().numpy())
 
 
 def main() -> None:
-    image, shape, samples, coords, n_shots, n_read, ksp, n_coils_full = _build_acquisition()
+    image, shape, _samples, coords, n_shots, n_read, ksp, n_coils_full = (
+        _build_acquisition()
+    )
     n_compressed = 8
 
     img_sigpy, img_zf = _run_sigpy(ksp, coords, shape, n_shots, n_read, n_compressed)
     img_deepinv = _run_deepinv(ksp, coords, shape, n_shots, n_read, n_compressed)
-    img_mrpro = _run_mrpro(ksp, coords, shape, n_shots, n_read, n_coils_full,
-                           n_compressed)
+    img_mrpro = _run_mrpro(
+        ksp, coords, shape, n_shots, n_read, n_coils_full, n_compressed
+    )
 
     panels = [
-        ("Ground truth",          normalize(image)),
+        ("Ground truth", normalize(image)),
         ("Zero-filled (adjoint)", normalize(img_zf)),
-        ("sigpy (L1-wavelet)",    normalize(img_sigpy)),
-        ("deepinv (L1-wavelet)",  normalize(img_deepinv)),
-        ("mrpro (L1-wavelet)",    normalize(img_mrpro)),
+        ("sigpy (L1-wavelet)", normalize(img_sigpy)),
+        ("deepinv (L1-wavelet)", normalize(img_deepinv)),
+        ("mrpro (L1-wavelet)", normalize(img_mrpro)),
     ]
     with POSTER_STYLE():
         fig, axes = plt.subplots(1, 5, figsize=(20, 4.4))
-        for ax, (title, im) in zip(axes, panels):
+        for ax, (title, im) in zip(axes, panels, strict=False):
             show_image(ax, im, title=title)
-        fig.suptitle("Same L1-wavelet recon via PyGROG interop adapters",
-                     y=1.04)
+        fig.suptitle("Same L1-wavelet recon via PyGROG interop adapters", y=1.04)
         fig.tight_layout()
         save_fig(fig, "fig_interop")
 

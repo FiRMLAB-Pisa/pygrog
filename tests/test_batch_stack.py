@@ -40,6 +40,7 @@ def _spiral2d(n_shots=8, n_per_shot=64, fov=64, seed=0):
 
 
 def _make_calib(shape=(64, 64), n_coils=4, cal=24, seed=0):
+    _ = shape  # kept for API compatibility with callers using shape=...
     rng = np.random.default_rng(seed)
     return (
         rng.standard_normal((n_coils, cal, cal))
@@ -229,7 +230,8 @@ def test_nlinv_calib_train_reduce_mean():
 
 
 def test_nlinv_calib_invalid_train_reduce():
-    y = (np.random.randn(4, 16, 16) + 1j * np.random.randn(4, 16, 16)).astype(
+    rng = np.random.default_rng(0)
+    y = (rng.standard_normal((4, 16, 16)) + 1j * rng.standard_normal((4, 16, 16))).astype(
         np.complex64
     )
     with pytest.raises(ValueError, match="train_reduce"):

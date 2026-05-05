@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import POSTER_STYLE, save_fig  # noqa: E402
+from _common import POSTER_STYLE, save_fig
 
 MMD_SOURCE = """\
 flowchart LR
@@ -40,28 +40,49 @@ flowchart LR
 
 
 def _box(ax, x, y, w, h, label, fc, ec):
-    ax.add_patch(FancyBboxPatch(
-        (x, y), w, h,
-        boxstyle="round,pad=0.012,rounding_size=0.018",
-        fc=fc, ec=ec, lw=2.0,
-    ))
-    ax.text(x + w / 2, y + h / 2, label, ha="center", va="center",
-            fontsize=14, color="#1a1a1a")
+    ax.add_patch(
+        FancyBboxPatch(
+            (x, y),
+            w,
+            h,
+            boxstyle="round,pad=0.012,rounding_size=0.018",
+            fc=fc,
+            ec=ec,
+            lw=2.0,
+        )
+    )
+    ax.text(
+        x + w / 2,
+        y + h / 2,
+        label,
+        ha="center",
+        va="center",
+        fontsize=14,
+        color="#1a1a1a",
+    )
     return {
-        "left":   (x, y + h / 2),
-        "right":  (x + w, y + h / 2),
-        "top":    (x + w / 2, y + h),
+        "left": (x, y + h / 2),
+        "right": (x + w, y + h / 2),
+        "top": (x + w / 2, y + h),
         "bottom": (x + w / 2, y),
     }
 
 
 def _arrow(ax, src, dst, *, linestyle="-", rad=0.0, color="#444", lw=1.8):
-    ax.add_patch(FancyArrowPatch(
-        src, dst, arrowstyle="-|>", mutation_scale=20,
-        color=color, lw=lw, linestyle=linestyle,
-        connectionstyle=f"arc3,rad={rad}",
-        shrinkA=2, shrinkB=2,
-    ))
+    ax.add_patch(
+        FancyArrowPatch(
+            src,
+            dst,
+            arrowstyle="-|>",
+            mutation_scale=20,
+            color=color,
+            lw=lw,
+            linestyle=linestyle,
+            connectionstyle=f"arc3,rad={rad}",
+            shrinkA=2,
+            shrinkB=2,
+        )
+    )
 
 
 def main() -> None:
@@ -83,45 +104,99 @@ def main() -> None:
         #               ┌─────────────────────────┐
         #               │   interop (sigpy ...)   │  ← dashed wrap from operator
         #               └─────────────────────────┘
-        in_box   = _box(ax, 0.005, 0.55, 0.165, 0.20,
-                        "non-Cartesian\nk-space + trajectory",
-                        "#fff5e6", "#cc8800")
-        util_box = _box(ax, 0.190, 0.55, 0.20, 0.20,
-                        "utils\ncoil_compress · nlinv_calib",
-                        "#fdf6e3", "#8c6d3f")
-        grog_box = _box(ax, 0.410, 0.55, 0.18, 0.20,
-                        "calib\nGrogInterpolator",
-                        "#e8f0ff", "#1f77b4")
-        op_box   = _box(ax, 0.610, 0.78, 0.22, 0.13,
-                        "operator\nSparseFFT  ·  MaskedFFT",
-                        "#e8f0ff", "#1f77b4")
-        gad_box  = _box(ax, 0.610, 0.43, 0.22, 0.13,
-                        "gadgets\nOffResonance  ·  Subspace",
-                        "#fde6f0", "#c2185b")
-        solv_box = _box(ax, 0.852, 0.55, 0.142, 0.30,
-                        "_solve · _toep\n(cg / lsmr / pcg)\nToeplitz",
-                        "#f0e6ff", "#6a1b9a")
-        out_box  = _box(ax, 0.610, 0.20, 0.384, 0.13,
-                        "coefficient images   ·   reconstruction x",
-                        "#e6ffe6", "#2ca02c")
-        io_box   = _box(ax, 0.190, 0.04, 0.40, 0.13,
-                        "interop.sigpy  ·  interop.deepinv  ·  interop.mrpro",
-                        "#e6f7ee", "#2ca02c")
+        in_box = _box(
+            ax,
+            0.005,
+            0.55,
+            0.165,
+            0.20,
+            "non-Cartesian\nk-space + trajectory",
+            "#fff5e6",
+            "#cc8800",
+        )
+        util_box = _box(
+            ax,
+            0.190,
+            0.55,
+            0.20,
+            0.20,
+            "utils\ncoil_compress · nlinv_calib",
+            "#fdf6e3",
+            "#8c6d3f",
+        )
+        grog_box = _box(
+            ax, 0.410, 0.55, 0.18, 0.20, "calib\nGrogInterpolator", "#e8f0ff", "#1f77b4"
+        )
+        op_box = _box(
+            ax,
+            0.610,
+            0.78,
+            0.22,
+            0.13,
+            "operator\nSparseFFT  ·  MaskedFFT",
+            "#e8f0ff",
+            "#1f77b4",
+        )
+        gad_box = _box(
+            ax,
+            0.610,
+            0.43,
+            0.22,
+            0.13,
+            "gadgets\nOffResonance  ·  Subspace",
+            "#fde6f0",
+            "#c2185b",
+        )
+        solv_box = _box(
+            ax,
+            0.852,
+            0.55,
+            0.142,
+            0.30,
+            "_solve · _toep\n(cg / lsmr / pcg)\nToeplitz",
+            "#f0e6ff",
+            "#6a1b9a",
+        )
+        out_box = _box(
+            ax,
+            0.610,
+            0.20,
+            0.384,
+            0.13,
+            "coefficient images   ·   reconstruction x",
+            "#e6ffe6",
+            "#2ca02c",
+        )
+        io_box = _box(
+            ax,
+            0.190,
+            0.04,
+            0.40,
+            0.13,
+            "interop.sigpy  ·  interop.deepinv  ·  interop.mrpro",
+            "#e6f7ee",
+            "#2ca02c",
+        )
 
         # Forward data-flow arrows (anchored to box edges).
-        _arrow(ax, in_box["right"],   util_box["left"])
+        _arrow(ax, in_box["right"], util_box["left"])
         _arrow(ax, util_box["right"], grog_box["left"])
-        _arrow(ax, grog_box["right"], op_box["left"],  rad=0.20)
+        _arrow(ax, grog_box["right"], op_box["left"], rad=0.20)
         _arrow(ax, grog_box["right"], gad_box["left"], rad=-0.20)
-        _arrow(ax, op_box["right"],   solv_box["left"], rad=-0.15)
-        _arrow(ax, gad_box["right"],  solv_box["left"], rad=0.15)
+        _arrow(ax, op_box["right"], solv_box["left"], rad=-0.15)
+        _arrow(ax, gad_box["right"], solv_box["left"], rad=0.15)
         _arrow(ax, solv_box["bottom"], out_box["top"], rad=0.15)
 
         # Interop wrap (dashed, green).
-        _arrow(ax, op_box["bottom"], io_box["top"],
-               linestyle="--", rad=-0.45, color="#2ca02c")
-        ax.text(0.46, 0.30, "wrap", fontsize=12,
-                color="#2ca02c", style="italic")
+        _arrow(
+            ax,
+            op_box["bottom"],
+            io_box["top"],
+            linestyle="--",
+            rad=-0.45,
+            color="#2ca02c",
+        )
+        ax.text(0.46, 0.30, "wrap", fontsize=12, color="#2ca02c", style="italic")
 
         ax.set_title("PyGROG package architecture", fontsize=22, pad=12)
         save_fig(fig, "fig_package")

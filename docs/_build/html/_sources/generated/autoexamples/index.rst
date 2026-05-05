@@ -24,10 +24,10 @@ reconstruction using GROG-accelerated sparse FFT operators.
 
 .. only:: html
 
-  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example_basic_usage_thumb.png
+  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example01_basic_usage_thumb.png
     :alt:
 
-  :doc:`/generated/autoexamples/example_basic_usage`
+  :doc:`/generated/autoexamples/example01_basic_usage`
 
 .. raw:: html
 
@@ -37,14 +37,31 @@ reconstruction using GROG-accelerated sparse FFT operators.
 
 .. raw:: html
 
+    <div class="sphx-glr-thumbcontainer" tooltip="This example focuses on stack/batch behavior and trajectory handling.">
+
+.. only:: html
+
+  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example02_stacked_thumb.png
+    :alt:
+
+  :doc:`/generated/autoexamples/example02_stacked`
+
+.. raw:: html
+
+      <div class="sphx-glr-thumbnail-title">Batched and Stacked Reconstructions with PyGROG</div>
+    </div>
+
+
+.. raw:: html
+
     <div class="sphx-glr-thumbcontainer" tooltip="This example uses a common data pipeline for both PyGROG gadgets:">
 
 .. only:: html
 
-  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example_gadgets_thumb.png
+  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example03_gadgets_thumb.png
     :alt:
 
-  :doc:`/generated/autoexamples/example_gadgets`
+  :doc:`/generated/autoexamples/example03_gadgets`
 
 .. raw:: html
 
@@ -54,18 +71,18 @@ reconstruction using GROG-accelerated sparse FFT operators.
 
 .. raw:: html
 
-    <div class="sphx-glr-thumbcontainer" tooltip="PyGROG ships native adapters for the full preprocessing chain:">
+    <div class="sphx-glr-thumbcontainer" tooltip="This example introduces two utility routines from pygrog.utils:">
 
 .. only:: html
 
-  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example_interop_thumb.png
+  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example04_calibration_thumb.png
     :alt:
 
-  :doc:`/generated/autoexamples/example_interop`
+  :doc:`/generated/autoexamples/example04_calibration`
 
 .. raw:: html
 
-      <div class="sphx-glr-thumbnail-title">End-to-end CS reconstruction with sigpy, deepinv and mrpro</div>
+      <div class="sphx-glr-thumbnail-title">Utils Tour: Coil Compression and NLINV</div>
     </div>
 
 
@@ -75,10 +92,10 @@ reconstruction using GROG-accelerated sparse FFT operators.
 
 .. only:: html
 
-  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example_solve_thumb.png
+  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example05_solvers_thumb.png
     :alt:
 
-  :doc:`/generated/autoexamples/example_solve`
+  :doc:`/generated/autoexamples/example05_solvers`
 
 .. raw:: html
 
@@ -92,10 +109,10 @@ reconstruction using GROG-accelerated sparse FFT operators.
 
 .. only:: html
 
-  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example_toeplitz_thumb.png
+  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example06_toeplitz_thumb.png
     :alt:
 
-  :doc:`/generated/autoexamples/example_toeplitz`
+  :doc:`/generated/autoexamples/example06_toeplitz`
 
 .. raw:: html
 
@@ -105,18 +122,18 @@ reconstruction using GROG-accelerated sparse FFT operators.
 
 .. raw:: html
 
-    <div class="sphx-glr-thumbcontainer" tooltip="This example introduces two utility routines from pygrog.utils:">
+    <div class="sphx-glr-thumbcontainer" tooltip="PyGROG ships native adapters for the full preprocessing chain:">
 
 .. only:: html
 
-  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example_utils_thumb.png
+  .. image:: /generated/autoexamples/images/thumb/sphx_glr_example07_interoperability_thumb.png
     :alt:
 
-  :doc:`/generated/autoexamples/example_utils`
+  :doc:`/generated/autoexamples/example07_interoperability`
 
 .. raw:: html
 
-      <div class="sphx-glr-thumbnail-title">Utils Tour: Coil Compression and NLINV</div>
+      <div class="sphx-glr-thumbnail-title">End-to-end CS reconstruction with sigpy, deepinv and mrpro</div>
     </div>
 
 
@@ -130,12 +147,13 @@ reconstruction using GROG-accelerated sparse FFT operators.
 .. toctree::
    :hidden:
 
-   /generated/autoexamples/example_basic_usage
-   /generated/autoexamples/example_gadgets
-   /generated/autoexamples/example_interop
-   /generated/autoexamples/example_solve
-   /generated/autoexamples/example_toeplitz
-   /generated/autoexamples/example_utils
+   /generated/autoexamples/example01_basic_usage
+   /generated/autoexamples/example02_stacked
+   /generated/autoexamples/example03_gadgets
+   /generated/autoexamples/example04_calibration
+   /generated/autoexamples/example05_solvers
+   /generated/autoexamples/example06_toeplitz
+   /generated/autoexamples/example07_interoperability
 
 
 .. only:: html

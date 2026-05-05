@@ -15,7 +15,7 @@ the deepinv ecosystem:
 * **image**:   ``(B, 1, *image_shape)`` complex.  ``C == 1`` because the
   wrapped operator already coil-combines via ``smaps``.
 * **k-space**: ``(B, n_coils, n_samples)`` complex (flattened sparse layout
-  – deepinv treats measurements as opaque tensors, so the flat layout is
+    - deepinv treats measurements as opaque tensors, so the flat layout is
   the most permissive choice and avoids forcing callers to reshape on
   every call).
 

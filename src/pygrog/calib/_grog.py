@@ -310,14 +310,22 @@ class GrogInterpolator:
         image_shape: int | list[int] | tuple[int] | None = None,
         stack_shape: tuple[int, ...] = (),
     ):
+        coords_arr = np.asarray(coords)
+        stack_shape_eff = tuple(int(s) for s in (stack_shape or ()))
+        if not stack_shape_eff and coords_arr.ndim == 4:
+            # Conservative auto-stack detection for canonical 2D trajectories:
+            # coords = (*stack, k1, k0, 2). We infer a single stack axis.
+            # More complex layouts (ndim != 4) must pass stack_shape explicitly.
+            stack_shape_eff = (int(coords_arr.shape[0]),)
+
         self.plan = _create_plan(
             shape,
-            coords,
+            coords_arr,
             oversamp,
             kernel_width,
             kernel_shape,
             time_map,
-            stack_shape=stack_shape,
+            stack_shape=stack_shape_eff,
         )
         # Attach FFT plan fields to self.plan for SparseFFT consumption
         _attach_fft_plan(self.plan, image_shape)
@@ -664,7 +672,7 @@ class GrogInterpolator:
         ncoils,
         spatial,
         kw,
-        target_idx,
+        _target_idx,
         interp_idx,
         kernel,
     ):

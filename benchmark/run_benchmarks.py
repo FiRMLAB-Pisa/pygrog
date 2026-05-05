@@ -58,6 +58,7 @@ from mrinufft import get_operator
 from pygrog.calib import GrogInterpolator
 from pygrog.gadgets import SubspaceSparseFFT
 from pygrog.operator import SparseFFT
+import contextlib
 
 DATASET_FILES = {
     "kspace": "kspace.npy",
@@ -142,7 +143,7 @@ def _prepare_real_inputs(cfg: BenchmarkConfig, data_dir: Path) -> BenchmarkInput
     dcf = dcf[:n_frames]
 
     # Optional spoke (k1) undersampling for memory-constrained machines.
-    # Keeps every R-th spoke, reducing GROG peak memory by ~R× while preserving
+    # Keeps every R-th spoke, reducing GROG peak memory by ~Rx while preserving
     # the 3-D Cartesian grid resolution.  R=1 (default) uses the full dataset.
     accel_k1 = max(1, int(getattr(cfg, "accel_k1", 1)))
     if accel_k1 > 1:
@@ -287,7 +288,9 @@ def _grog_interpolate_all(
     kspace_for_grog = kspace_t[0].permute(1, 0, 2, 3)  # (T, C, n_spokes, n_readout)
     sparse = grog.interpolate(kspace_for_grog)  # (T, C, n_flat)
     pre_w_t = torch.as_tensor(sqrt_weights, dtype=torch.float32)
-    pre_w_view = pre_w_t.reshape(1, 1, -1).to(sparse.dtype)  # broadcast over (T, C, n_flat)
+    pre_w_view = pre_w_t.reshape(1, 1, -1).to(
+        sparse.dtype
+    )  # broadcast over (T, C, n_flat)
     sparse = sparse * pre_w_view
     return sparse.cpu().numpy()
 
@@ -395,7 +398,7 @@ def _nufft_forward_all(
 #               k_i = E(alpha[i])                     (one NUFFT / SparseFFT)
 #               y_t += phi[i,t] · k_i   for all t
 #
-# K=5 transforms instead of T=500 — ~100× fewer IFFT/NUFFT calls.
+# K=5 transforms instead of T=500 — ~100x fewer IFFT/NUFFT calls.
 # GROG subspace ops are K independent SparseFFT pipelines (φ applied before GROG).
 # ---------------------------------------------------------------------------
 
@@ -411,7 +414,7 @@ def _nufft_subspace_adjoint(
     (T = k2 phase-encode axis).  For each coefficient k:
 
         y_k[c, t, s, r] = φ_k[t]* · y[c, t, s, r]            # (C, T, S, R)
-        α_k             = NUFFT_adj(traj_full, y_k.reshape(C, T*S*R))
+        alpha_k         = NUFFT_adj(traj_full, y_k.reshape(C, T*S*R))
 
     Total: K NUFFT_adj calls, each on the FULL T*S*R-sample trajectory.
     """
@@ -440,7 +443,7 @@ def _nufft_subspace_forward(
 
     For each coefficient k:
 
-        ksp_k[c, t, s, r] = NUFFT_op(α_k)[c, j(t,s,r)]        # (C, T, S, R)
+        ksp_k[c, t, s, r] = NUFFT_op(alpha_k)[c, j(t,s,r)]    # (C, T, S, R)
         y[c, t, s, r]    += φ_k[t] · ksp_k[c, t, s, r]
 
     Returns shape (T, n_coils, S, R) so the result matches what the GROG
@@ -858,9 +861,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
                 int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
             ),
             "gpu_name": (
-                torch.cuda.get_device_name(0)
-                if torch.cuda.is_available()
-                else None
+                torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
             ),
             "cpu_count": os.cpu_count(),
             "thread_cap": int(cfg.thread_cap),
@@ -875,7 +876,11 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
             f"FINUFFT backend is required for this benchmark: {finufft_err}"
         )
     cufinufft_ok, cufinufft_err = _safe_backend_available("cufinufft")
-    print(f"[bench] cufinufft available: {cufinufft_ok}" + (f" ({cufinufft_err})" if not cufinufft_ok else ""), flush=True)
+    print(
+        f"[bench] cufinufft available: {cufinufft_ok}"
+        + (f" ({cufinufft_err})" if not cufinufft_ok else ""),
+        flush=True,
+    )
 
     nufft_sim = _make_nufft_operator(
         "finufft", inputs.samples, inputs.shape, inputs.smaps, inputs.density
@@ -919,7 +924,7 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
     )
     sparse_natural_cpu = np.asarray(sparse_natural_cpu)  # (1, C, T, k1, k0, kw)
     # Squeeze the leading batch-of-1 so SubspaceSparseFFT receives (C, *natural).
-    sparse_natural_cpu = sparse_natural_cpu.squeeze(0)   # (C, T, k1, k0, kw)
+    sparse_natural_cpu = sparse_natural_cpu.squeeze(0)  # (C, T, k1, k0, kw)
     results["steps"]["grog_interpolation"] = _serialize_metrics(interp_cpu_m)
 
     # Build the subspace gadget on top of the CPU SparseFFT.  encoding_axis=-4
@@ -1100,10 +1105,8 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         except Exception as exc:
             print(f"[bench] GPU GROG FAILED: {exc}", flush=True)
             gc.collect()
-            try:
+            with contextlib.suppress(Exception):
                 torch.cuda.empty_cache()
-            except Exception:
-                pass
             gpu_results["grog_gpu_skipped"] = {"reason": str(exc)}
 
     if _cuda_available and cufinufft_ok:
@@ -1111,7 +1114,10 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         # allocates its own large workspace, otherwise we OOM on smaller GPUs.
         # The GPU subspace comparison below will be skipped when we do this.
         if _gpu_subspace is not None:
-            print("[bench] freeing GROG GPU operator before cufinufft (skips GPU subspace comparison) ...", flush=True)
+            print(
+                "[bench] freeing GROG GPU operator before cufinufft (skips GPU subspace comparison) ...",
+                flush=True,
+            )
             _gpu_subspace = None
             gc.collect()
             torch.cuda.empty_cache()
@@ -1151,10 +1157,8 @@ def run(cfg: BenchmarkConfig, output_dir: Path) -> dict[str, Any]:
         except Exception as exc:
             print(f"[bench] cufinufft FAILED: {exc}", flush=True)
             gc.collect()
-            try:
+            with contextlib.suppress(Exception):
                 torch.cuda.empty_cache()
-            except Exception:
-                pass
             if cfg.require_cufinufft:
                 raise RuntimeError(
                     "CUFINUFFT benchmark is required but failed to run: " f"{exc}"
@@ -1264,7 +1268,7 @@ def parse_args() -> argparse.Namespace:
         "--skip-scaling",
         action="store_true",
         default=False,
-        help="Skip the synthetic scaling suite (9 cases × plan repeats). Speeds up laptop runs.",
+        help="Skip the synthetic scaling suite (9 cases x plan repeats). Speeds up laptop runs.",
     )
     parser.add_argument(
         "--accel-k1",
@@ -1272,7 +1276,7 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help=(
             "Spoke (k1) undersampling factor R for the real dataset. R=3 keeps every "
-            "3rd spoke (e.g. 48 -> 16), reducing GROG-interpolation peak memory by ~R×. "
+            "3rd spoke (e.g. 48 -> 16), reducing GROG-interpolation peak memory by ~Rx. "
             "Use on memory-constrained machines (laptops). Default: 1 (no subsampling)."
         ),
     )

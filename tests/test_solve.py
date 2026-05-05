@@ -205,3 +205,38 @@ def test_unknown_method_raises(grog_setup):
 
     with pytest.raises(ValueError, match="Unknown method"):
         op.solve(b, method="bogus")
+
+
+def test_solve_accepts_numpy_input_and_returns_numpy(grog_setup):
+    """solve() accepts NumPy RHS and preserves NumPy backend on output."""
+    g = grog_setup["grog"]
+    data = grog_setup["data"]
+    smaps = grog_setup["smaps"]
+
+    kgrid, mplan = g.interpolate(data, grid=True)
+    op = MaskedFFT(plan=mplan, smaps=smaps)
+
+    x = op.solve(np.asarray(kgrid), method="cg", max_iter=5, damp=1e-3)
+    assert isinstance(x, np.ndarray)
+    assert x.shape == tuple(grog_setup["image_shape"])
+    assert np.isfinite(x).all()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA-enabled torch")
+def test_solve_accepts_cupy_without_host_transfer(grog_setup):
+    """CuPy RHS stays on GPU via DLPack and returns CuPy output."""
+    cp = pytest.importorskip("cupy")
+
+    g = grog_setup["grog"]
+    data = grog_setup["data"]
+    smaps = grog_setup["smaps"].to("cuda")
+
+    kgrid, mplan = g.interpolate(data, grid=True)
+    op = MaskedFFT(plan=mplan, smaps=smaps, device="cuda")
+
+    b_cp = cp.asarray(np.asarray(kgrid))
+    x = op.solve(b_cp, method="cg", max_iter=5, damp=1e-3)
+
+    assert isinstance(x, cp.ndarray)
+    assert x.shape == tuple(grog_setup["image_shape"])
+    assert x.device.id == b_cp.device.id

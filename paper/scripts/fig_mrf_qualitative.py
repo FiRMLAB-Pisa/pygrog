@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import (  # noqa: E402
+from _common import (
     BENCHMARK_DIR,
     BENCHMARK_RESULTS_DIR,
     CMAP_GRAY,
@@ -38,25 +38,33 @@ def _ensure_cache(rerun: bool) -> tuple[Path, Path]:
         print("[fig_mrf_qualitative] (re)running benchmark to refresh coeffs…")
         subprocess.run(
             [sys.executable, "run_benchmarks.py"],
-            cwd=BENCHMARK_DIR, check=True,
+            cwd=BENCHMARK_DIR,
+            check=True,
         )
     return grog, nufft
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--rerun", action="store_true",
-                        help="Re-run benchmark to refresh cached coefficients.")
-    parser.add_argument("--slice", type=int, default=None,
-                        help="Slice index along axis 1 (default: central).")
+    parser.add_argument(
+        "--rerun",
+        action="store_true",
+        help="Re-run benchmark to refresh cached coefficients.",
+    )
+    parser.add_argument(
+        "--slice",
+        type=int,
+        default=None,
+        help="Slice index along axis 1 (default: central).",
+    )
     args = parser.parse_args()
 
     grog_p, nufft_p = _ensure_cache(args.rerun)
     coeff_grog = np.load(grog_p)
     coeff_nufft = np.load(nufft_p)
-    assert coeff_grog.shape == coeff_nufft.shape, (
-        f"shape mismatch: {coeff_grog.shape} vs {coeff_nufft.shape}"
-    )
+    assert (
+        coeff_grog.shape == coeff_nufft.shape
+    ), f"shape mismatch: {coeff_grog.shape} vs {coeff_nufft.shape}"
     K = coeff_grog.shape[0]
     if coeff_grog.ndim == 4:
         z = args.slice if args.slice is not None else coeff_grog.shape[1] // 2
@@ -73,10 +81,8 @@ def main() -> None:
         for k in range(K):
             ref = normalize(slabs_n[k])
             est = normalize(slabs_g[k])
-            axes[0, k].imshow(ref, cmap=CMAP_GRAY, origin="lower",
-                              vmin=0.0, vmax=1.0)
-            axes[1, k].imshow(est, cmap=CMAP_GRAY, origin="lower",
-                              vmin=0.0, vmax=1.0)
+            axes[0, k].imshow(ref, cmap=CMAP_GRAY, origin="lower", vmin=0.0, vmax=1.0)
+            axes[1, k].imshow(est, cmap=CMAP_GRAY, origin="lower", vmin=0.0, vmax=1.0)
             for ax in (axes[0, k], axes[1, k]):
                 ax.set_xticks([])
                 ax.set_yticks([])

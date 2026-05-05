@@ -1,3 +1,5 @@
+import contextlib
+
 """Subspace projection gadget and SparseFFT decorator.
 
 Provides two complementary views of low-rank temporal/contrast subspace
@@ -222,10 +224,7 @@ class SubspaceSparseFFT(SolveMixin):
         T = self.T
         # PyTorch indexing requires long/int32 (no int16) → pick int32 when
         # T fits, else int64.
-        if T <= 2_147_483_647:
-            idx_dtype = torch.int32
-        else:
-            idx_dtype = torch.int64
+        idx_dtype = torch.int32 if T <= 2_147_483_647 else torch.int64
         view_shape = [1] * nat_ndim
         view_shape[self._t_axis_in_nat] = T
         t_axis = (
@@ -357,9 +356,7 @@ class SubspaceSparseFFT(SolveMixin):
             t_idx_sorted = self._get_t_idx_sorted(sort_perm, s_flat_idx)
             for c in range(n_coils):
                 # ``sw_c_sorted`` is in scatter-sorted order (no per-k gather).
-                sw_c_sorted = (
-                    (sparse_kspace[c] * pre_w).reshape(-1)[sort_perm]
-                )
+                sw_c_sorted = (sparse_kspace[c] * pre_w).reshape(-1)[sort_perm]
                 smap_conj_c = smaps[c].conj()
                 for k in range(K):
                     # T-indexed lookup → (n_samples,) basis values, then
@@ -554,30 +551,19 @@ class SubspaceSparseFFT(SolveMixin):
         indices = idx_s.to(comp_device)
         sqrt_w = sqw_s.to(comp_device)
         sort_perm = sp_s.to(comp_device)
-        pre_w_gpu = (
-            sqw_s[ip_s].to(device=comp_device, dtype=dtype).view(*nat)
-        )  # (*nat)
+        pre_w_gpu = sqw_s[ip_s].to(device=comp_device, dtype=dtype).view(*nat)  # (*nat)
         base._ensure_bins(comp_device)
 
         smaps_cpu = base.smaps.to(dtype=dtype)
         if not smaps_cpu.is_pinned() and smaps_cpu.device.type == "cpu":
-            try:
+            with contextlib.suppress(RuntimeError):
                 smaps_cpu = smaps_cpu.pin_memory()
-            except RuntimeError:
-                pass
         sparse_pin = sparse_kspace
-        if (
-            sparse_pin.device.type == "cpu"
-            and not sparse_pin.is_pinned()
-        ):
-            try:
+        if sparse_pin.device.type == "cpu" and not sparse_pin.is_pinned():
+            with contextlib.suppress(RuntimeError):
                 sparse_pin = sparse_pin.pin_memory()
-            except RuntimeError:
-                pass
 
-        output_gpu = torch.zeros(
-            K, *base.image_shape, dtype=dtype, device=comp_device
-        )
+        output_gpu = torch.zeros(K, *base.image_shape, dtype=dtype, device=comp_device)
 
         s_data = torch.cuda.Stream(device=comp_device)
         s_comp = torch.cuda.Stream(device=comp_device)
@@ -597,9 +583,7 @@ class SubspaceSparseFFT(SolveMixin):
             buf_sparse[0] = sparse_pin[0].to(
                 comp_device, dtype=dtype, non_blocking=True
             )
-            buf_smaps[0] = smaps_cpu[0].to(
-                comp_device, dtype=dtype, non_blocking=True
-            )
+            buf_smaps[0] = smaps_cpu[0].to(comp_device, dtype=dtype, non_blocking=True)
 
         for c in range(n_coils):
             cur = c % 2
@@ -620,16 +604,10 @@ class SubspaceSparseFFT(SolveMixin):
                 if k_chunk <= 1:
                     # Sort hoisting: one big gather per coil; per-k is a
                     # T-indexed basis lookup + element-wise multiply.
-                    t_idx_sorted = self._get_t_idx_sorted(
-                        sort_perm, s_flat_idx
-                    )
-                    sw_c_sorted = (
-                        (buf_sparse[cur] * pre_w_gpu).reshape(-1)[sort_perm]
-                    )
+                    t_idx_sorted = self._get_t_idx_sorted(sort_perm, s_flat_idx)
+                    sw_c_sorted = (buf_sparse[cur] * pre_w_gpu).reshape(-1)[sort_perm]
                     for k in range(K):
-                        weighted_sorted = (
-                            basis_gpu[k][t_idx_sorted] * sw_c_sorted
-                        )
+                        weighted_sorted = basis_gpu[k][t_idx_sorted] * sw_c_sorted
                         img_k = base._scatter_ifft_crop(
                             weighted_sorted, indices, sqrt_w, grid, dtype
                         )
@@ -684,17 +662,13 @@ class SubspaceSparseFFT(SolveMixin):
 
         smaps_cpu = base.smaps.to(dtype=dtype)
         if smaps_cpu.device.type == "cpu" and not smaps_cpu.is_pinned():
-            try:
+            with contextlib.suppress(RuntimeError):
                 smaps_cpu = smaps_cpu.pin_memory()
-            except RuntimeError:
-                pass
         n_coils = int(smaps_cpu.shape[0])
 
         # Pinned destination so D2H copy_(non_blocking=True) is truly async.
         try:
-            output_cpu = torch.empty(
-                n_coils, *nat, dtype=dtype, pin_memory=True
-            )
+            output_cpu = torch.empty(n_coils, *nat, dtype=dtype, pin_memory=True)
         except RuntimeError:
             output_cpu = torch.empty(n_coils, *nat, dtype=dtype)
 
@@ -704,9 +678,7 @@ class SubspaceSparseFFT(SolveMixin):
         # Single padded buffer reused across all (c, k) on the compute stream.
         k_chunk = self.k_chunk
         if k_chunk <= 1:
-            padded = torch.empty(
-                *base.grid_shape, dtype=dtype, device=comp_device
-            )
+            padded = torch.empty(*base.grid_shape, dtype=dtype, device=comp_device)
         else:
             padded = None
 
@@ -714,9 +686,7 @@ class SubspaceSparseFFT(SolveMixin):
         ksp_buf: list[torch.Tensor | None] = [None, None]
 
         with torch.cuda.stream(s_data):
-            buf_smaps[0] = smaps_cpu[0].to(
-                comp_device, dtype=dtype, non_blocking=True
-            )
+            buf_smaps[0] = smaps_cpu[0].to(comp_device, dtype=dtype, non_blocking=True)
 
         for c in range(n_coils):
             cur = c % 2

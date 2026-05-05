@@ -76,7 +76,7 @@ class PolynomialPreconditioner:
         :math:`A^H (A x)`).
     degree : int
         Polynomial degree.  Higher → better preconditioner, but each
-        ``apply()`` evaluates ``T`` ``degree`` times.  Typical values: 2–5.
+        ``apply()`` evaluates ``T`` ``degree`` times.  Typical values: 2-5.
     spectrum : tuple[float, float], optional
         ``(l, L)`` bracket on the eigenvalues of ``T``.  When ``None`` the
         upper bound is estimated by power iteration; the lower bound

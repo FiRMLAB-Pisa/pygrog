@@ -54,7 +54,7 @@
     <script>DOCUMENTATION_OPTIONS.pagename = 'generated/autoexamples/index';</script>
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
-    <link rel="next" title="Basic Usage: mri-nufft Baseline vs PyGROG" href="example_basic_usage.html" />
+    <link rel="next" title="Basic Usage: mri-nufft Baseline vs PyGROG" href="example01_basic_usage.html" />
     <link rel="prev" title="Installation" href="../../install.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
@@ -165,30 +165,46 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Examples</span></p>
 <ul class="current nav bd-sidenav">
 <li class="toctree-l1 current active has-children"><a class="current reference internal" href="#">Examples</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
-<li class="toctree-l2"><a class="reference internal" href="example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
-<li class="toctree-l2"><a class="reference internal" href="example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
-<li class="toctree-l2"><a class="reference internal" href="example_solve.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
-<li class="toctree-l2"><a class="reference internal" href="example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
-<li class="toctree-l2"><a class="reference internal" href="example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
+<li class="toctree-l2"><a class="reference internal" href="example01_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
+<li class="toctree-l2"><a class="reference internal" href="example02_stacked.html">Batched and Stacked Reconstructions with PyGROG</a></li>
+<li class="toctree-l2"><a class="reference internal" href="example03_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
+<li class="toctree-l2"><a class="reference internal" href="example04_calibration.html">Utils Tour: Coil Compression and NLINV</a></li>
+<li class="toctree-l2"><a class="reference internal" href="example05_solvers.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
+<li class="toctree-l2"><a class="reference internal" href="example06_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
+<li class="toctree-l2"><a class="reference internal" href="example07_interoperability.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
 </ul>
 </details></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1 has-children"><a class="reference internal" href="../../api.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="../pygrog.calib.KernelTable.html">KernelTable</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../pygrog.calib.GrogInterpolator.html">GrogInterpolator</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../pygrog.operator.SparseFFT.html">SparseFFT</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../pygrog.gadgets.SubspaceProjection.html">SubspaceProjection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../pygrog.gadgets.SubspaceSparseFFT.html">SubspaceSparseFFT</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../pygrog.gadgets.with_subspace.html">with_subspace</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../pygrog.gadgets.OffResonanceCorrection.html">OffResonanceCorrection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../pygrog.gadgets.OffResonanceSparseFFT.html">OffResonanceSparseFFT</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../pygrog.utils.coil_compress.html">coil_compress</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../pygrog.utils.nlinv_calib.html">nlinv_calib</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../pygrog.interop.GrogLinop.html">GrogLinop</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../pygrog.interop.GrogLinearOp.html">GrogLinearOp</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api/calib.html">Calibration</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.utils.coil_compression.html">coil_compression</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.utils.nlinv.html">nlinv</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api/grog.html">GROG</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.calib.GrogInterpolator.html">GrogInterpolator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api/gadgets.html">Gadgets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.gadgets.OffResonanceGadget.html">OffResonanceGadget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.gadgets.SubspaceGadget.html">SubspaceGadget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.gadgets.with_offresonance.html">with_offresonance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.gadgets.with_subspace.html">with_subspace</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api/operators.html">Operators</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.operator.SparseFFT.html">SparseFFT</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.operator.MaskedFFT.html">MaskedFFT</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../api/interop.html">Interoperability</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.interop.GrogLinop.html">GrogLinop</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.interop.GrogLinearOp.html">GrogLinearOp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../pygrog.interop.GrogLinearPhysics.html">GrogLinearPhysics</a></li>
+</ul>
+</details></li>
 </ul>
 </details></li>
 </ul>
@@ -429,24 +445,27 @@
 <h1>Examples<a class="headerlink" href="#examples" title="Link to this heading">#</a></h1>
 <p>End-to-end examples demonstrating PyGROG’s API for non-Cartesian MRI
 reconstruction using GROG-accelerated sparse FFT operators.</p>
-<div id='sg-tag-list' class='sphx-glr-tag-list'></div><div class="sphx-glr-thumbnails"><div class="sphx-glr-thumbcontainer" tooltip="This example follows a realistic non-Cartesian pipeline:"><img alt="" src="../../_images/sphx_glr_example_basic_usage_thumb.png" />
-<p><a class="reference internal" href="example_basic_usage.html"><span class="doc">Basic Usage: mri-nufft Baseline vs PyGROG</span></a></p>
+<div id='sg-tag-list' class='sphx-glr-tag-list'></div><div class="sphx-glr-thumbnails"><div class="sphx-glr-thumbcontainer" tooltip="This example follows a realistic non-Cartesian pipeline:"><img alt="" src="../../_images/sphx_glr_example01_basic_usage_thumb.png" />
+<p><a class="reference internal" href="example01_basic_usage.html"><span class="doc">Basic Usage: mri-nufft Baseline vs PyGROG</span></a></p>
   <div class="sphx-glr-thumbnail-title">Basic Usage: mri-nufft Baseline vs PyGROG</div>
-</div><div class="sphx-glr-thumbcontainer" tooltip="This example uses a common data pipeline for both PyGROG gadgets:"><img alt="" src="../../_images/sphx_glr_example_gadgets_thumb.png" />
-<p><a class="reference internal" href="example_gadgets.html"><span class="doc">Gadgets with mri-nufft Data: Subspace and B0 ORC</span></a></p>
+</div><div class="sphx-glr-thumbcontainer" tooltip="This example focuses on stack/batch behavior and trajectory handling."><img alt="" src="../../_images/sphx_glr_example02_stacked_thumb.png" />
+<p><a class="reference internal" href="example02_stacked.html"><span class="doc">Batched and Stacked Reconstructions with PyGROG</span></a></p>
+  <div class="sphx-glr-thumbnail-title">Batched and Stacked Reconstructions with PyGROG</div>
+</div><div class="sphx-glr-thumbcontainer" tooltip="This example uses a common data pipeline for both PyGROG gadgets:"><img alt="" src="../../_images/sphx_glr_example03_gadgets_thumb.png" />
+<p><a class="reference internal" href="example03_gadgets.html"><span class="doc">Gadgets with mri-nufft Data: Subspace and B0 ORC</span></a></p>
   <div class="sphx-glr-thumbnail-title">Gadgets with mri-nufft Data: Subspace and B0 ORC</div>
-</div><div class="sphx-glr-thumbcontainer" tooltip="PyGROG ships native adapters for the full preprocessing chain:"><img alt="" src="../../_images/sphx_glr_example_interop_thumb.png" />
-<p><a class="reference internal" href="example_interop.html"><span class="doc">End-to-end CS reconstruction with sigpy, deepinv and mrpro</span></a></p>
-  <div class="sphx-glr-thumbnail-title">End-to-end CS reconstruction with sigpy, deepinv and mrpro</div>
-</div><div class="sphx-glr-thumbcontainer" tooltip="This example demonstrates the solve method exposed on every PyGROG operator (``SparseFFT``, MaskedFFT and their pygrog.gadgets decorators), and the pygrog.PolynomialPreconditioner accelerator."><img alt="" src="../../_images/sphx_glr_example_solve_thumb.png" />
-<p><a class="reference internal" href="example_solve.html"><span class="doc">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</span></a></p>
-  <div class="sphx-glr-thumbnail-title">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</div>
-</div><div class="sphx-glr-thumbcontainer" tooltip="Iterative reconstructions (CG, FISTA) repeatedly evaluate the normal operator A^H A.  PyGROG ships a Toeplitz-embedded short-circuit: op.normal(image) builds a small PSF once and replaces every forward+adjoint NUFFT pair by a pad → FFT → multiply → IFFT → crop sequence."><img alt="" src="../../_images/sphx_glr_example_toeplitz_thumb.png" />
-<p><a class="reference internal" href="example_toeplitz.html"><span class="doc">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</span></a></p>
-  <div class="sphx-glr-thumbnail-title">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</div>
-</div><div class="sphx-glr-thumbcontainer" tooltip="This example introduces two utility routines from pygrog.utils:"><img alt="" src="../../_images/sphx_glr_example_utils_thumb.png" />
-<p><a class="reference internal" href="example_utils.html"><span class="doc">Utils Tour: Coil Compression and NLINV</span></a></p>
+</div><div class="sphx-glr-thumbcontainer" tooltip="This example introduces two utility routines from pygrog.utils:"><img alt="" src="../../_images/sphx_glr_example04_calibration_thumb.png" />
+<p><a class="reference internal" href="example04_calibration.html"><span class="doc">Utils Tour: Coil Compression and NLINV</span></a></p>
   <div class="sphx-glr-thumbnail-title">Utils Tour: Coil Compression and NLINV</div>
+</div><div class="sphx-glr-thumbcontainer" tooltip="This example demonstrates the solve method exposed on every PyGROG operator (``SparseFFT``, MaskedFFT and their pygrog.gadgets decorators), and the pygrog.PolynomialPreconditioner accelerator."><img alt="" src="../../_images/sphx_glr_example05_solvers_thumb.png" />
+<p><a class="reference internal" href="example05_solvers.html"><span class="doc">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</span></a></p>
+  <div class="sphx-glr-thumbnail-title">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</div>
+</div><div class="sphx-glr-thumbcontainer" tooltip="Iterative reconstructions (CG, FISTA) repeatedly evaluate the normal operator A^H A.  PyGROG ships a Toeplitz-embedded short-circuit: op.normal(image) builds a small PSF once and replaces every forward+adjoint NUFFT pair by a pad → FFT → multiply → IFFT → crop sequence."><img alt="" src="../../_images/sphx_glr_example06_toeplitz_thumb.png" />
+<p><a class="reference internal" href="example06_toeplitz.html"><span class="doc">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</span></a></p>
+  <div class="sphx-glr-thumbnail-title">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</div>
+</div><div class="sphx-glr-thumbcontainer" tooltip="PyGROG ships native adapters for the full preprocessing chain:"><img alt="" src="../../_images/sphx_glr_example07_interoperability_thumb.png" />
+<p><a class="reference internal" href="example07_interoperability.html"><span class="doc">End-to-end CS reconstruction with sigpy, deepinv and mrpro</span></a></p>
+  <div class="sphx-glr-thumbnail-title">End-to-end CS reconstruction with sigpy, deepinv and mrpro</div>
 </div></div><div class="toctree-wrapper compound">
 </div>
 <div class="sphx-glr-footer sphx-glr-footer-gallery docutils container">
@@ -481,7 +500,7 @@ reconstruction using GROG-accelerated sparse FFT operators.</p>
       </div>
     </a>
     <a class="right-next"
-       href="example_basic_usage.html"
+       href="example01_basic_usage.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>

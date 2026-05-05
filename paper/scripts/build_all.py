@@ -28,7 +28,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 # Final poster figures (what goes on the poster).
 POSTER_SCRIPTS = [
     "fig_package.py",
-    "fig_features.py",          # auto-runs the components below if missing.
+    "fig_features.py",  # auto-runs the components below if missing.
     "fig_mrf_qualitative.py",
     "fig_benchmarks.py",
 ]
@@ -50,19 +50,28 @@ def _run(name: str) -> tuple[int, float]:
     path = SCRIPTS_DIR / name
     print(f"\n[build_all] >>> {name}", flush=True)
     t0 = time.perf_counter()
-    rc = subprocess.run([sys.executable, str(path)]).returncode
+    rc = subprocess.run([sys.executable, str(path)]).returncode  # noqa: S603
     dt = time.perf_counter() - t0
-    print(f"[build_all] <<< {name}   {'OK ' if rc == 0 else 'FAIL'}   {dt:.1f} s",
-          flush=True)
+    print(
+        f"[build_all] <<< {name}   {'OK ' if rc == 0 else 'FAIL'}   {dt:.1f} s",
+        flush=True,
+    )
     return rc, dt
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--components", action="store_true",
-                        help="Also re-render the per-feature component figures.")
-    parser.add_argument("--only", nargs="+", metavar="SCRIPT",
-                        help="Run only the named scripts (e.g. fig_orc.py).")
+    parser.add_argument(
+        "--components",
+        action="store_true",
+        help="Also re-render the per-feature component figures.",
+    )
+    parser.add_argument(
+        "--only",
+        nargs="+",
+        metavar="SCRIPT",
+        help="Run only the named scripts (e.g. fig_orc.py).",
+    )
     args = parser.parse_args()
 
     if args.only:

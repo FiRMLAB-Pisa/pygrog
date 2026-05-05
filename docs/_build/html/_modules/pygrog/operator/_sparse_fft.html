@@ -164,30 +164,46 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Examples</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1 has-children"><a class="reference internal" href="../../../generated/autoexamples/index.html">Examples</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_solve.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example01_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example02_stacked.html">Batched and Stacked Reconstructions with PyGROG</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example03_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example04_calibration.html">Utils Tour: Coil Compression and NLINV</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example05_solvers.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example06_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../generated/autoexamples/example07_interoperability.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
 </ul>
 </details></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1 has-children"><a class="reference internal" href="../../../api.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.calib.KernelTable.html">KernelTable</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.calib.GrogInterpolator.html">GrogInterpolator</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.operator.SparseFFT.html">SparseFFT</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.gadgets.SubspaceProjection.html">SubspaceProjection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.gadgets.SubspaceSparseFFT.html">SubspaceSparseFFT</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.gadgets.with_subspace.html">with_subspace</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.gadgets.OffResonanceCorrection.html">OffResonanceCorrection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.gadgets.OffResonanceSparseFFT.html">OffResonanceSparseFFT</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.utils.coil_compress.html">coil_compress</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.utils.nlinv_calib.html">nlinv_calib</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.interop.GrogLinop.html">GrogLinop</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../../generated/pygrog.interop.GrogLinearOp.html">GrogLinearOp</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../api/calib.html">Calibration</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.utils.coil_compression.html">coil_compression</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.utils.nlinv.html">nlinv</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../api/grog.html">GROG</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.calib.GrogInterpolator.html">GrogInterpolator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../api/gadgets.html">Gadgets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.gadgets.OffResonanceGadget.html">OffResonanceGadget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.gadgets.SubspaceGadget.html">SubspaceGadget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.gadgets.with_offresonance.html">with_offresonance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.gadgets.with_subspace.html">with_subspace</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../api/operators.html">Operators</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.operator.SparseFFT.html">SparseFFT</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.operator.MaskedFFT.html">MaskedFFT</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../api/interop.html">Interoperability</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.interop.GrogLinop.html">GrogLinop</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.interop.GrogLinearOp.html">GrogLinearOp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/pygrog.interop.GrogLinearPhysics.html">GrogLinearPhysics</a></li>
+</ul>
+</details></li>
 </ul>
 </details></li>
 </ul>
@@ -684,8 +700,6 @@
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Internal helpers</span>
     <span class="c1"># ------------------------------------------------------------------</span>
-<div class="viewcode-block" id="SparseFFT._ensure_bins">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._ensure_bins">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_ensure_bins</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">device</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute CUDA scatter acceleration metadata on first use.</span>
 
@@ -735,7 +749,7 @@
             <span class="n">he</span> <span class="o">=</span> <span class="n">hot_ends</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
             <span class="n">cold_s</span><span class="p">,</span> <span class="n">cold_e</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
             <span class="n">prev</span> <span class="o">=</span> <span class="mi">0</span>
-            <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">e</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">hs</span><span class="p">,</span> <span class="n">he</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">e</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">hs</span><span class="p">,</span> <span class="n">he</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
                 <span class="k">if</span> <span class="n">s</span> <span class="o">&gt;</span> <span class="n">prev</span><span class="p">:</span>
                     <span class="n">cold_s</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">prev</span><span class="p">)</span>
                     <span class="n">cold_e</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
@@ -759,11 +773,8 @@
         <span class="n">n_bins</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">grid_size</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">//</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span>
         <span class="n">bin_edges</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">n_bins</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span>
         <span class="n">bin_edges</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">grid_size</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_bin_starts</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">searchsorted</span><span class="p">(</span><span class="n">sorted_idx</span><span class="p">,</span> <span class="n">bin_edges</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">))</span></div>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_bin_starts</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">searchsorted</span><span class="p">(</span><span class="n">sorted_idx</span><span class="p">,</span> <span class="n">bin_edges</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">))</span>
 
-
-<div class="viewcode-block" id="SparseFFT._scatter">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._scatter">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_scatter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">grid</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Weighted scatter-add ``grid[idx[i]] += sqrt_w[i] * data[i]``.</span>
 
@@ -783,13 +794,13 @@
             <span class="ow">and</span> <span class="n">indices</span><span class="o">.</span><span class="n">numel</span><span class="p">()</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span>
         <span class="p">):</span>
             <span class="c1"># Cold segments — contiguous slices, low-contention atomic.</span>
-            <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">e</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cold_seg_starts</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cold_seg_ends</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">e</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cold_seg_starts</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cold_seg_ends</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
                 <span class="n">ext</span><span class="o">.</span><span class="n">scatter_add</span><span class="p">(</span><span class="n">grid</span><span class="p">,</span> <span class="n">data</span><span class="p">[</span><span class="n">s</span><span class="p">:</span><span class="n">e</span><span class="p">],</span> <span class="n">indices</span><span class="p">[</span><span class="n">s</span><span class="p">:</span><span class="n">e</span><span class="p">],</span> <span class="n">sqrt_w</span><span class="p">[</span><span class="n">s</span><span class="p">:</span><span class="n">e</span><span class="p">])</span>
             <span class="c1"># Hot segments — sum-reduce each, then a single index_add.</span>
             <span class="n">hot_sums</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span>
                 <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_hot_starts</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">device</span>
             <span class="p">)</span>
-            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">e</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_hot_starts</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hot_ends</span><span class="p">)):</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">e</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_hot_starts</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hot_ends</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">)):</span>
                 <span class="n">hot_sums</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="n">s</span><span class="p">:</span><span class="n">e</span><span class="p">]</span> <span class="o">*</span> <span class="n">sqrt_w</span><span class="p">[</span><span class="n">s</span><span class="p">:</span><span class="n">e</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
             <span class="n">grid</span><span class="o">.</span><span class="n">index_add_</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hot_uidx</span><span class="p">,</span> <span class="n">hot_sums</span><span class="p">)</span>
             <span class="k">return</span>
@@ -801,14 +812,11 @@
             <span class="n">sqrt_w</span><span class="p">,</span>
             <span class="n">bin_starts</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_bin_starts</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
             <span class="n">bin_size</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bin_size</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span><span class="p">,</span>
-        <span class="p">)</span></div>
-
+        <span class="p">)</span>
 
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Per-stack 1-D selectors (for stacked plans)</span>
     <span class="c1"># ------------------------------------------------------------------</span>
-<div class="viewcode-block" id="SparseFFT._stack_arrays">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._stack_arrays">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_stack_arrays</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Return ``(indices, sqrt_weights, sort_perm, inv_perm)`` for one</span>
 <span class="sd">        flattened stack element.  If unstacked, returns the global arrays.</span>
@@ -820,8 +828,7 @@
         <span class="n">sqw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sqrt_weights</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">s_total</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">)[</span><span class="n">s_flat_idx</span><span class="p">]</span>
         <span class="n">sp</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sort_perm</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">s_total</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">)[</span><span class="n">s_flat_idx</span><span class="p">]</span>
         <span class="n">ip</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">inv_perm</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">s_total</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">)[</span><span class="n">s_flat_idx</span><span class="p">]</span>
-        <span class="k">return</span> <span class="n">idx</span><span class="p">,</span> <span class="n">sqw</span><span class="p">,</span> <span class="n">sp</span><span class="p">,</span> <span class="n">ip</span></div>
-
+        <span class="k">return</span> <span class="n">idx</span><span class="p">,</span> <span class="n">sqw</span><span class="p">,</span> <span class="n">sp</span><span class="p">,</span> <span class="n">ip</span>
 
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Packed-stack arrays — fuse all stack elements into a single sorted</span>
@@ -831,8 +838,6 @@
     <span class="c1"># which lets the single-trajectory C++ kernels handle the whole stack</span>
     <span class="c1"># in one call without naive Python looping.</span>
     <span class="c1"># ------------------------------------------------------------------</span>
-<div class="viewcode-block" id="SparseFFT._packed_arrays">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._packed_arrays">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_packed_arrays</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">comp_device</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Return packed ``(indices, sqrt_w, sort_perm, inv_perm, S, n_per)``.</span>
 
@@ -872,8 +877,7 @@
             <span class="n">n_per</span><span class="p">,</span>
         <span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_packed_cache</span> <span class="o">=</span> <span class="p">(</span><span class="n">comp_device</span><span class="p">,</span> <span class="n">packed</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">packed</span></div>
-
+        <span class="k">return</span> <span class="n">packed</span>
 
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Forward: sparse k-space -&gt; image  (adjoint NUFFT direction)</span>
@@ -947,8 +951,6 @@
         <span class="k">return</span> <span class="n">stacked</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">B_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">s_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">single_out_shape</span><span class="p">)</span></div>
 
 
-<div class="viewcode-block" id="SparseFFT._forward_single">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._forward_single">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_forward_single</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sparse_kspace</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Single-frame forward (one stack element). ``sparse_kspace`` shape:</span>
 <span class="sd">        ``(n_coils, n_samples)``.&quot;&quot;&quot;</span>
@@ -996,14 +998,11 @@
                 <span class="k">else</span><span class="p">:</span>
                     <span class="n">accum</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">img_c</span>
 
-        <span class="k">return</span> <span class="n">accum</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span></div>
-
+        <span class="k">return</span> <span class="n">accum</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span>
 
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Packed-stack forward — one C++ scatter call covers all S elements</span>
     <span class="c1"># ------------------------------------------------------------------</span>
-<div class="viewcode-block" id="SparseFFT._forward_packed">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._forward_packed">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_forward_packed</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sparse_kspace</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Stacked forward over all stack elements at once.</span>
 
@@ -1058,8 +1057,7 @@
             <span class="k">else</span><span class="p">:</span>
                 <span class="n">accum</span><span class="p">[:,</span> <span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">imgs</span>
 
-        <span class="k">return</span> <span class="n">accum</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span></div>
-
+        <span class="k">return</span> <span class="n">accum</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span>
 
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Adjoint: image -&gt; sparse k-space  (forward NUFFT direction)</span>
@@ -1085,11 +1083,9 @@
         <span class="k">return</span> <span class="n">out</span></div>
 
 
-<div class="viewcode-block" id="SparseFFT._adjoint_flat">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._adjoint_flat">[docs]</a>
     <span class="nd">@with_torch</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">_adjoint_flat</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Flat-output adjoint: returns (*B, *S, n_coils, n_samples).&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Flat-output adjoint: returns ``(*B, *S, n_coils, n_samples)``.&quot;&quot;&quot;</span>
         <span class="n">s_shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">stack_shape</span>
         <span class="n">s_ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">s_shape</span><span class="p">)</span>
         <span class="c1"># Single-frame ndim (no batch, no stack):</span>
@@ -1123,11 +1119,8 @@
         <span class="c1"># Each entry has shape (S_total, n_coils, n_samples)</span>
         <span class="n">n_coils</span> <span class="o">=</span> <span class="n">outs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
         <span class="n">stacked</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">outs</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>  <span class="c1"># (B_total, S_total, n_coils, n_samples)</span>
-        <span class="k">return</span> <span class="n">stacked</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">B_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">s_shape</span><span class="p">,</span> <span class="n">n_coils</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">stacked</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">B_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">s_shape</span><span class="p">,</span> <span class="n">n_coils</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">)</span>
 
-
-<div class="viewcode-block" id="SparseFFT._adjoint_single">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._adjoint_single">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_adjoint_single</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Single-frame adjoint (one stack element).&quot;&quot;&quot;</span>
         <span class="n">src_device</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">device</span>
@@ -1176,14 +1169,11 @@
                     <span class="n">dtype</span><span class="p">,</span>
                 <span class="p">)</span>
 
-        <span class="k">return</span> <span class="n">output</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span></div>
-
+        <span class="k">return</span> <span class="n">output</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span>
 
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Packed-stack adjoint — one C++ gather call covers all S elements</span>
     <span class="c1"># ------------------------------------------------------------------</span>
-<div class="viewcode-block" id="SparseFFT._adjoint_packed">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._adjoint_packed">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_adjoint_packed</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Stacked adjoint over all stack elements at once.</span>
 
@@ -1223,10 +1213,7 @@
         <span class="p">)</span>
 
         <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_coils</span><span class="p">):</span>
-            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">smaps</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-                <span class="n">coil_imgs</span> <span class="o">=</span> <span class="n">image_d</span> <span class="o">*</span> <span class="n">smaps</span><span class="p">[</span><span class="n">c</span><span class="p">]</span>  <span class="c1"># (S, *image_shape)</span>
-            <span class="k">else</span><span class="p">:</span>
-                <span class="n">coil_imgs</span> <span class="o">=</span> <span class="n">image_d</span><span class="p">[:,</span> <span class="n">c</span><span class="p">]</span>  <span class="c1"># (S, *image_shape)</span>
+            <span class="n">coil_imgs</span> <span class="o">=</span> <span class="n">image_d</span> <span class="o">*</span> <span class="n">smaps</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">smaps</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">image_d</span><span class="p">[:,</span> <span class="n">c</span><span class="p">]</span>
             <span class="n">padded</span><span class="o">.</span><span class="n">zero_</span><span class="p">()</span>
             <span class="n">padded</span><span class="p">[</span><span class="n">slc</span><span class="p">]</span> <span class="o">=</span> <span class="n">coil_imgs</span>
             <span class="n">kgrid</span> <span class="o">=</span> <span class="n">fft</span><span class="p">(</span><span class="n">padded</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span><span class="p">)</span>  <span class="c1"># (S, *grid_shape)</span>
@@ -1241,16 +1228,12 @@
             <span class="o">.</span><span class="n">permute</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
             <span class="o">.</span><span class="n">contiguous</span><span class="p">()</span>
         <span class="p">)</span>
-        <span class="k">return</span> <span class="n">out</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">out</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span>
 
-
-<div class="viewcode-block" id="SparseFFT.__call__">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT.__call__">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">adjoint</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
         <span class="k">if</span> <span class="n">adjoint</span><span class="p">:</span>
             <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">adjoint</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">x</span><span class="p">)</span></div>
-
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
 
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Normal operator: A^H A</span>
@@ -1292,8 +1275,6 @@
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Sort-once non-Toeplitz normal</span>
     <span class="c1"># ------------------------------------------------------------------</span>
-<div class="viewcode-block" id="SparseFFT._normal_no_toep">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._normal_no_toep">[docs]</a>
     <span class="nd">@with_torch</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">_normal_no_toep</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Batched/stacked dispatcher for :meth:`_normal_*_no_toep`.</span>
@@ -1335,11 +1316,8 @@
             <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">B_total</span><span class="p">):</span>
                 <span class="n">outs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_normal_single_no_toep</span><span class="p">(</span><span class="n">flat</span><span class="p">[</span><span class="n">b</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
         <span class="n">stacked</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">outs</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">stacked</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">B_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">s_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">single_shape</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">stacked</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">B_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">s_shape</span><span class="p">,</span> <span class="o">*</span><span class="n">single_shape</span><span class="p">)</span>
 
-
-<div class="viewcode-block" id="SparseFFT._normal_single_no_toep">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._normal_single_no_toep">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_normal_single_no_toep</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">s_flat_idx</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Sort-once single-frame ``A^H A``; intermediate stays sorted.&quot;&quot;&quot;</span>
         <span class="n">src_device</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">device</span>
@@ -1387,11 +1365,8 @@
             <span class="k">else</span><span class="p">:</span>
                 <span class="n">accum</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">img_c</span>
 
-        <span class="k">return</span> <span class="n">accum</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">accum</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span>
 
-
-<div class="viewcode-block" id="SparseFFT._normal_packed_no_toep">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._normal_packed_no_toep">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_normal_packed_no_toep</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Sort-once packed-stack ``A^H A`` over all S elements at once.&quot;&quot;&quot;</span>
         <span class="n">src_device</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">device</span>
@@ -1448,8 +1423,7 @@
             <span class="k">else</span><span class="p">:</span>
                 <span class="n">accum</span><span class="p">[:,</span> <span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">imgs</span>
 
-        <span class="k">return</span> <span class="n">accum</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span></div>
-
+        <span class="k">return</span> <span class="n">accum</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span>
 
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Iterative solve</span>
@@ -1459,8 +1433,6 @@
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Batch helpers for decorators  (Tier-1 FFT fusion)</span>
     <span class="c1"># ------------------------------------------------------------------</span>
-<div class="viewcode-block" id="SparseFFT._scatter_ifft_crop_batch">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._scatter_ifft_crop_batch">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_scatter_ifft_crop_batch</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">batch_kspace</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
@@ -1512,11 +1484,8 @@
         <span class="c1"># (via oshape) would be wrong when the grid is oversampled.</span>
         <span class="n">full_imgs</span> <span class="o">=</span> <span class="n">ifft</span><span class="p">(</span><span class="n">grids_nd</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span><span class="p">)</span>  <span class="c1"># (B, *grid_shape)</span>
         <span class="n">imgs</span> <span class="o">=</span> <span class="n">resize</span><span class="p">(</span><span class="n">full_imgs</span><span class="p">,</span> <span class="p">(</span><span class="n">B</span><span class="p">,</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">))</span>
-        <span class="k">return</span> <span class="n">imgs</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">imgs</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span>
 
-
-<div class="viewcode-block" id="SparseFFT._fft_pad_gather_batch">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._fft_pad_gather_batch">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_fft_pad_gather_batch</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">batch_imgs</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
@@ -1563,14 +1532,11 @@
         <span class="n">output</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
             <span class="p">[</span><span class="n">_gather</span><span class="p">(</span><span class="n">padded_flat</span><span class="p">[</span><span class="n">b</span><span class="p">],</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">)[</span><span class="n">inv_perm</span><span class="p">]</span> <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">B</span><span class="p">)]</span>
         <span class="p">)</span>
-        <span class="k">return</span> <span class="n">output</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span>  <span class="c1"># (B, n_samples)</span></div>
-
+        <span class="k">return</span> <span class="n">output</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">src_device</span><span class="p">)</span>  <span class="c1"># (B, n_samples)</span>
 
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Core single-coil ops (fused)</span>
     <span class="c1"># ------------------------------------------------------------------</span>
-<div class="viewcode-block" id="SparseFFT._scatter_ifft_crop">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._scatter_ifft_crop">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_scatter_ifft_crop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">coil_data</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">,</span> <span class="n">grid</span><span class="p">,</span> <span class="n">_dtype</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Scatter -&gt; full-size IFFT -&gt; image-space center-crop for one coil.</span>
 
@@ -1582,11 +1548,8 @@
         <span class="n">grid</span><span class="o">.</span><span class="n">zero_</span><span class="p">()</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_scatter</span><span class="p">(</span><span class="n">grid</span><span class="p">,</span> <span class="n">coil_data</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">)</span>
         <span class="n">full_img</span> <span class="o">=</span> <span class="n">ifft</span><span class="p">(</span><span class="n">grid</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">grid_shape</span><span class="p">),</span> <span class="n">axes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">resize</span><span class="p">(</span><span class="n">full_img</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">resize</span><span class="p">(</span><span class="n">full_img</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">image_shape</span><span class="p">)</span>
 
-
-<div class="viewcode-block" id="SparseFFT._fft_pad_gather">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._fft_pad_gather">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_fft_pad_gather</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">coil_img</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">,</span> <span class="n">inv_perm</span><span class="p">,</span> <span class="n">padded</span><span class="p">,</span> <span class="n">_dtype</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Zero-pad image -&gt; FFT at grid_shape -&gt; gather -&gt; unpermute for one coil.</span>
 
@@ -1597,14 +1560,11 @@
         <span class="n">padded</span><span class="o">.</span><span class="n">zero_</span><span class="p">()</span>
         <span class="n">padded</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_pad_slices</span><span class="p">]</span> <span class="o">=</span> <span class="n">coil_img</span>
         <span class="n">fft_result</span> <span class="o">=</span> <span class="n">fft</span><span class="p">(</span><span class="n">padded</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fft_axes</span><span class="p">)</span>  <span class="c1"># FFT at full grid_shape</span>
-        <span class="k">return</span> <span class="n">_gather</span><span class="p">(</span><span class="n">fft_result</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">),</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">)[</span><span class="n">inv_perm</span><span class="p">]</span></div>
-
+        <span class="k">return</span> <span class="n">_gather</span><span class="p">(</span><span class="n">fft_result</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">),</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">)[</span><span class="n">inv_perm</span><span class="p">]</span>
 
     <span class="c1"># ------------------------------------------------------------------</span>
     <span class="c1"># Dual-stream GPU pipelining  (CPU input -&gt; GPU compute)</span>
     <span class="c1"># ------------------------------------------------------------------</span>
-<div class="viewcode-block" id="SparseFFT._forward_pipeline">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._forward_pipeline">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_forward_pipeline</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">sparse_kspace</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">,</span> <span class="n">sort_perm</span><span class="p">,</span> <span class="n">grid</span><span class="p">,</span> <span class="n">conj_smaps</span><span class="p">,</span> <span class="n">accum</span><span class="p">,</span> <span class="n">dtype</span>
     <span class="p">):</span>
@@ -1640,11 +1600,8 @@
                 <span class="k">else</span><span class="p">:</span>
                     <span class="n">accum</span> <span class="o">+=</span> <span class="n">img_c</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">square</span><span class="p">()</span>
 
-        <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">synchronize</span><span class="p">(</span><span class="n">device</span><span class="p">)</span></div>
+        <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">synchronize</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
 
-
-<div class="viewcode-block" id="SparseFFT._adjoint_pipeline">
-<a class="viewcode-back" href="../../../generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._adjoint_pipeline">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">_adjoint_pipeline</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">image_d</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">sqrt_w</span><span class="p">,</span> <span class="n">inv_perm</span><span class="p">,</span> <span class="n">smaps</span><span class="p">,</span> <span class="n">padded</span><span class="p">,</span> <span class="n">output</span><span class="p">,</span> <span class="n">dtype</span>
     <span class="p">):</span>
@@ -1669,7 +1626,6 @@
                 <span class="p">)</span>
 
         <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">synchronize</span><span class="p">(</span><span class="n">device</span><span class="p">)</span></div>
-</div>
 
 </pre></div>
 

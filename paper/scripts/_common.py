@@ -146,9 +146,15 @@ def psnr(estimate: np.ndarray, reference: np.ndarray) -> float:
 # ---------------------------------------------------------------------------
 # Panel helpers
 # ---------------------------------------------------------------------------
-def show_image(ax: plt.Axes, img: np.ndarray, *, title: str | None = None,
-               cmap: str = CMAP_GRAY, vmin: float | None = 0.0,
-               vmax: float | None = 1.0):
+def show_image(
+    ax: plt.Axes,
+    img: np.ndarray,
+    *,
+    title: str | None = None,
+    cmap: str = CMAP_GRAY,
+    vmin: float | None = 0.0,
+    vmax: float | None = 1.0,
+):
     ax.imshow(np.abs(img), cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
     ax.set_xticks([])
     ax.set_yticks([])
@@ -156,8 +162,14 @@ def show_image(ax: plt.Axes, img: np.ndarray, *, title: str | None = None,
         ax.set_title(title)
 
 
-def show_diff(ax: plt.Axes, diff: np.ndarray, *, vlim: float = 0.1,
-              title: str | None = None, cbar: bool = True):
+def show_diff(
+    ax: plt.Axes,
+    diff: np.ndarray,
+    *,
+    vlim: float = 0.1,
+    title: str | None = None,
+    cbar: bool = True,
+):
     im = ax.imshow(diff, cmap=CMAP_DIFF, origin="lower", vmin=-vlim, vmax=vlim)
     ax.set_xticks([])
     ax.set_yticks([])

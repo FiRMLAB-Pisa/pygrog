@@ -1,6 +1,6 @@
 """fig_orc — Off-resonance correction (no-ORC | mri-nufft | PyGROG | B0 map).
 
-Mirrors the ORC half of ``examples/example_gadgets.py`` but uses the
+Mirrors the ORC half of ``examples/example03_gadgets.py`` but uses the
 sparse (non-Cartesian) PyGROG ORC path — the canonical recipe.
 """
 
@@ -20,7 +20,7 @@ from mrinufft.operators.off_resonance import MRIFourierCorrected
 from mrinufft.trajectories.utils import Acquisition
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import (  # noqa: E402
+from _common import (
     CMAP_DIFF,
     POSTER_STYLE,
     center_crop_pad,
@@ -31,9 +31,9 @@ from _common import (  # noqa: E402
     synthetic_smaps,
 )
 
-from pygrog.calib import GrogInterpolator  # noqa: E402
-from pygrog.gadgets import OffResonanceCorrection  # noqa: E402
-from pygrog.operator import SparseFFT  # noqa: E402
+from pygrog.calib import GrogInterpolator
+from pygrog.gadgets import OffResonanceCorrection
+from pygrog.operator import SparseFFT
 
 
 def main() -> None:
@@ -48,18 +48,27 @@ def main() -> None:
     smaps = synthetic_smaps(shape, n_coils=n_coils)
 
     nufft = get_operator("finufft")(
-        samples=samples, shape=shape, n_coils=n_coils,
-        smaps=smaps, density=density, squeeze_dims=True,
+        samples=samples,
+        shape=shape,
+        n_coils=n_coils,
+        smaps=smaps,
+        density=density,
+        squeeze_dims=True,
     )
 
     brain_mask = image > 0.1 * image.max()
     b0_map, _ = make_b0map(shape, b0range=(-200, 200), mask=brain_mask)
 
-    t_read = np.arange(samples.shape[1], dtype=np.float32) * Acquisition.default.raster_time
+    t_read = (
+        np.arange(samples.shape[1], dtype=np.float32) * Acquisition.default.raster_time
+    )
     readout_time = np.repeat(t_read[None, :], samples.shape[0], axis=0)
 
     orc_nufft = MRIFourierCorrected(
-        nufft, b0_map=b0_map, readout_time=readout_time, mask=brain_mask,
+        nufft,
+        b0_map=b0_map,
+        readout_time=readout_time,
+        mask=brain_mask,
     )
     kspace_off = orc_nufft.op(image.astype(np.complex64))
     img_no_orc = np.squeeze(np.abs(nufft.adj_op(kspace_off)))
@@ -74,9 +83,13 @@ def main() -> None:
     ).astype(np.complex64)
     cy, cx = shape[0] // 2, shape[1] // 2
     cs = 24
-    calib = cart[:, cy - cs // 2:cy + cs // 2, cx - cs // 2:cx + cs // 2]
+    calib = cart[:, cy - cs // 2 : cy + cs // 2, cx - cs // 2 : cx + cs // 2]
     grog = GrogInterpolator(
-        shape=shape, coords=coords, kernel_width=2, oversamp=1.25, image_shape=shape,
+        shape=shape,
+        coords=coords,
+        kernel_width=2,
+        oversamp=1.25,
+        image_shape=shape,
     )
     grog.calc_interp_table(calib, lamda=0.01, precision=1)
 
@@ -85,9 +98,12 @@ def main() -> None:
     sqrt_w = grog.plan.pre_weights
 
     orc_pg = OffResonanceCorrection(
-        base_op, field_map=b0_map.astype(np.float32),
-        readout_time=readout_time, mask=brain_mask,
-        n_components=-1, method="svd",
+        base_op,
+        field_map=b0_map.astype(np.float32),
+        readout_time=readout_time,
+        mask=brain_mask,
+        n_components=-1,
+        method="svd",
     )
     sparse_off = torch.as_tensor(
         grog.interpolate(
@@ -107,8 +123,7 @@ def main() -> None:
 
     with POSTER_STYLE():
         fig, axes = plt.subplots(1, 4, figsize=(17, 4.6))
-        im = axes[0].imshow(b0_map, cmap=CMAP_DIFF, origin="lower",
-                            vmin=-200, vmax=200)
+        im = axes[0].imshow(b0_map, cmap=CMAP_DIFF, origin="lower", vmin=-200, vmax=200)
         axes[0].set_xticks([])
         axes[0].set_yticks([])
         axes[0].set_title("B$_0$ field map [Hz]")
@@ -116,8 +131,7 @@ def main() -> None:
         cb.ax.tick_params(labelsize=12)
         show_image(axes[1], img_no_orc, title="No correction")
         show_image(axes[2], img_ref_orc, title="mri-nufft ORC (reference)")
-        show_image(axes[3], img_pg_orc,
-                   title=f"PyGROG ORC   NRMSE={err:.3f}")
+        show_image(axes[3], img_pg_orc, title=f"PyGROG ORC   NRMSE={err:.3f}")
         fig.tight_layout()
         save_fig(fig, "fig_orc")
 

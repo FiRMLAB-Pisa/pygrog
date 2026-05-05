@@ -164,30 +164,46 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Examples</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1 has-children"><a class="reference internal" href="generated/autoexamples/index.html">Examples</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="generated/autoexamples/example_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/autoexamples/example_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/autoexamples/example_interop.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/autoexamples/example_solve.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/autoexamples/example_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/autoexamples/example_utils.html">Utils Tour: Coil Compression and NLINV</a></li>
+<li class="toctree-l2"><a class="reference internal" href="generated/autoexamples/example01_basic_usage.html">Basic Usage: mri-nufft Baseline vs PyGROG</a></li>
+<li class="toctree-l2"><a class="reference internal" href="generated/autoexamples/example02_stacked.html">Batched and Stacked Reconstructions with PyGROG</a></li>
+<li class="toctree-l2"><a class="reference internal" href="generated/autoexamples/example03_gadgets.html">Gadgets with mri-nufft Data: Subspace and B0 ORC</a></li>
+<li class="toctree-l2"><a class="reference internal" href="generated/autoexamples/example04_calibration.html">Utils Tour: Coil Compression and NLINV</a></li>
+<li class="toctree-l2"><a class="reference internal" href="generated/autoexamples/example05_solvers.html">Iterative Solve: CG, LSMR, and Polynomial Preconditioning</a></li>
+<li class="toctree-l2"><a class="reference internal" href="generated/autoexamples/example06_toeplitz.html">Toeplitz-Embedded Self-Adjoint A^H A for SparseFFT Gadgets</a></li>
+<li class="toctree-l2"><a class="reference internal" href="generated/autoexamples/example07_interoperability.html">End-to-end CS reconstruction with sigpy, deepinv and mrpro</a></li>
 </ul>
 </details></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1 has-children"><a class="reference internal" href="api.html">API Reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="generated/pygrog.calib.KernelTable.html">KernelTable</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/pygrog.calib.GrogInterpolator.html">GrogInterpolator</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/pygrog.operator.SparseFFT.html">SparseFFT</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/pygrog.gadgets.SubspaceProjection.html">SubspaceProjection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/pygrog.gadgets.SubspaceSparseFFT.html">SubspaceSparseFFT</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/pygrog.gadgets.with_subspace.html">with_subspace</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/pygrog.gadgets.OffResonanceCorrection.html">OffResonanceCorrection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/pygrog.gadgets.OffResonanceSparseFFT.html">OffResonanceSparseFFT</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/pygrog.utils.coil_compress.html">coil_compress</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/pygrog.utils.nlinv_calib.html">nlinv_calib</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/pygrog.interop.GrogLinop.html">GrogLinop</a></li>
-<li class="toctree-l2"><a class="reference internal" href="generated/pygrog.interop.GrogLinearOp.html">GrogLinearOp</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="api/calib.html">Calibration</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="generated/pygrog.utils.coil_compression.html">coil_compression</a></li>
+<li class="toctree-l3"><a class="reference internal" href="generated/pygrog.utils.nlinv.html">nlinv</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="api/grog.html">GROG</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="generated/pygrog.calib.GrogInterpolator.html">GrogInterpolator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="api/gadgets.html">Gadgets</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="generated/pygrog.gadgets.OffResonanceGadget.html">OffResonanceGadget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="generated/pygrog.gadgets.SubspaceGadget.html">SubspaceGadget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="generated/pygrog.gadgets.with_offresonance.html">with_offresonance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="generated/pygrog.gadgets.with_subspace.html">with_subspace</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="api/operators.html">Operators</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="generated/pygrog.operator.SparseFFT.html">SparseFFT</a></li>
+<li class="toctree-l3"><a class="reference internal" href="generated/pygrog.operator.MaskedFFT.html">MaskedFFT</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="api/interop.html">Interoperability</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="generated/pygrog.interop.GrogLinop.html">GrogLinop</a></li>
+<li class="toctree-l3"><a class="reference internal" href="generated/pygrog.interop.GrogLinearOp.html">GrogLinearOp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="generated/pygrog.interop.GrogLinearPhysics.html">GrogLinearPhysics</a></li>
+</ul>
+</details></li>
 </ul>
 </details></li>
 </ul>
@@ -363,13 +379,11 @@
 <h1 id="index">Index</h1>
 
 <div class="genindex-jumpbox">
- <a href="#_"><strong>_</strong></a>
- | <a href="#A"><strong>A</strong></a>
+ <a href="#A"><strong>A</strong></a>
  | <a href="#C"><strong>C</strong></a>
  | <a href="#F"><strong>F</strong></a>
  | <a href="#G"><strong>G</strong></a>
  | <a href="#I"><strong>I</strong></a>
- | <a href="#K"><strong>K</strong></a>
  | <a href="#M"><strong>M</strong></a>
  | <a href="#N"><strong>N</strong></a>
  | <a href="#O"><strong>O</strong></a>
@@ -377,108 +391,12 @@
  | <a href="#W"><strong>W</strong></a>
  
 </div>
-<h2 id="_">_</h2>
-<table style="width: 100%" class="indextable genindextable"><tr>
-  <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator.__call__">__call__() (pygrog.calib.GrogInterpolator method)</a>
-
-      <ul>
-        <li><a href="generated/pygrog.gadgets.OffResonanceSparseFFT.html#pygrog.gadgets.OffResonanceSparseFFT.__call__">(pygrog.gadgets.OffResonanceSparseFFT method)</a>
-</li>
-        <li><a href="generated/pygrog.gadgets.SubspaceSparseFFT.html#pygrog.gadgets.SubspaceSparseFFT.__call__">(pygrog.gadgets.SubspaceSparseFFT method)</a>
-</li>
-        <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT.__call__">(pygrog.operator.SparseFFT method)</a>
-</li>
-      </ul></li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._adjoint_flat">_adjoint_flat() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.gadgets.SubspaceSparseFFT.html#pygrog.gadgets.SubspaceSparseFFT._adjoint_impl">_adjoint_impl() (pygrog.gadgets.SubspaceSparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._adjoint_packed">_adjoint_packed() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._adjoint_pipeline">_adjoint_pipeline() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.gadgets.OffResonanceSparseFFT.html#pygrog.gadgets.OffResonanceSparseFFT._adjoint_single">_adjoint_single() (pygrog.gadgets.OffResonanceSparseFFT method)</a>
-
-      <ul>
-        <li><a href="generated/pygrog.gadgets.SubspaceSparseFFT.html#pygrog.gadgets.SubspaceSparseFFT._adjoint_single">(pygrog.gadgets.SubspaceSparseFFT method)</a>
-</li>
-        <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._adjoint_single">(pygrog.operator.SparseFFT method)</a>
-</li>
-      </ul></li>
-      <li><a href="generated/pygrog.gadgets.SubspaceSparseFFT.html#pygrog.gadgets.SubspaceSparseFFT._adjoint_single_dual">_adjoint_single_dual() (pygrog.gadgets.SubspaceSparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.gadgets.OffResonanceCorrection.html#pygrog.gadgets.OffResonanceCorrection._b_view">_b_view() (pygrog.gadgets.OffResonanceCorrection method)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._ensure_bins">_ensure_bins() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._fft_pad_gather">_fft_pad_gather() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._fft_pad_gather_batch">_fft_pad_gather_batch() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.gadgets.SubspaceSparseFFT.html#pygrog.gadgets.SubspaceSparseFFT._forward_impl">_forward_impl() (pygrog.gadgets.SubspaceSparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._forward_packed">_forward_packed() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._forward_pipeline">_forward_pipeline() (pygrog.operator.SparseFFT method)</a>
-</li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="generated/pygrog.gadgets.OffResonanceSparseFFT.html#pygrog.gadgets.OffResonanceSparseFFT._forward_single">_forward_single() (pygrog.gadgets.OffResonanceSparseFFT method)</a>
-
-      <ul>
-        <li><a href="generated/pygrog.gadgets.SubspaceSparseFFT.html#pygrog.gadgets.SubspaceSparseFFT._forward_single">(pygrog.gadgets.SubspaceSparseFFT method)</a>
-</li>
-        <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._forward_single">(pygrog.operator.SparseFFT method)</a>
-</li>
-      </ul></li>
-      <li><a href="generated/pygrog.gadgets.SubspaceSparseFFT.html#pygrog.gadgets.SubspaceSparseFFT._forward_single_dual">_forward_single_dual() (pygrog.gadgets.SubspaceSparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.gadgets.SubspaceSparseFFT.html#pygrog.gadgets.SubspaceSparseFFT._get_t_idx_sorted">_get_t_idx_sorted() (pygrog.gadgets.SubspaceSparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator._grid_kspace">_grid_kspace() (pygrog.calib.GrogInterpolator method)</a>
-</li>
-      <li><a href="generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator._grid_shot">_grid_shot() (pygrog.calib.GrogInterpolator method)</a>
-</li>
-      <li><a href="generated/pygrog.interop.GrogLinearOp.html#pygrog.interop.GrogLinearOp._mrpro_class">_mrpro_class (pygrog.interop.GrogLinearOp attribute)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._normal_no_toep">_normal_no_toep() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._normal_packed_no_toep">_normal_packed_no_toep() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._normal_single_no_toep">_normal_single_no_toep() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._packed_arrays">_packed_arrays() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._scatter">_scatter() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._scatter_ifft_crop">_scatter_ifft_crop() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._scatter_ifft_crop_batch">_scatter_ifft_crop_batch() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.interop.GrogLinop.html#pygrog.interop.GrogLinop._sigpy_class">_sigpy_class (pygrog.interop.GrogLinop attribute)</a>
-</li>
-      <li><a href="generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator._sparse_full">_sparse_full() (pygrog.calib.GrogInterpolator method)</a>
-</li>
-      <li><a href="generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator._sparse_full_single">_sparse_full_single() (pygrog.calib.GrogInterpolator static method)</a>
-</li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT._stack_arrays">_stack_arrays() (pygrog.operator.SparseFFT method)</a>
-</li>
-      <li><a href="generated/pygrog.gadgets.SubspaceSparseFFT.html#pygrog.gadgets.SubspaceSparseFFT._use_dual_stream">_use_dual_stream() (pygrog.gadgets.SubspaceSparseFFT method)</a>
-</li>
-  </ul></td>
-</tr></table>
-
 <h2 id="A">A</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="generated/pygrog.gadgets.OffResonanceCorrection.html#pygrog.gadgets.OffResonanceCorrection.adjoint">adjoint() (pygrog.gadgets.OffResonanceCorrection method)</a>
+      <li><a href="generated/pygrog.operator.MaskedFFT.html#pygrog.operator.MaskedFFT.adjoint">adjoint() (pygrog.operator.MaskedFFT method)</a>
 
       <ul>
-        <li><a href="generated/pygrog.gadgets.OffResonanceSparseFFT.html#pygrog.gadgets.OffResonanceSparseFFT.adjoint">(pygrog.gadgets.OffResonanceSparseFFT method)</a>
-</li>
-        <li><a href="generated/pygrog.gadgets.SubspaceSparseFFT.html#pygrog.gadgets.SubspaceSparseFFT.adjoint">(pygrog.gadgets.SubspaceSparseFFT method)</a>
-</li>
         <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT.adjoint">(pygrog.operator.SparseFFT method)</a>
 </li>
       </ul></li>
@@ -492,7 +410,7 @@
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="generated/pygrog.utils.coil_compress.html#pygrog.utils.coil_compress">coil_compress() (in module pygrog.utils)</a>
+      <li><a href="generated/pygrog.utils.coil_compression.html#pygrog.utils.coil_compression">coil_compression() (in module pygrog.utils)</a>
 </li>
       <li><a href="generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator.collect_shots">collect_shots() (pygrog.calib.GrogInterpolator method)</a>
 </li>
@@ -504,11 +422,11 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator.fft_plan">fft_plan() (pygrog.calib.GrogInterpolator method)</a>
 </li>
-      <li><a href="generated/pygrog.gadgets.OffResonanceCorrection.html#pygrog.gadgets.OffResonanceCorrection.forward">forward() (pygrog.gadgets.OffResonanceCorrection method)</a>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="generated/pygrog.operator.MaskedFFT.html#pygrog.operator.MaskedFFT.forward">forward() (pygrog.operator.MaskedFFT method)</a>
 
       <ul>
-        <li><a href="generated/pygrog.gadgets.OffResonanceSparseFFT.html#pygrog.gadgets.OffResonanceSparseFFT.forward">(pygrog.gadgets.OffResonanceSparseFFT method)</a>
-</li>
         <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT.forward">(pygrog.operator.SparseFFT method)</a>
 </li>
       </ul></li>
@@ -520,9 +438,11 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator">GrogInterpolator (class in pygrog.calib)</a>
 </li>
+      <li><a href="generated/pygrog.interop.GrogLinearOp.html#pygrog.interop.GrogLinearOp">GrogLinearOp (class in pygrog.interop)</a>
+</li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="generated/pygrog.interop.GrogLinearOp.html#pygrog.interop.GrogLinearOp">GrogLinearOp (class in pygrog.interop)</a>
+      <li><a href="generated/pygrog.interop.GrogLinearPhysics.html#pygrog.interop.GrogLinearPhysics">GrogLinearPhysics (class in pygrog.interop)</a>
 </li>
       <li><a href="generated/pygrog.interop.GrogLinop.html#pygrog.interop.GrogLinop">GrogLinop (class in pygrog.interop)</a>
 </li>
@@ -537,16 +457,12 @@
   </ul></td>
 </tr></table>
 
-<h2 id="K">K</h2>
-<table style="width: 100%" class="indextable genindextable"><tr>
-  <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="generated/pygrog.calib.KernelTable.html#pygrog.calib.KernelTable">KernelTable() (in module pygrog.calib)</a>
-</li>
-  </ul></td>
-</tr></table>
-
 <h2 id="M">M</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="generated/pygrog.operator.MaskedFFT.html#pygrog.operator.MaskedFFT">MaskedFFT (class in pygrog.operator)</a>
+</li>
+  </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator.metadata">metadata() (pygrog.calib.GrogInterpolator method)</a>
 </li>
@@ -556,13 +472,11 @@
 <h2 id="N">N</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="generated/pygrog.gadgets.OffResonanceCorrection.html#pygrog.gadgets.OffResonanceCorrection.n_components">n_components (pygrog.gadgets.OffResonanceCorrection property)</a>
-</li>
-      <li><a href="generated/pygrog.utils.nlinv_calib.html#pygrog.utils.nlinv_calib">nlinv_calib() (in module pygrog.utils)</a>
+      <li><a href="generated/pygrog.utils.nlinv.html#pygrog.utils.nlinv">nlinv() (in module pygrog.utils)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="generated/pygrog.gadgets.OffResonanceSparseFFT.html#pygrog.gadgets.OffResonanceSparseFFT.normal">normal() (pygrog.gadgets.OffResonanceSparseFFT method)</a>
+      <li><a href="generated/pygrog.operator.MaskedFFT.html#pygrog.operator.MaskedFFT.normal">normal() (pygrog.operator.MaskedFFT method)</a>
 
       <ul>
         <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT.normal">(pygrog.operator.SparseFFT method)</a>
@@ -574,11 +488,7 @@
 <h2 id="O">O</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="generated/pygrog.gadgets.OffResonanceCorrection.html#pygrog.gadgets.OffResonanceCorrection">OffResonanceCorrection (class in pygrog.gadgets)</a>
-</li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="generated/pygrog.gadgets.OffResonanceSparseFFT.html#pygrog.gadgets.OffResonanceSparseFFT">OffResonanceSparseFFT (class in pygrog.gadgets)</a>
+      <li><a href="generated/pygrog.gadgets.OffResonanceGadget.html#pygrog.gadgets.OffResonanceGadget">OffResonanceGadget (class in pygrog.gadgets)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -588,19 +498,21 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="generated/pygrog.calib.GrogInterpolator.html#pygrog.calib.GrogInterpolator.set_dataset_shape">set_dataset_shape() (pygrog.calib.GrogInterpolator method)</a>
 </li>
-      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT">SparseFFT (class in pygrog.operator)</a>
-</li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="generated/pygrog.gadgets.SubspaceProjection.html#pygrog.gadgets.SubspaceProjection">SubspaceProjection (class in pygrog.gadgets)</a>
+      <li><a href="generated/pygrog.operator.SparseFFT.html#pygrog.operator.SparseFFT">SparseFFT (class in pygrog.operator)</a>
 </li>
-      <li><a href="generated/pygrog.gadgets.SubspaceSparseFFT.html#pygrog.gadgets.SubspaceSparseFFT">SubspaceSparseFFT (class in pygrog.gadgets)</a>
+      <li><a href="generated/pygrog.gadgets.SubspaceGadget.html#pygrog.gadgets.SubspaceGadget">SubspaceGadget (class in pygrog.gadgets)</a>
 </li>
   </ul></td>
 </tr></table>
 
 <h2 id="W">W</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="generated/pygrog.gadgets.with_offresonance.html#pygrog.gadgets.with_offresonance">with_offresonance() (in module pygrog.gadgets)</a>
+</li>
+  </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="generated/pygrog.gadgets.with_subspace.html#pygrog.gadgets.with_subspace">with_subspace() (in module pygrog.gadgets)</a>
 </li>

@@ -514,7 +514,10 @@ class GrogInterpolator(_GrogInterpolatorBase):
         sparse = sparse.reshape(*sparse.shape[:-1], *self.plan.natural_shape)
 
         # Fuse kw into the last spatial axis to match mrpro layout.
-        *_lead, n_coils = (*sparse.shape[:-(self._ndim + 1)], sparse.shape[-(self._ndim + 1)])
+        *_lead, n_coils = (
+            *sparse.shape[: -(self._ndim + 1)],
+            sparse.shape[-(self._ndim + 1)],
+        )
         spatial_kw = sparse.shape[-(self._ndim + 1) + 1 :]  # (*spatial, kw)
         spatial = spatial_kw[:-1]
         kw = int(spatial_kw[-1])
