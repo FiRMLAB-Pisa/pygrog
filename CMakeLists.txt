@@ -186,6 +186,35 @@ if(MSVC)
     set_source_files_properties(csrc/torch/sparse_ops_avx512.cpp PROPERTIES
         COMPILE_FLAGS "/arch:AVX512"
     )
+elseif(APPLE)
+    # Apple Clang does not ship OpenMP; locate Homebrew libomp.
+    execute_process(
+        COMMAND brew --prefix libomp
+        OUTPUT_VARIABLE _brew_libomp
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE _brew_result
+    )
+    target_compile_options(_pygrog_torch PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-O3>
+    )
+    if(_brew_result EQUAL 0 AND _brew_libomp)
+        target_compile_options(_pygrog_torch PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:-Xpreprocessor;-fopenmp;-I${_brew_libomp}/include>
+        )
+        target_link_libraries(_pygrog_torch PRIVATE "${_brew_libomp}/lib/libomp.dylib")
+    endif()
+    unset(_brew_libomp)
+    unset(_brew_result)
+    # Explicitly set the ISA for the AVX dispatch TUs so GCC 13+'s stricter
+    # always_inline target-mismatch check doesn't fire when std::allocator
+    # (always_inline) is instantiated under a #pragma GCC target("avx512f").
+    set_source_files_properties(csrc/torch/sparse_ops_avx2.cpp PROPERTIES
+        COMPILE_FLAGS "-mavx2 -mfma"
+    )
+    set_source_files_properties(csrc/torch/sparse_ops_avx512.cpp PROPERTIES
+        COMPILE_FLAGS "-mavx512f"
+    )
 else()
     target_compile_options(_pygrog_torch PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-O3 -fopenmp>
