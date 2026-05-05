@@ -50,7 +50,7 @@ jobs:
 
       - name: Install system deps (macOS)
         if: runner.os == 'macOS'
-        run: brew install cmake ninja libomp
+        run: brew install cmake ninja
 
       - name: Install system deps (Windows)
         if: runner.os == 'Windows'

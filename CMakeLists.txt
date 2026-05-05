@@ -194,25 +194,14 @@ if(MSVC)
         COMPILE_FLAGS "/arch:AVX512"
     )
 elseif(APPLE)
-    # Apple Clang does not ship OpenMP; locate Homebrew libomp.
-    execute_process(
-        COMMAND brew --prefix libomp
-        OUTPUT_VARIABLE _brew_libomp
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-        RESULT_VARIABLE _brew_result
-    )
     target_compile_options(_pygrog_torch PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-O3>
     )
-    if(_brew_result EQUAL 0 AND _brew_libomp)
-        target_compile_options(_pygrog_torch PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:-Xpreprocessor;-fopenmp;-I${_brew_libomp}/include>
-        )
-        target_link_libraries(_pygrog_torch PRIVATE "${_brew_libomp}/lib/libomp.dylib")
-    endif()
-    unset(_brew_libomp)
-    unset(_brew_result)
+    # OpenMP is intentionally omitted on macOS.  Apple Clang requires a
+    # separate libomp installation, and loading a second OMP runtime alongside
+    # PyTorch's bundled libomp.dylib causes a duplicate-OMP-runtime SIGABRT.
+    # The #pragma omp pragmas fall back to single-threaded execution, which is
+    # correct (tests pass; Apple Silicon ATen ops are already well-parallelised).
     # On Apple Clang the #pragma GCC target in each AVX TU sets the ISA for
     # the entire translation unit — no explicit -mavx2/-mavx512f flag needed.
     # (These flags are x86-only and would fail on Apple Silicon / arm64.)
