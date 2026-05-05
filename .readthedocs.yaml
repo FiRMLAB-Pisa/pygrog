@@ -4,6 +4,15 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.12"
+  jobs:
+    pre_install:
+      # torch must be available in the active environment *before* building
+      # the C++ extension, because CMakeLists.txt queries torch for its CMake
+      # prefix path.  pip's default build isolation creates a fresh environment
+      # that doesn't see the host venv, so we pre-install the build requirements
+      # here and then pass --no-build-isolation when building the package.
+      - pip install torch numpy
+      - pip install --no-build-isolation .[dev-cpu]
 
 sphinx:
   configuration: docs/conf.py
@@ -11,7 +20,3 @@ sphinx:
 python:
   install:
     - requirements: docs/requirements.txt
-    - method: pip
-      path: .
-      extra_requirements:
-        - dev-cpu
