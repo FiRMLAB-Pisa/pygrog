@@ -174,10 +174,12 @@ static torch::Tensor gather_cpu(
 }
 #endif  // _M_X64 || _M_IX86
 
-#elif (defined(__GNUC__) && !defined(__clang__)) || \
-      (defined(__clang__) && !defined(__apple_build_version__) && (__clang_major__ >= 14))
+#elif ((defined(__GNUC__) && !defined(__clang__)) || \
+       (defined(__clang__) && !defined(__apple_build_version__) && (__clang_major__ >= 14))) \
+      && (defined(__x86_64__) || defined(__i386__))
 // -------------------------------------------------------------------
-// Path C: GCC / Clang ≥ 14 (non-Apple) — target_clones → GNU ifunc resolver.
+// Path C: GCC / Clang ≥ 14 (non-Apple) on x86/x86_64 — target_clones →
+//         GNU ifunc resolver.
 //         The compiler emits SSE2, AVX2+FMA, and AVX-512 clones.
 //         The dynamic linker picks the best at load time (zero per-
 //         call overhead).
