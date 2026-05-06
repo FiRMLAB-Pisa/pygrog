@@ -64,10 +64,10 @@ jobs:
           CIBW_ENVIRONMENT: "PYGROG_NO_CUDA=1 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1"
           CIBW_ENVIRONMENT_MACOS: "PYGROG_NO_CUDA=1 MACOSX_DEPLOYMENT_TARGET=12.0 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1"
           CIBW_ENVIRONMENT_WINDOWS: "PYGROG_NO_CUDA=1 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1"
-          CIBW_TEST_REQUIRES: pytest
+          CIBW_BEFORE_TEST: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          CIBW_TEST_EXTRAS: dev-cpu
           CIBW_TEST_COMMAND: >-
-            python -m pytest {project}/tests/ -q
-            --override-ini=addopts=--import-mode=importlib
+            python -m pytest {project}/tests/ -v
             --ignore={project}/tests/test_fast_binning.py
         run: python -m cibuildwheel --output-dir wheelhouse
 
