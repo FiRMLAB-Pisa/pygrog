@@ -104,6 +104,18 @@ foreach(_v CMAKE_C_FLAGS CMAKE_CXX_FLAGS
 endforeach()
 unset(_v)
 
+# ── TORCH_CUDA_ARCH_LIST ──────────────────────────────────────────────────────
+# PyTorch's CMake ignores CMAKE_CUDA_ARCHITECTURES and uses TORCH_CUDA_ARCH_LIST
+# instead.  If the caller did not already set it, pin a list that starts at 7.0
+# (Volta) — the minimum that supports atomicAdd(double*, double) and is still
+# accepted by all CUDA toolkits we target (12.6, 12.8, 13.0).  This prevents
+# PyTorch from injecting compute_50 (Maxwell), which is:
+#   • missing the double atomicAdd overload, and
+#   • no longer supported by CUDA 13.0.
+if(NOT DEFINED TORCH_CUDA_ARCH_LIST AND NOT DEFINED ENV{TORCH_CUDA_ARCH_LIST})
+    set(TORCH_CUDA_ARCH_LIST "7.0;8.0;8.6;8.9;9.0")
+endif()
+
 find_package(Torch REQUIRED)
 
 # ── CUDA (optional) ───────────────────────────────────────────────────────────
