@@ -66,6 +66,12 @@ jobs:
           # The default manylinux_2_17 image cannot install numpy 2.4+/scipy 1.17+
           # binary wheels and falls back to a source build that fails (no OpenBLAS).
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          # Exclude all of PyTorch's shared libraries from the auditwheel
+          # bundle.  Without this, auditwheel copies libtorch_cpu.so (~500 MB)
+          # and friends into the wheel, pushing it well past PyPI's 100 MB
+          # per-file limit.  torch>=2.0 is a declared runtime dependency, so
+          # the libraries are already present in every user's environment.
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: "python scripts/repair_wheel.py {wheel} {dest_dir}"
           # CI (ci.yml) already runs the full test suite; the release workflow
           # only needs a quick sanity check that the wheel imports correctly.
           CIBW_TEST_COMMAND: >-
