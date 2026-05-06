@@ -18,6 +18,8 @@ import re
 import subprocess
 import sys
 
+import torch
+
 
 def main() -> None:
     if len(sys.argv) != 3:
@@ -25,9 +27,12 @@ def main() -> None:
 
     wheel, dest_dir = sys.argv[1], sys.argv[2]
 
-    import torch
-
     torch_lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
+    if not os.path.isdir(torch_lib_dir):
+        sys.exit(
+            f"PyTorch lib directory not found: {torch_lib_dir}\n"
+            "Ensure torch is installed in the build environment."
+        )
 
     # Match shared-library filenames: libfoo.so or libfoo.so.1.2.3
     _so_re = re.compile(r"\.so(\.\d+)*$")
