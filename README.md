@@ -42,6 +42,24 @@ using GRAPPA kernels trained from an auto-calibration region.  It provides:
 pip install pygrog
 ```
 
+CUDA builds are published on GitHub Releases (not on PyPI). If your PyTorch is
+CUDA-enabled, install the matching PyGROG CUDA wheel with `-f`:
+
+```bash
+# CUDA must match your installed torch wheel: cu126 | cu128 | cu130
+CUDA=cu128
+PYGROG_VERSION=1.0.0
+
+pip install "pygrog==${PYGROG_VERSION}+${CUDA}" \
+  -f "https://github.com/FiRMLAB-Pisa/pygrog/releases/expanded_assets/v${PYGROG_VERSION}"
+```
+
+Find your torch CUDA version with:
+
+```bash
+python -c "import torch; print(torch.version.cuda)"
+```
+
 ```python
 import numpy as np
 from pygrog.calib import GrogInterpolator
@@ -77,6 +95,17 @@ pip install --no-build-isolation -e ".[dev]"
 
 CUDA wheels are attached to each
 [GitHub Release](https://github.com/FiRMLAB-Pisa/pygrog/releases).
+
+Install them with a torch-scatter-style `-f` command:
+
+```bash
+# CUDA must match your installed torch wheel: cu126 | cu128 | cu130
+CUDA=cu128
+PYGROG_VERSION=1.0.0
+
+pip install "pygrog==${PYGROG_VERSION}+${CUDA}" \
+  -f "https://github.com/FiRMLAB-Pisa/pygrog/releases/expanded_assets/v${PYGROG_VERSION}"
+```
 
 ## Development Style
 

@@ -27,9 +27,25 @@ python -c "import pygrog._pygrog_torch as e; assert hasattr(e, 'scatter_add'); i
 ## CUDA wheels
 
 CUDA wheels are **not** on PyPI (manylinux rules forbid CUDA runtime
-libraries in standard wheels).  They are attached as assets to every
-[GitHub Release](https://github.com/FiRMLAB-Pisa/pygrog/releases) and can
-be installed with `--find-links`:
+libraries in standard wheels). They are attached as assets to every
+[GitHub Release](https://github.com/FiRMLAB-Pisa/pygrog/releases).
+
+Use this torch-scatter-style flow (`-f` is equivalent to `--find-links`):
+
+```bash
+# 1) Pick the CUDA label that matches your installed torch wheel
+#    Supported values: cu126 | cu128 | cu130
+CUDA=cu128
+
+# 2) Pick the pygrog version tag from GitHub Releases
+PYGROG_VERSION=1.0.0
+
+# 3) Install from the release asset index
+pip install "pygrog==${PYGROG_VERSION}+${CUDA}" \
+  -f "https://github.com/FiRMLAB-Pisa/pygrog/releases/expanded_assets/v${PYGROG_VERSION}"
+```
+
+Compatibility map:
 
 | CUDA version | Matches PyTorch index | Label |
 |---|---|---|
@@ -37,7 +53,7 @@ be installed with `--find-links`:
 | 12.8 | `cu128` | `+cu128` |
 | 13.0 | `cu130` | `+cu130` |
 
-Replace `<version>` and `<cu>` (e.g. `1.0.0` / `cu126`):
+Equivalent explicit form (replace `<version>` and `<cu>`):
 
 ```bash
 pip install "pygrog==<version>+<cu>" \

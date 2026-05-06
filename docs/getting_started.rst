@@ -20,7 +20,8 @@ Installation
 ------------
 
 Follow the :doc:`install` guide to install PyGROG from PyPI or build from
-source (required for CUDA wheels).
+source. CUDA wheels are provided on GitHub Releases and installed via
+``pip install ... -f <release-index>`` (documented in :doc:`install`).
 
 Using PyGROG
 ------------

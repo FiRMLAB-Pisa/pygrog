@@ -13,10 +13,10 @@ Usage (called by cibuildwheel via CIBW_REPAIR_WHEEL_COMMAND_LINUX):
     python scripts/repair_wheel.py {wheel} {dest_dir}
 """
 
-import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 import torch
 
@@ -27,8 +27,8 @@ def main() -> None:
 
     wheel, dest_dir = sys.argv[1], sys.argv[2]
 
-    torch_lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
-    if not os.path.isdir(torch_lib_dir):
+    torch_lib_dir = Path(torch.__file__).parent / "lib"
+    if not torch_lib_dir.is_dir():
         sys.exit(
             f"PyTorch lib directory not found: {torch_lib_dir}\n"
             "Ensure torch is installed in the build environment."
@@ -39,13 +39,14 @@ def main() -> None:
 
     excludes = [
         arg
-        for name in os.listdir(torch_lib_dir)
+        for name in (entry.name for entry in torch_lib_dir.iterdir())
         if _so_re.search(name)
         for arg in ("--exclude", name)
     ]
 
-    cmd = ["auditwheel", "repair"] + excludes + ["-w", dest_dir, wheel]
-    subprocess.check_call(cmd)
+    cmd = ["auditwheel", "repair", *excludes, "-w", dest_dir, wheel]
+    # Command arguments are generated locally from trusted inputs in CI.
+    subprocess.check_call(cmd)  # noqa: S603
 
 
 if __name__ == "__main__":
