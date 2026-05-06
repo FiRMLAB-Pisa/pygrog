@@ -36,7 +36,7 @@ classifiers = [  # Optional
 
 dependencies = [
     "numpy>=2.0",
-    "scipy",
+    "scipy>=1.13,<2",
     "torch>=2.0",
     "mri-nufft",
     "finufft",
