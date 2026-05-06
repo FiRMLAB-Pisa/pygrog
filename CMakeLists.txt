@@ -104,19 +104,49 @@ foreach(_v CMAKE_C_FLAGS CMAKE_CXX_FLAGS
 endforeach()
 unset(_v)
 
-# ── TORCH_CUDA_ARCH_LIST ──────────────────────────────────────────────────────
-# PyTorch's CMake ignores CMAKE_CUDA_ARCHITECTURES and uses TORCH_CUDA_ARCH_LIST
-# instead.  If the caller did not already set it, pin a list that starts at 7.0
-# (Volta) — the minimum that supports atomicAdd(double*, double) and is still
-# accepted by all CUDA toolkits we target (12.6, 12.8, 13.0).  This prevents
-# PyTorch from injecting compute_50 (Maxwell), which is:
-#   • missing the double atomicAdd overload, and
-#   • no longer supported by CUDA 13.0.
-if(NOT DEFINED TORCH_CUDA_ARCH_LIST AND NOT DEFINED ENV{TORCH_CUDA_ARCH_LIST})
-    set(TORCH_CUDA_ARCH_LIST "7.0;8.0;8.6;8.9;9.0")
+find_package(Torch REQUIRED)
+
+# ── Sanitise CUDA arch flags injected by TorchConfig.cmake ────────────────────
+# TorchConfig.cmake sets TORCH_CUDA_ARCH_LIST to the full list of architectures
+# that the installed PyTorch was compiled for (e.g. "5.0;6.0;7.0;7.5;8.0;…")
+# and injects the matching -gencode flags into CMAKE_CUDA_FLAGS, overriding any
+# value we set before find_package().  We must therefore sanitise those flags
+# after the fact for two reasons:
+#
+#   1. CUDA 13.0 dropped support for compute_70 (Volta) and older — compiling
+#      with -gencode arch=compute_70,… fails with a fatal nvcc error.
+#
+#   2. Our shared-memory atomicAdd(double*,double) kernel requires sm_70+.
+#      When PyTorch injects compute_60 (Pascal) via CMAKE_CUDA_FLAGS the kernel
+#      instantiation for T=double fails with "no matching overload" for sm_60.
+#
+# We control the target architectures exclusively via the CUDA_ARCHITECTURES
+# target property (set below), so all PyTorch-injected -gencode flags can be
+# stripped.  The minimum we compile for is sm_80 (Ampere), which satisfies all
+# three CUDA toolkits we target (12.6, 12.8, 13.0) and guarantees double
+# atomicAdd on both global and shared memory.
+if(DEFINED CMAKE_CUDA_FLAGS)
+    # Strip  -gencode arch=compute_NN,code=sm_NN  (space separator)
+    string(REGEX REPLACE
+        "-gencode arch=compute_[0-9]+,code=[^ ]*" ""
+        CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS}")
+    # Strip  -gencode=arch=compute_NN,code=sm_NN  (equals separator)
+    string(REGEX REPLACE
+        "-gencode=arch=compute_[0-9]+,code=[^ ]*" ""
+        CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS}")
+    # Strip  --generate-code=arch=compute_NN,code=[…]
+    string(REGEX REPLACE
+        "--generate-code=arch=compute_[0-9]+,code=\\[[^]]*\\]" ""
+        CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS}")
+    string(REGEX REPLACE "[ \t]+" " " CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS}")
+    string(STRIP "${CMAKE_CUDA_FLAGS}" CMAKE_CUDA_FLAGS)
 endif()
 
-find_package(Torch REQUIRED)
+# Update TORCH_CUDA_ARCH_LIST to match what we actually compile for, so any
+# downstream macro that reads it also sees the correct value.
+if(NOT DEFINED ENV{TORCH_CUDA_ARCH_LIST})
+    set(TORCH_CUDA_ARCH_LIST "8.0;8.6;8.9;9.0")
+endif()
 
 # ── CUDA (optional) ───────────────────────────────────────────────────────────
 # Disable CUDA via cmake define (-DPYGROG_NO_CUDA=ON) or env var (PYGROG_NO_CUDA=1).
@@ -246,7 +276,7 @@ if(USE_CUDA)
         >
     )
     set_property(TARGET _pygrog_torch PROPERTY
-        CUDA_ARCHITECTURES 70 80 86 89 90
+        CUDA_ARCHITECTURES 80 86 89 90
     )
 endif()
 
