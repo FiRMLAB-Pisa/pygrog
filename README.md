@@ -33,7 +33,7 @@ using GRAPPA kernels trained from an auto-calibration region.  It provides:
 - **Interoperability** (`pygrog.interop`) — drop-in adapters for
   [mri-nufft](https://mind-inria.github.io/mri-nufft/),
   [sigpy](https://sigpy.readthedocs.io/),
-  [mrpro](https://mrpro.readthedocs.io/), and
+  [mrpro](https://mrpro.rocks/), and
   [deepinverse](https://deepinv.github.io/).
 
 ## Quick Start
@@ -92,7 +92,7 @@ ruff check .
 ## Related Projects
 
 - [mri-nufft](https://mind-inria.github.io/mri-nufft/) — Non-uniform FFT for MRI
-- [mrpro](https://mrpro.readthedocs.io/) — MRI reconstruction in PyTorch
+- [mrpro](https://mrpro.rocks/) — MRI reconstruction in PyTorch
 - [sigpy](https://sigpy.readthedocs.io/) — Signal processing for inverse problems
 - [deepinverse](https://deepinv.github.io/) — Deep learning for inverse problems
 
