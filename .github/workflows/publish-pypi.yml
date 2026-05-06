@@ -11,8 +11,8 @@ name: Publish to PyPI
 #     --find-links https://github.com/FiRMLAB-Pisa/pygrog/releases/expanded_assets/v1.0.0
 
 on:
-  release:
-    types: [published]
+  push:
+    tas: [v*]
   workflow_dispatch:
 
 concurrency:
