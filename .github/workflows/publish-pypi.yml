@@ -61,7 +61,11 @@ jobs:
           CIBW_ENVIRONMENT: "PYGROG_NO_CUDA=1 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1"
           CIBW_ENVIRONMENT_MACOS: "PYGROG_NO_CUDA=1 MACOSX_DEPLOYMENT_TARGET=12.0 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1"
           CIBW_ENVIRONMENT_WINDOWS: "PYGROG_NO_CUDA=1 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1"
-          CIBW_TEST_REQUIRES: "scipy>=1.13,<2"
+          # Use manylinux_2_28 (glibc 2.28, AlmaLinux 8) so that modern
+          # numpy/scipy/torch binary wheels are available in the test venv.
+          # The default manylinux_2_17 image cannot install numpy 2.4+/scipy 1.17+
+          # binary wheels and falls back to a source build that fails (no OpenBLAS).
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
           # CI (ci.yml) already runs the full test suite; the release workflow
           # only needs a quick sanity check that the wheel imports correctly.
           CIBW_TEST_COMMAND: >-
@@ -93,6 +97,9 @@ jobs:
             pkg: '13-0'
             label: 'cu130'
             torch_index: 'https://download.pytorch.org/whl/cu130'
+            # compute_101a is not supported by nvcc 13.0.0; set arch list
+            # explicitly to avoid the autodetected list that includes it.
+            arch_list: '8.0;8.6;8.9;9.0;9.0a;10.0;10.0a'
         python: ['3.10', '3.11', '3.12', '3.13']
 
     steps:
@@ -125,7 +132,14 @@ jobs:
       - name: Build wheel
         env:
           CUDA_HOME: /usr/local/cuda
-        run: pip wheel --no-build-isolation --no-deps -w wheelhouse .
+        run: |
+          # Set TORCH_CUDA_ARCH_LIST only when the matrix provides an explicit
+          # arch_list (e.g. cu130 where nvcc 13.0 rejects compute_101a from
+          # PyTorch's auto-detected list).
+          if [ -n "${{ matrix.cuda.arch_list }}" ]; then
+            export TORCH_CUDA_ARCH_LIST="${{ matrix.cuda.arch_list }}"
+          fi
+          pip wheel --no-build-isolation --no-deps -w wheelhouse .
 
       - uses: actions/upload-artifact@v4
         with:
