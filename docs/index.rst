@@ -41,6 +41,6 @@
    :caption: Related Projects
 
    mri-nufft <https://mind-inria.github.io/mri-nufft/>
-   mrpro <https://mrpro.readthedocs.io/>
+   mrpro <https://mrpro.rocks/>
    sigpy <https://sigpy.readthedocs.io/>
    deepinverse <https://deepinv.github.io/>
