@@ -64,12 +64,10 @@ jobs:
           CIBW_ENVIRONMENT: "PYGROG_NO_CUDA=1 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1"
           CIBW_ENVIRONMENT_MACOS: "PYGROG_NO_CUDA=1 MACOSX_DEPLOYMENT_TARGET=12.0 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1"
           CIBW_ENVIRONMENT_WINDOWS: "PYGROG_NO_CUDA=1 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1"
-          CIBW_BEFORE_TEST: >-
-            pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cpu &&
-            pip install pytest pytest-cov coverage
+          # CI (ci.yml) already runs the full test suite; the release workflow
+          # only needs a quick sanity check that the wheel imports correctly.
           CIBW_TEST_COMMAND: >-
-            python -m pytest {project}/tests/ -v
-            --ignore={project}/tests/test_fast_binning.py
+            python -c "import pygrog; print('pygrog import OK')"
         run: python -m cibuildwheel --output-dir wheelhouse
 
       - uses: actions/upload-artifact@v4
