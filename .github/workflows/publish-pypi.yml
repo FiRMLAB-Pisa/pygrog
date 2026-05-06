@@ -61,12 +61,12 @@ jobs:
           CIBW_BEFORE_BUILD: >-
             pip install torch --index-url https://download.pytorch.org/whl/cpu &&
             pip install scikit-build-core setuptools-scm cmake ninja
-          CIBW_ENVIRONMENT: "PYGROG_NO_CUDA=1 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1"
-          CIBW_ENVIRONMENT_MACOS: "PYGROG_NO_CUDA=1 MACOSX_DEPLOYMENT_TARGET=12.0 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1"
-          CIBW_ENVIRONMENT_WINDOWS: "PYGROG_NO_CUDA=1 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1"
+          CIBW_ENVIRONMENT: "PYGROG_NO_CUDA=1 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1"
+          CIBW_ENVIRONMENT_MACOS: "PYGROG_NO_CUDA=1 MACOSX_DEPLOYMENT_TARGET=12.0 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1"
+          CIBW_ENVIRONMENT_WINDOWS: "PYGROG_NO_CUDA=1 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1"
           CIBW_BEFORE_TEST: >-
-            pip install --force-reinstall --no-deps torch --index-url https://download.pytorch.org/whl/cpu &&
-            pip install pytest pytest-cov pytest-xdist pytest-sugar pytest-cases coverage
+            pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cpu &&
+            pip install pytest pytest-cov coverage
           CIBW_TEST_COMMAND: >-
             python -m pytest {project}/tests/ -v
             --ignore={project}/tests/test_fast_binning.py
